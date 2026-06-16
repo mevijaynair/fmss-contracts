@@ -1,9 +1,10 @@
-// players.js — per-contract ledger table + add player.
+// players.js — per-contract ledger table + add player + timeline & stats detail.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, balCell, contractSeg, openModal, closeModal, today } from '../util.js';
 
 let contractId = 'sat';
+let currentDetailPlayerId = null;
 
 const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
@@ -11,7 +12,7 @@ async function render() {
   const ledgers = await api.ledgers(contractId);
   $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => `
     <tr>
-      <td><strong>${esc(l.player_name)}</strong></td>
+      <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong></td>
       <td>
         <select data-status="${l.player_id}" class="btn-sm" style="padding:0.25rem 0.4rem;">
           ${STATUSES.map(s => `<option ${s.toLowerCase() === (l.status || '').toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
@@ -34,6 +35,81 @@ async function render() {
     }));
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
+}
+
+window.showPlayerDetail = async (playerId) => {
+  try {
+    const stats = await api.get(`/players/${playerId}/stats?contract_id=${contractId}`);
+    const player = store.players.find(p => p.id === playerId);
+    renderPlayerDetail(player, stats);
+  } catch (e) {
+    toast(`Failed to load player stats: ${e.message}`, true);
+  }
+};
+
+function renderPlayerDetail(player, stats) {
+  const detailCard = $('playerDetailCard');
+  $('playerDetailName').textContent = `${player.name} — ${store.contracts.find(c => c.id === contractId)?.name || ''}`;
+
+  // Timeline
+  const timelineHtml = stats.timeline.events.length > 0
+    ? stats.timeline.events.map(e => {
+        const type = e.type === 'contribution' ? 'contribution' : 'charge';
+        return `
+          <div class="timeline-event ${type}">
+            <div class="timeline-marker"></div>
+            <div class="timeline-content">
+              <div class="timeline-date">${e.date}</div>
+              <div class="timeline-type">${type === 'contribution' ? '📥 Contribution' : '⚽ Game charge'}</div>
+              <div class="timeline-detail">${type === 'contribution' ? `+${e.amount} AED` : `${e.team || '—'} · ${e.rate_type || '—'} · -${e.amount} AED`}</div>
+              <div class="timeline-balance">Balance: ${e.runningBalance} AED</div>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="hint">No transactions yet.</div>';
+
+  $('playerTimeline').innerHTML = `
+    <div style="margin-bottom: 1rem;">
+      <span class="muted">Opening</span> ${money(stats.timeline.opening)} AED
+      &nbsp;·&nbsp;
+      <span class="muted">Present</span> <strong>${money(stats.timeline.presentBalance)}</strong> AED
+    </div>
+    ${timelineHtml}
+  `;
+
+  // Stats grid
+  const statsGrid = [
+    { label: 'Games played', value: stats.games, detail: stats.games === 1 ? '1 game' : `${stats.games} games` },
+    { label: 'Teams', value: stats.teams?.length || 0, detail: stats.teams?.map(t => t.team).join(', ') || 'None' },
+    { label: 'Attendance', value: `${stats.streaks.current}`, detail: `${stats.streaks.longest} longest` },
+    { label: 'Current balance', value: money(stats.timeline.presentBalance), detail: stats.timeline.presentBalance >= 0 ? 'Positive' : 'Refill needed' },
+  ];
+
+  const costBreakdownHtml = stats.costs?.length > 0
+    ? stats.costs.map(c => `<div class="stat-detail">${c.rate_type}: ${c.gameCount}g @ ${money(c.totalAmount)}</div>`).join('')
+    : '<div class="stat-detail">No cost breakdown</div>';
+
+  $('playerStatsGrid').innerHTML = statsGrid.map(s => `
+    <div class="stat-card">
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value">${s.value}</div>
+      <div class="stat-detail">${s.detail}</div>
+    </div>
+  `).join('') + `
+    <div class="stat-card" style="grid-column: span 2;">
+      <div class="stat-label">Cost breakdown</div>
+      ${costBreakdownHtml}
+    </div>
+  `;
+
+  detailCard.hidden = false;
+  currentDetailPlayerId = player.id;
+}
+
+function closePlayerDetail() {
+  $('playerDetailCard').hidden = true;
+  currentDetailPlayerId = null;
 }
 
 function payModal(playerId) {
@@ -74,6 +150,7 @@ function addPlayerModal() {
 
 export function initPlayers() {
   $('plAdd').addEventListener('click', addPlayerModal);
+  $('playerDetailClose').addEventListener('click', closePlayerDetail);
 }
 
 export function loadPlayers() {

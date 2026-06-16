@@ -110,6 +110,15 @@
           </div>
         </section>
 
+        <!-- RESULTS -->
+        <section class="view" data-view="results" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Match Results</h3>
+              <span class="seg" id="resContractSeg"></span></div>
+            <div id="resultsContainer"></div>
+          </div>
+        </section>
+
         <!-- PLAYERS -->
         <section class="view" data-view="players" hidden>
           <div class="sams-card">
@@ -126,6 +135,16 @@
                 <tbody></tbody>
               </table>
             </div>
+          </div>
+
+          <!-- Player detail panel (timeline + stats) -->
+          <div class="sams-card" id="playerDetailCard" hidden>
+            <div class="card-header">
+              <h3 class="card-title" id="playerDetailName"></h3>
+              <button class="btn btn-secondary btn-sm" id="playerDetailClose">Close</button>
+            </div>
+            <div class="timeline-container" id="playerTimeline"></div>
+            <div class="stats-grid" id="playerStatsGrid"></div>
           </div>
         </section>
 
@@ -230,6 +249,64 @@
     <div class="modal-content">
       <div class="modal-header"><h3 id="modalTitle"></h3><button class="modal-close" id="modalClose">✕</button></div>
       <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- Edit Gameweek Modal -->
+  <div id="editGameweekModal" class="modal" hidden>
+    <div class="modal-overlay"></div>
+    <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3 id="egTitle">Edit Game</h3>
+        <button class="modal-close" id="egClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group"><label>Game Type</label>
+            <select id="egGameType">
+              <option value="regular">Regular</option>
+              <option value="tournament">Tournament</option>
+              <option value="friendly">Friendly</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Tournament Name (if applicable)</label>
+            <input type="text" id="egTournamentName" placeholder="e.g. Ramadan Cup">
+          </div>
+        </div>
+        <div class="form-row mt">
+          <div class="form-group"><label>Score</label><input type="text" id="egScore" placeholder="e.g. Reds 7 - Blues 5"></div>
+          <div class="form-group"><label>Comments</label><input type="text" id="egComments" placeholder="optional"></div>
+        </div>
+
+        <div style="margin-top: 1.5rem; border-top: 1px solid var(--color-border); padding-top: 1rem;">
+          <h4 style="margin-bottom: 0.8rem;">Player Charges</h4>
+          <div style="overflow-x: auto;">
+            <table class="sams-table" id="egChargesTable">
+              <thead>
+                <tr>
+                  <th>Player</th><th>Team</th><th>Captain</th><th>Rate</th>
+                  <th class="num">Original</th><th class="num">New</th><th class="num">Delta</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="egImpactPreview" style="margin-top: 1.5rem; padding: 1rem; background: var(--color-bg-alt); border-radius: 0.5rem; display: none;">
+          <h4 style="margin-bottom: 0.8rem;">Impact Preview</h4>
+          <div id="egImpactText"></div>
+        </div>
+
+        <div class="form-row mt" style="align-items: center;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" id="egAutoRecalc" checked>
+            <span>Auto-recalculate balances</span>
+          </label>
+          <button class="btn btn-secondary" id="egPreview">Calculate Impact</button>
+          <button class="btn" id="egSave">Save &amp; Update</button>
+        </div>
+      </div>
     </div>
   </div>
 

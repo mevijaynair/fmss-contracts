@@ -13,6 +13,12 @@ async function req(method, path, body) {
 }
 
 export const api = {
+  // Helper methods
+  get: (path) => req('GET', path),
+  put: (path, body) => req('PUT', path, body),
+  post: (path, body) => req('POST', path, body),
+  delete: (path) => req('DELETE', path),
+
   dashboard: () => req('GET', '/dashboard'),
 
   contracts: () => req('GET', '/contracts'),
@@ -42,4 +48,12 @@ export const api = {
   kitty: () => req('GET', '/kitty'),
   createKitty: (k) => req('POST', '/kitty', k),
   deleteKitty: (id) => req('DELETE', `/kitty/${id}`),
+
+  // New endpoints (Phase 1 backend)
+  results: (contract) => req('GET', `/results${contract ? `?contract=${contract}` : ''}`),
+  playerStats: (playerId, contractId) => req('GET', `/players/${playerId}/stats?contract_id=${contractId}`),
+  auditTrail: (q = {}) => {
+    const p = new URLSearchParams(q).toString();
+    return req('GET', `/audit/charges${p ? `?${p}` : ''}`);
+  },
 };

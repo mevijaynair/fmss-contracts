@@ -6,6 +6,7 @@ import { initTheme } from './theme.js';
 import { $, closeModal } from './util.js';
 
 import { loadDashboard } from './modules/dashboard.js';
+import { initResults, loadResults } from './modules/results.js';
 import { initGameday, loadGameday } from './modules/gameday.js';
 import { initPlayers, loadPlayers } from './modules/players.js';
 import { initContributions, loadContributions } from './modules/contributions.js';
@@ -15,6 +16,7 @@ import { initSettings, loadSettings } from './modules/settings.js';
 
 const LOADERS = {
   dashboard: loadDashboard,
+  results: loadResults,
   gameday: loadGameday,
   players: loadPlayers,
   contributions: loadContributions,
@@ -31,7 +33,7 @@ async function start() {
   [store.contracts, store.players] = await Promise.all([api.contracts(), api.players()]);
   store.activeContract = store.contracts[0]?.id || 'sat';
 
-  initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
+  initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
 
   // Lazy per-view data load.
   window.addEventListener('fmss:view', (e) => {

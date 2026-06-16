@@ -502,3 +502,47 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 .row-actions { display: flex; gap: 0.4rem; }
 .link-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 0.95rem; padding: 0.2rem 0.4rem; border-radius: 6px; }
 .link-btn:hover { color: var(--danger); background: var(--bg-subtle); }
+
+/* ===== Results view ===== */
+.result-card { border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 0.8rem; overflow: hidden; }
+.result-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem; cursor: pointer; background: var(--bg-inset); user-select: none; }
+.result-header:hover { background: var(--bg-subtle); }
+.result-meta { display: flex; gap: 0.6rem; align-items: center; font-size: 0.9rem; }
+.result-date { font-weight: 600; }
+.result-gw { color: var(--text-faint); }
+.result-summary { display: flex; gap: 1rem; align-items: center; }
+.result-score { font-size: 0.95rem; }
+.result-cost { color: var(--text-muted); font-size: 0.9rem; }
+.result-toggle { color: var(--text-faint); transition: transform 0.2s; }
+.result-card.expanded .result-toggle { transform: rotate(180deg); }
+.result-card .result-detail { display: none; padding: 1rem; border-top: 1px solid var(--border-color); }
+.result-card.expanded .result-detail { display: block; }
+.result-detail table { width: 100%; }
+.result-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
+.btn-edit { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 0.9rem; padding: 0 0.3rem; }
+.btn-edit:hover { color: var(--sport); }
+
+/* ===== Player timeline & stats ===== */
+.timeline-container { margin-bottom: 1.5rem; }
+.timeline-event { display: flex; gap: 0.8rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color); }
+.timeline-event:last-child { border-bottom: none; }
+.timeline-marker { width: 24px; height: 24px; border-radius: 50%; background: var(--sport); flex-shrink: 0; margin-top: 2px; }
+.timeline-event.contribution .timeline-marker { background: var(--success); }
+.timeline-event.charge .timeline-marker { background: var(--warning); }
+.timeline-content { flex: 1; }
+.timeline-date { font-size: 0.85rem; color: var(--text-faint); }
+.timeline-type { font-weight: 500; }
+.timeline-detail { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem; }
+.timeline-balance { font-weight: 600; color: var(--sport); }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.stat-card { padding: 1rem; background: var(--bg-inset); border-radius: 8px; }
+.stat-label { font-size: 0.85rem; color: var(--text-faint); margin-bottom: 0.4rem; }
+.stat-value { font-size: 1.5rem; font-weight: 600; color: var(--sport); }
+.stat-detail { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.4rem; }
+
+.tag-tournament { background: var(--warning); color: white; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+
+/* ===== Edit modal ===== */
+.input-mini { padding: 0.3rem 0.4rem; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; width: 80px; }
+.input-mini:disabled { background: var(--bg-inset); color: var(--text-muted); }

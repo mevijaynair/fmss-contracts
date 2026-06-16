@@ -19,7 +19,9 @@ async function render() {
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No games recorded.</td></tr>';
 
   $('gwTable').querySelectorAll('tr[data-gw]').forEach(tr =>
-    tr.addEventListener('click', (e) => { if (!e.target.closest('[data-del]')) detail(tr.dataset.gw); }));
+    tr.addEventListener('click', (e) => {
+      if (!e.target.closest('button')) detail(tr.dataset.gw);
+    }));
   $('gwTable').querySelectorAll('[data-del]').forEach(b =>
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -38,7 +40,97 @@ async function detail(id) {
     ${g.score ? `<p class="muted"><strong>Result:</strong> ${esc(g.score)}</p>` : ''}
     ${g.teams_raw ? `<div class="teams-raw mt">${esc(g.teams_raw)}</div>` : ''}
     <h4 class="mini-h mt">Charges (${g.num_players} players · ${money(g.charges?.reduce((s,c)=>s+c.amount,0)||0)} AED)</h4>
-    ${charges || '<p class="hint">No charges.</p>'}`);
+    ${charges || '<p class="hint">No charges.</p>'}
+    ${!g.historical ? `<button class="btn mt" onclick="window.editGameweekClick('${g.id}')">Edit Game</button>` : ''}`);
+}
+
+// Edit gameweek — populate and show modal
+window.editGameweekClick = async (gameweekId) => {
+  try {
+    const g = await api.gameweek(gameweekId);
+    editGameweekModal(g);
+  } catch (e) {
+    toast(`Failed to load game: ${e.message}`, true);
+  }
+};
+
+function editGameweekModal(g) {
+  const modal = $('editGameweekModal');
+  $('egTitle').textContent = `Edit ${fmtDate(g.date)}`;
+  $('egGameType').value = g.game_type || 'regular';
+  $('egTournamentName').value = g.tournament_name || '';
+  $('egScore').value = g.score || '';
+  $('egComments').value = g.comments || '';
+
+  // Populate charges table
+  const tbody = $('egChargesTable').querySelector('tbody');
+  tbody.innerHTML = (g.charges || []).map(ch => `
+    <tr>
+      <td>${esc(ch.player_name)}</td>
+      <td>${ch.team || '—'}</td>
+      <td>${ch.is_captain ? '✓' : ''}</td>
+      <td><input type="text" class="input-mini" value="${ch.rate_type}" disabled></td>
+      <td class="num"><span class="muted">${money(ch.amount)}</span></td>
+      <td class="num"><input type="number" class="input-mini" value="${ch.amount}" data-charge-id="${ch.id}" step="1"></td>
+      <td class="num"><span class="charge-delta" data-charge-id="${ch.id}">0</span></td>
+    </tr>
+  `).join('');
+
+  // Wire up preview
+  $('egPreview').onclick = () => previewImpact(g.id);
+  $('egSave').onclick = () => saveGameweekEdits(g.id);
+  $('egClose').onclick = () => { modal.hidden = true; };
+
+  modal.hidden = false;
+}
+
+async function previewImpact(gameweekId) {
+  try {
+    const edits = Array.from($('egChargesTable').querySelectorAll('input[type="number"]')).map(inp => ({
+      chargeId: inp.dataset.chargeId,
+      newAmount: Number(inp.value),
+    }));
+
+    const impact = await api.get(`/gameweeks/${gameweekId}/impact?chargeEdits=${JSON.stringify(edits)}`);
+    const preview = $('egImpactPreview');
+    preview.style.display = 'block';
+    $('egImpactText').innerHTML = `
+      <strong>${impact.changedCount} charges changed</strong><br>
+      Original total: ${money(impact.originalTotal)} AED<br>
+      New total: ${money(impact.newTotal)} AED<br>
+      Delta: ${money(impact.totalDelta)} AED<br>
+      ${impact.playerImpacts.map(pi => `<div class="hint">${pi.playerName}: ${money(pi.oldAmount)} → ${money(pi.newAmount)}</div>`).join('')}
+    `;
+  } catch (e) {
+    toast(`Failed to calculate impact: ${e.message}`, true);
+  }
+}
+
+async function saveGameweekEdits(gameweekId) {
+  try {
+    const edits = Array.from($('egChargesTable').querySelectorAll('input[type="number"]')).map(inp => ({
+      chargeId: inp.dataset.chargeId,
+      newAmount: Number(inp.value),
+    }));
+
+    await api.put(`/gameweeks/${gameweekId}`, {
+      metadata: {
+        game_type: $('egGameType').value,
+        tournament_name: $('egTournamentName').value,
+        score: $('egScore').value,
+        comments: $('egComments').value,
+      },
+      chargeEdits: edits,
+      reason: 'Web UI edit',
+      autoRecalculate: $('egAutoRecalc').checked,
+    });
+
+    $('editGameweekModal').hidden = true;
+    toast('Game updated with audit trail ✓');
+    render();
+  } catch (e) {
+    toast(`Failed to save: ${e.message}`, true);
+  }
 }
 
 export function initGameweeks() {}
