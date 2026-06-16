@@ -26,16 +26,14 @@ CREATE TABLE IF NOT EXISTS contracts (
   name         TEXT NOT NULL,
   venue        TEXT,
   cost_per_gw  REAL NOT NULL DEFAULT 0,
-  rates        TEXT NOT NULL DEFAULT '{}',   -- JSON rate card (regular games)
-  tournament_rates TEXT NOT NULL DEFAULT '{}',  -- JSON rate card (tournament games)
+  rates        TEXT NOT NULL DEFAULT '{}',
   sort         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS players (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
-  aliases     TEXT NOT NULL DEFAULT '[]',     -- JSON array of name variants
-  special_role TEXT,                          -- 'cashier' | null
+  aliases     TEXT NOT NULL DEFAULT '[]',
   created_at  TEXT NOT NULL
 );
 
@@ -59,13 +57,10 @@ CREATE TABLE IF NOT EXISTS gameweeks (
   captains_raw     TEXT NOT NULL DEFAULT '',
   score            TEXT NOT NULL DEFAULT '',
   comments         TEXT NOT NULL DEFAULT '',
-  game_type        TEXT NOT NULL DEFAULT 'regular',  -- 'regular' | 'tournament'
-  tournament_name  TEXT,
-  historical       INTEGER NOT NULL DEFAULT 0,   -- 1 = imported; excluded from live balance
+  historical       INTEGER NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gw_contract ON gameweeks(contract_id, date);
-CREATE INDEX IF NOT EXISTS idx_gw_type ON gameweeks(game_type);
 
 CREATE TABLE IF NOT EXISTS charges (
   id            TEXT PRIMARY KEY,
@@ -125,6 +120,41 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);
 
 export function initSchema() {
   db.exec(SCHEMA);
+  // Safe migrations: add new columns if they don't exist
+  const migrations = [
+    // gameweeks: add game_type, tournament_name
+    () => {
+      try {
+        db.prepare('SELECT game_type FROM gameweeks LIMIT 1').get();
+      } catch {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN game_type TEXT NOT NULL DEFAULT "regular"');
+      }
+    },
+    () => {
+      try {
+        db.prepare('SELECT tournament_name FROM gameweeks LIMIT 1').get();
+      } catch {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN tournament_name TEXT');
+      }
+    },
+    // players: add special_role
+    () => {
+      try {
+        db.prepare('SELECT special_role FROM players LIMIT 1').get();
+      } catch {
+        db.exec('ALTER TABLE players ADD COLUMN special_role TEXT');
+      }
+    },
+    // contracts: add tournament_rates
+    () => {
+      try {
+        db.prepare('SELECT tournament_rates FROM contracts LIMIT 1').get();
+      } catch {
+        db.exec('ALTER TABLE contracts ADD COLUMN tournament_rates TEXT NOT NULL DEFAULT "{}"');
+      }
+    },
+  ];
+  for (const mig of migrations) mig();
 }
 
 export function seed({ force = false } = {}) {
