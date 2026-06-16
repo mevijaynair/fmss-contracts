@@ -1,6 +1,7 @@
-// gameweeks.js — match records + their per-player charges.
+// gameweeks.js — match records + their per-player charges (+ edit with audit trail).
 import { db } from '../db.js';
 import { ledgersRepo } from './ledgers.js';
+import { auditRepo } from './audit.js';
 
 export const gameweeksRepo = {
   all(contractId) {
@@ -50,5 +51,68 @@ export const gameweeksRepo = {
   },
   remove(id) {
     db.prepare('DELETE FROM gameweeks WHERE id = ?').run(id);   // charges cascade
+  },
+
+  // Update gameweek metadata (game_type, tournament_name, score, comments, etc.)
+  updateMetadata(id, { game_type, tournament_name, score, comments, teams_raw, captains_raw }) {
+    db.prepare(`UPDATE gameweeks SET game_type=?, tournament_name=?, score=?, comments=?, teams_raw=?, captains_raw=?
+                WHERE id=?`).run(
+      game_type ?? 'regular', tournament_name || null, score || '', comments || '',
+      teams_raw || '', captains_raw || '', id);
+    return this.get(id);
+  },
+
+  // Preview impact of charge edits (returns summary of what would change, no commit)
+  previewChargeEdits(gameweekId, chargeEdits) {
+    // chargeEdits = [{ chargeId, newAmount }, ...]
+    const gameweek = this.get(gameweekId);
+    const impact = {
+      originalTotal: this.chargeTotal(gameweekId),
+      newTotal: 0,
+      playerImpacts: [],
+      changedCount: 0,
+    };
+
+    for (const edit of chargeEdits) {
+      const charge = gameweek.charges.find(c => c.id === edit.chargeId);
+      if (!charge) continue;
+      const delta = edit.newAmount - charge.amount;
+      if (delta !== 0) {
+        impact.playerImpacts.push({
+          playerId: charge.player_id,
+          playerName: charge.player_name,
+          oldAmount: charge.amount,
+          newAmount: edit.newAmount,
+          delta,
+        });
+        impact.newTotal += edit.newAmount;
+        impact.changedCount++;
+      } else {
+        impact.newTotal += charge.amount;
+      }
+    }
+    impact.totalDelta = impact.newTotal - impact.originalTotal;
+    return impact;
+  },
+
+  // Apply charge edits with audit trail + auto-recalculate option
+  applyChargeEdits(gameweekId, chargeEdits, { reason = '', changedBy = 'system', autoRecalculate = true } = {}) {
+    const gameweek = this.get(gameweekId);
+    for (const edit of chargeEdits) {
+      const charge = gameweek.charges.find(c => c.id === edit.chargeId);
+      if (!charge || edit.newAmount === charge.amount) continue;
+
+      // Update charge
+      db.prepare('UPDATE charges SET amount=? WHERE id=?').run(edit.newAmount, edit.chargeId);
+
+      // Log audit trail
+      auditRepo.create(edit.chargeId, charge.amount, edit.newAmount, reason, changedBy, autoRecalculate);
+
+      // If auto-recalculate, update player balance now
+      if (autoRecalculate) {
+        ledgersRepo.ensure(charge.player_id, gameweek.contract_id);
+      }
+    }
+    return this.get(gameweekId);
   },
 };

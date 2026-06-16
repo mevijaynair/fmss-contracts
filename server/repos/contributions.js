@@ -14,6 +14,13 @@ export const contributionsRepo = {
     return db.prepare(sql).all(...args);
   },
   create({ player_id, contract_id, amount, date, comments }) {
+    // Cashier exception: block Vijay from contributing
+    if (player_id) {
+      const player = db.prepare('SELECT special_role FROM players WHERE id = ?').get(player_id);
+      if (player?.special_role === 'cashier') {
+        throw new Error('Cashier cannot contribute; contributions excluded for audit integrity');
+      }
+    }
     const id = `q_live_${Date.now()}`;
     const name = player_id
       ? (db.prepare('SELECT name FROM players WHERE id=?').get(player_id)?.name || '')

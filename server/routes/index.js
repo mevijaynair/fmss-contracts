@@ -6,6 +6,8 @@ import { ledgersRepo } from '../repos/ledgers.js';
 import { gameweeksRepo } from '../repos/gameweeks.js';
 import { contributionsRepo } from '../repos/contributions.js';
 import { kittyRepo } from '../repos/kitty.js';
+import { statsRepo } from '../repos/stats.js';
+import { auditRepo } from '../repos/audit.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -45,6 +47,29 @@ r.post('/gameweeks', wrap((req) => {
 }));
 r.delete('/gameweeks/:id', wrap((req) => { gameweeksRepo.remove(req.params.id); return { ok: true }; }));
 
+// ---- gameweek edit with impact preview & audit ----
+r.get('/gameweeks/:id/impact', wrap((req) => {
+  const { chargeEdits } = req.query;
+  if (!chargeEdits) return { playerImpacts: [] };
+  return gameweeksRepo.previewChargeEdits(req.params.id, JSON.parse(chargeEdits));
+}));
+r.put('/gameweeks/:id', wrap((req) => {
+  const { metadata, chargeEdits, reason, autoRecalculate } = req.body;
+  const g = gameweeksRepo.get(req.params.id);
+  if (!g) throw new Error('Gameweek not found');
+  // Update metadata (game_type, tournament_name, score, etc.)
+  if (metadata) gameweeksRepo.updateMetadata(req.params.id, metadata);
+  // Apply charge edits with audit trail
+  if (chargeEdits?.length) {
+    gameweeksRepo.applyChargeEdits(req.params.id, chargeEdits, {
+      reason,
+      changedBy: 'web-ui',
+      autoRecalculate: autoRecalculate !== false,
+    });
+  }
+  return gameweeksRepo.get(req.params.id);
+}));
+
 // ---- WhatsApp parse → charge preview ----
 r.post('/parse', wrap((req) => {
   const { contract_id, text } = req.body;
@@ -66,6 +91,41 @@ r.delete('/contributions/:id', wrap((req) => { contributionsRepo.remove(req.para
 r.get('/kitty', wrap(() => ({ entries: kittyRepo.all(), ...kittyRepo.balance() })));
 r.post('/kitty', wrap((req) => kittyRepo.create(req.body)));
 r.delete('/kitty/:id', wrap((req) => { kittyRepo.remove(req.params.id); return { ok: true }; }));
+
+// ---- results: match history with full context ----
+r.get('/results', wrap((req) => {
+  const contractId = req.query.contract;
+  const games = contractId
+    ? gameweeksRepo.all(contractId)
+    : gameweeksRepo.all();
+  return games.map(g => {
+    const charges = gameweeksRepo.get(g.id).charges || [];
+    return {
+      ...g,
+      charges,
+      total_charged: gameweeksRepo.chargeTotal(g.id),
+      players_count: charges.length,
+    };
+  });
+}));
+
+// ---- player stats: timeline, cost breakdown, streaks ----
+r.get('/players/:id/stats', wrap((req) => {
+  const { contract_id } = req.query;
+  if (!contract_id) throw new Error('contract_id required');
+  const timeline = statsRepo.playerTimeline(req.params.id, contract_id);
+  const stats = statsRepo.playerStats(req.params.id, contract_id);
+  return { timeline, ...stats };
+}));
+
+// ---- audit trail: view charge history ----
+r.get('/audit/charges', wrap((req) => {
+  const { player_id, gameweek_id, charge_id } = req.query;
+  if (charge_id) return auditRepo.forCharge(charge_id);
+  if (gameweek_id) return auditRepo.forGameweek(gameweek_id);
+  if (player_id) return auditRepo.forPlayer(player_id, Number(req.query.limit) || 50);
+  throw new Error('player_id, gameweek_id, or charge_id required');
+}));
 
 // ---- dashboard summary ----
 r.get('/dashboard', wrap(() => {

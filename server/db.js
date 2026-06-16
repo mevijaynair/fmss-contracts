@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS contracts (
   name         TEXT NOT NULL,
   venue        TEXT,
   cost_per_gw  REAL NOT NULL DEFAULT 0,
-  rates        TEXT NOT NULL DEFAULT '{}',   -- JSON rate card
+  rates        TEXT NOT NULL DEFAULT '{}',   -- JSON rate card (regular games)
+  tournament_rates TEXT NOT NULL DEFAULT '{}',  -- JSON rate card (tournament games)
   sort         INTEGER NOT NULL DEFAULT 0
 );
 
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS players (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   aliases     TEXT NOT NULL DEFAULT '[]',     -- JSON array of name variants
+  special_role TEXT,                          -- 'cashier' | null
   created_at  TEXT NOT NULL
 );
 
@@ -57,10 +59,13 @@ CREATE TABLE IF NOT EXISTS gameweeks (
   captains_raw     TEXT NOT NULL DEFAULT '',
   score            TEXT NOT NULL DEFAULT '',
   comments         TEXT NOT NULL DEFAULT '',
+  game_type        TEXT NOT NULL DEFAULT 'regular',  -- 'regular' | 'tournament'
+  tournament_name  TEXT,
   historical       INTEGER NOT NULL DEFAULT 0,   -- 1 = imported; excluded from live balance
   created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gw_contract ON gameweeks(contract_id, date);
+CREATE INDEX IF NOT EXISTS idx_gw_type ON gameweeks(game_type);
 
 CREATE TABLE IF NOT EXISTS charges (
   id            TEXT PRIMARY KEY,
@@ -102,7 +107,21 @@ CREATE TABLE IF NOT EXISTS meta (
   key    TEXT PRIMARY KEY,
   value  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS charge_audit (
+  id                 TEXT PRIMARY KEY,
+  charge_id          TEXT REFERENCES charges(id),
+  original_amount    REAL,
+  new_amount         REAL,
+  reason             TEXT,
+  changed_by         TEXT,
+  auto_recalculate   INTEGER NOT NULL DEFAULT 1,
+  created_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_charge ON charge_audit(charge_id);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);
 `;
+
 
 export function initSchema() {
   db.exec(SCHEMA);
@@ -129,14 +148,15 @@ export function seed({ force = false } = {}) {
   const now = new Date().toISOString();
 
   const insContract = db.prepare(
-    'INSERT INTO contracts (id,name,venue,cost_per_gw,rates,sort) VALUES (?,?,?,?,?,?)');
+    'INSERT INTO contracts (id,name,venue,cost_per_gw,rates,tournament_rates,sort) VALUES (?,?,?,?,?,?,?)');
   for (const c of data.contracts)
-    insContract.run(c.id, c.name, c.venue, c.cost_per_gw, JSON.stringify(c.rates), c.sort);
+    insContract.run(c.id, c.name, c.venue, c.cost_per_gw, JSON.stringify(c.rates),
+      JSON.stringify(c.tournament_rates || {}), c.sort);
 
   const insPlayer = db.prepare(
-    'INSERT INTO players (id,name,aliases,created_at) VALUES (?,?,?,?)');
+    'INSERT INTO players (id,name,aliases,special_role,created_at) VALUES (?,?,?,?,?)');
   for (const p of data.players)
-    insPlayer.run(p.id, p.name, JSON.stringify(p.aliases || []), now);
+    insPlayer.run(p.id, p.name, JSON.stringify(p.aliases || []), p.special_role || null, now);
 
   const insLedger = db.prepare(
     'INSERT OR REPLACE INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,?,?,?)');
@@ -145,15 +165,16 @@ export function seed({ force = false } = {}) {
 
   const insGw = db.prepare(`INSERT INTO gameweeks
     (id,contract_id,gw_number,contract_number,date,cost_per_gw,num_players,
-     teams_raw,captains_raw,score,comments,historical,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+     teams_raw,captains_raw,score,comments,game_type,tournament_name,historical,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const insCharge = db.prepare(`INSERT INTO charges
     (id,gameweek_id,player_id,team,is_captain,rate_type,amount) VALUES (?,?,?,?,?,?,?)`);
   let ci = 0;
   for (const g of data.gameweeks) {
     insGw.run(g.id, g.contract_id, g.gw_number, g.contract_number, g.date,
       g.cost_per_gw, g.num_players, g.teams_raw, g.captains_raw, g.score,
-      g.comments || '', g.historical ?? 1, now);
+      g.comments || '', g.game_type || 'regular', g.tournament_name || null,
+      g.historical ?? 1, now);
     for (const ch of g.charges || [])
       insCharge.run(`c_${ci++}`, g.id, ch.player_id, ch.team || '',
         ch.is_captain ? 1 : 0, ch.rate_type || 'historical', ch.amount);
