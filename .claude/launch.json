@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "FMSS Fee Manager",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/index.js"],
+      "port": 3100,
+      "description": "FMSS football club contract fee management web app"
+    }
+  ]
+}

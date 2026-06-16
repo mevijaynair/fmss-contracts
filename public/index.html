@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FMSS — Football Club Fee Management</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script>
+    // Apply saved/system theme before first paint to avoid a flash.
+    (function () {
+      try {
+        var t = localStorage.getItem('fmss_theme')
+          || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="sport-football">
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" id="brandMark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9.2"/>
+            <path d="M12 6.6l3.1 2.3-1.2 3.7h-3.8L8.9 8.9 12 6.6z"/>
+            <path d="M12 6.6V3.2M15.1 8.9l3.1-1M13.9 12.6l2 3.1M10.1 12.6l-2 3.1M8.9 8.9l-3.1-1"/>
+          </svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-name">FMSS</span>
+          <span class="brand-tag">Football Club</span>
+        </span>
+      </div>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <span class="dev-tag">FEE MANAGER</span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-lead">
+          <span class="topbar-sport" id="topbarSport">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9.2"/><path d="M12 6.6l3.1 2.3-1.2 3.7h-3.8L8.9 8.9 12 6.6z"/>
+            </svg>
+          </span>
+          <div class="topbar-titles">
+            <h2 id="pageTitle" class="page-title">Dashboard</h2>
+            <span id="pageContext" class="page-context">FMSS Football Club · contract fee management</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button class="icon-btn" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode"></button>
+        </div>
+      </header>
+
+      <main class="content" id="content">
+
+        <!-- DASHBOARD -->
+        <section class="view" data-view="dashboard">
+          <div class="kpi-strip" id="kpiStrip"></div>
+          <div class="sams-grid" id="contractCards"></div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Refill Watchlist</h3>
+              <span class="card-sub">Players in the red — need a top-up</span></div>
+            <div id="watchlist" class="watch-wrap"></div>
+          </div>
+        </section>
+
+        <!-- GAME DAY (WhatsApp parser) -->
+        <section class="view" data-view="gameday" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Game Day — paste WhatsApp teams</h3>
+              <span class="seg" id="gdContractSeg"></span></div>
+            <p class="hint">Paste the team message from WhatsApp, then Parse. Review the auto-detected
+              players, teams, captains and per-player cost — edit anything — then Confirm to deduct balances.</p>
+            <textarea id="gdText" class="wa-input"
+              placeholder="🔴 Vijay (C) Toby Rojy Prem Sikku&#10;🔵 Jithin Kartik Rakesh Shone Jeetu"></textarea>
+            <div style="display:flex; gap:0.6rem; margin-top:0.8rem;">
+              <button class="btn" id="gdParse">Parse teams</button>
+              <button class="btn btn-secondary" id="gdClear">Clear</button>
+            </div>
+          </div>
+
+          <div class="sams-card" id="gdPreviewCard" hidden>
+            <div class="card-header"><h3 class="card-title">Charge Preview</h3>
+              <span class="card-sub" id="gdMeta"></span></div>
+            <div class="form-row">
+              <div class="form-group"><label>Date</label><input type="date" id="gdDate"></div>
+              <div class="form-group"><label>Contract # (optional)</label><input type="number" id="gdContractNo" min="0" placeholder="e.g. 8"></div>
+            </div>
+            <div class="form-row mt">
+              <div class="form-group"><label>Score / Result</label><input type="text" id="gdScore" placeholder="e.g. Reds win 7-5"></div>
+              <div class="form-group"><label>Comments</label><input type="text" id="gdComments" placeholder="optional"></div>
+            </div>
+            <div style="overflow-x:auto; margin-top:1rem;">
+              <table class="sams-table" id="gdTable">
+                <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="preview-foot">
+              <div><span class="muted">Total charge</span> &nbsp;<span class="tot" id="gdTotal">0</span> AED
+                &nbsp;·&nbsp; <span class="hint" id="gdVsCost"></span></div>
+              <button class="btn" id="gdConfirm">Confirm &amp; deduct balances</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- PLAYERS -->
+        <section class="view" data-view="players" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Player Ledger</h3>
+              <div style="display:flex; gap:0.6rem; align-items:center;">
+                <span class="seg" id="plContractSeg"></span>
+                <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
+              </div></div>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="playersTable">
+                <thead><tr><th>Player</th><th>Status</th><th class="num">Opening</th>
+                  <th class="num">Contributed</th><th class="num">Charged</th><th class="num">Balance</th>
+                  <th>Games</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- CONTRIBUTIONS -->
+        <section class="view" data-view="contributions" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Add Contribution</h3>
+              <span class="card-sub">Log an incoming payment</span></div>
+            <form id="contribForm">
+              <div class="form-row">
+                <div class="form-group"><label>Player</label><select id="cf_player"></select></div>
+                <div class="form-group"><label>Contract</label><select id="cf_contract"></select></div>
+              </div>
+              <div class="form-row mt">
+                <div class="form-group"><label>Amount (AED)</label><input type="number" id="cf_amount" step="1" placeholder="300"></div>
+                <div class="form-group"><label>Date</label><input type="date" id="cf_date"></div>
+              </div>
+              <div class="form-group full mt"><label>Comments</label><input type="text" id="cf_comments" placeholder="e.g. cash, transfer, top-up split"></div>
+              <button type="submit" class="btn mt">Add contribution</button>
+            </form>
+          </div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Contributions Log</h3>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <select id="contribFilter" style="width:auto;"><option value="">All players</option></select>
+              </div></div>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="contribTable">
+                <thead><tr><th>Date</th><th>Player</th><th>Contract</th><th class="num">Amount</th><th>Comments</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- GAMEWEEKS -->
+        <section class="view" data-view="gameweeks" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Game History</h3>
+              <span class="seg" id="gwContractSeg"></span></div>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="gwTable">
+                <thead><tr><th>Date</th><th>GW</th><th>Players</th><th class="num">Charged</th><th>Score</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- KITTY -->
+        <section class="view" data-view="kitty" hidden>
+          <div class="kpi-strip" id="kittyKpi"></div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Add Kitty Entry</h3>
+              <span class="card-sub">Club income or expense (BBQ, iftar, top-ups…)</span></div>
+            <form id="kittyForm">
+              <div class="form-row">
+                <div class="form-group"><label>Type</label><select id="kf_kind"><option value="expense">Expense</option><option value="income">Income</option></select></div>
+                <div class="form-group"><label>Amount (AED)</label><input type="number" id="kf_amount" step="1"></div>
+              </div>
+              <div class="form-row mt">
+                <div class="form-group"><label>Label</label><input type="text" id="kf_label" placeholder="e.g. Football top-up"></div>
+                <div class="form-group"><label>Date</label><input type="date" id="kf_date"></div>
+              </div>
+              <button type="submit" class="btn mt">Add entry</button>
+            </form>
+          </div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Kitty Ledger</h3></div>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="kittyTable">
+                <thead><tr><th>Date</th><th>Type</th><th>Label</th><th class="num">Amount</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="view" data-view="settings" hidden>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Contract Settings &amp; Rate Cards</h3>
+              <span class="card-sub">Edit venue, cost per game and per-player rates</span></div>
+            <div id="settingsCards"></div>
+          </div>
+        </section>
+
+      </main>
+
+      <footer class="legal-footer">
+        FMSS fee manager · local tracker. Balances are computed from your imported opening
+        balance plus contributions minus game charges. Imported history is shown for the record.
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Generic modal -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header"><h3 id="modalTitle"></h3><button class="modal-close" id="modalClose">✕</button></div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "fmss",
+  "version": "1.0.0",
+  "description": "FMSS Football Club — contract fee management (WhatsApp-driven cost tracking).",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/db.js --seed",
+    "reseed": "node server/db.js --reseed"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
