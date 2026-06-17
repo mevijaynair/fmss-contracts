@@ -64,8 +64,14 @@ npm ci --only=production
 ```bash
 cd /opt/fmss-contracts
 cp .env.example .env
-nano .env        # confirm: PORT=3002  and  FMSS_DB_PATH=/data/fmss.db
+nano .env        # Set three variables:
+                 # PORT=3002
+                 # FMSS_DB_PATH=/data/fmss.db
+                 # FMSS_AUTH_PASSWORD=<your-strong-password>
 ```
+
+**Important:** This app is **view-only and password-protected**. No edits, adds, or deletes
+are possible — only you can log in and view the data. Set a strong password you'll remember.
 
 ---
 
@@ -162,7 +168,13 @@ Verify, then open the site:
 ```bash
 dig +short contracts.fmss.ae     # -> <your-server-ip>
 ```
-→ https://contracts.fmss.ae  (Caddy issues the TLS cert automatically on first hit)
+→ https://contracts.fmss.ae (Caddy issues the TLS cert automatically)
+
+**Test the login:**
+- You should see a password-protected login page
+- Enter the `FMSS_AUTH_PASSWORD` from your `.env`
+- You should see the dashboard with your imported data (players, games, balances)
+- All view-only — no edit/add/delete buttons are visible
 
 ---
 

@@ -1,11 +1,29 @@
-// api.js — fetch wrapper for the FMSS API (no auth).
+// api.js — fetch wrapper for the FMSS API.
+// Attaches JWT token from localStorage to every request (except /login).
 async function req(method, path, body) {
   const opts = { method, headers: {} };
+
+  // Attach token for protected endpoints
+  if (!path.includes('/login')) {
+    const token = localStorage.getItem('fmss_token');
+    if (token) {
+      opts.headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(`/api${path}`, opts);
+
+  // If 401, token expired — clear and reload to show login
+  if (res.status === 401) {
+    localStorage.removeItem('fmss_token');
+    window.location.reload();
+    return;
+  }
+
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);

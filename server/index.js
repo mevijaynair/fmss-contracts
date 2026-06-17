@@ -1,9 +1,11 @@
 // index.js — Express entry point. Serves the API and the static frontend.
-// Local single-user app: no auth.
+// Single-user app: password-protected (JWT auth). /api/login is public; all other
+// API endpoints require a valid Bearer token from FMSS_AUTH_PASSWORD.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { initSchema, seed, applyRoles } from './db.js';
+import { auth, authMiddleware } from './auth.js';
 import api from './routes/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,8 +19,20 @@ applyRoles();                 // idempotent business rules (Vijay = cashier)
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
+// Public endpoints (no auth required)
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
-app.use('/api', api);
+app.post('/api/login', (req, res) => {
+  try {
+    const { password } = req.body;
+    const result = auth.login(password);
+    res.json(result);
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+// Protected endpoints (auth required)
+app.use('/api', authMiddleware, api);
 app.use(express.static(PUBLIC_DIR));
 
 app.use((err, _req, res, _next) => {

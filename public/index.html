@@ -59,6 +59,24 @@
 
       <main class="content" id="content">
 
+        <!-- LOGIN -->
+        <section id="loginView" class="login-view">
+          <div class="login-card">
+            <div class="login-header">
+              <h1>FMSS Contracts</h1>
+              <p>View-only access · password protected</p>
+            </div>
+            <form id="loginForm">
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="loginPassword" placeholder="Enter password" required>
+              </div>
+              <button type="submit" class="btn">Login</button>
+              <div id="loginError" class="login-error" style="display:none;"></div>
+            </form>
+          </div>
+        </section>
+
         <!-- DASHBOARD -->
         <section class="view" data-view="dashboard">
           <div class="kpi-strip" id="kpiStrip"></div>

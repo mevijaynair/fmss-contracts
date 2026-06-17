@@ -549,3 +549,20 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 
 /* ===== Cashier badge ===== */
 .tag-cashier { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-color); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+
+/* ===== Login view ===== */
+.login-view { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg-main); }
+.login-card { background: var(--bg-card); border-radius: 12px; padding: 2rem; box-shadow: var(--shadow-lg); max-width: 320px; width: 100%; }
+.login-header { text-align: center; margin-bottom: 2rem; }
+.login-header h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text-main); }
+.login-header p { margin: 0; font-size: 0.9rem; color: var(--text-muted); }
+#loginForm { display: flex; flex-direction: column; gap: 1rem; }
+.login-error { color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; }
+
+/* ===== Read-only mode (hide edit/create/delete controls) ===== */
+#contribForm, #kittyForm, #plAdd,
+[data-pay], [data-del], [data-edit],
+.btn-edit, .row-actions button,
+.preview-foot button { display: none !important; }
+.row-actions { display: flex !important; }
+.row-actions:has(button) { display: none !important; }
