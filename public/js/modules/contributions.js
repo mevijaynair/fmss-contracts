@@ -8,10 +8,16 @@ function contractName(id) {
 }
 
 function fillSelects() {
-  const players = store.players.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  $('cf_player').innerHTML = '<option value="">— unassigned —</option>' + players;
+  // Cashier (Vijay) is excluded from contributing — never offer them in the
+  // "add contribution" dropdown. They remain available in the filter so their
+  // history (charges) can still be browsed.
+  const payable = store.players
+    .filter(p => p.special_role !== 'cashier')
+    .map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const everyone = store.players.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  $('cf_player').innerHTML = '<option value="">— unassigned —</option>' + payable;
   $('cf_contract').innerHTML = store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  $('contribFilter').innerHTML = '<option value="">All players</option>' + players;
+  $('contribFilter').innerHTML = '<option value="">All players</option>' + everyone;
 }
 
 async function renderLog() {

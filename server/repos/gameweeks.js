@@ -95,22 +95,32 @@ export const gameweeksRepo = {
     return impact;
   },
 
-  // Apply charge edits with audit trail + auto-recalculate option
+  // Apply charge edits with audit trail + auto-recalculate option.
+  //
+  // Present balance is COMPUTED (opening + contributions − charges), so editing a
+  // charge on a live game always flows into the balance by default — that is the
+  // auto-recalculate (default) behaviour. When autoRecalculate is false the caller
+  // wants an "override": correct only this game's recorded charge WITHOUT moving the
+  // player's present balance. We achieve that by shifting opening_balance by the same
+  // delta, which exactly neutralises the charge change. (Only meaningful for live
+  // games; historical charges are excluded from the live balance, so there is nothing
+  // to neutralise and we must NOT touch opening_balance for them.)
   applyChargeEdits(gameweekId, chargeEdits, { reason = '', changedBy = 'system', autoRecalculate = true } = {}) {
     const gameweek = this.get(gameweekId);
     for (const edit of chargeEdits) {
       const charge = gameweek.charges.find(c => c.id === edit.chargeId);
       if (!charge || edit.newAmount === charge.amount) continue;
+      const delta = edit.newAmount - charge.amount;
 
-      // Update charge
       db.prepare('UPDATE charges SET amount=? WHERE id=?').run(edit.newAmount, edit.chargeId);
-
-      // Log audit trail
       auditRepo.create(edit.chargeId, charge.amount, edit.newAmount, reason, changedBy, autoRecalculate);
+      ledgersRepo.ensure(charge.player_id, gameweek.contract_id);
 
-      // If auto-recalculate, update player balance now
-      if (autoRecalculate) {
-        ledgersRepo.ensure(charge.player_id, gameweek.contract_id);
+      if (!autoRecalculate && !gameweek.historical) {
+        // Override: keep the player's present balance unchanged.
+        db.prepare(`UPDATE ledgers SET opening_balance = opening_balance + ?
+                    WHERE player_id = ? AND contract_id = ?`)
+          .run(delta, charge.player_id, gameweek.contract_id);
       }
     }
     return this.get(gameweekId);

@@ -10,9 +10,12 @@ const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
 async function render() {
   const ledgers = await api.ledgers(contractId);
-  $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => `
+  const roleOf = Object.fromEntries(store.players.map(p => [p.id, p.special_role]));
+  $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => {
+    const isCashier = roleOf[l.player_id] === 'cashier';
+    return `
     <tr>
-      <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong></td>
+      <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
       <td>
         <select data-status="${l.player_id}" class="btn-sm" style="padding:0.25rem 0.4rem;">
           ${STATUSES.map(s => `<option ${s.toLowerCase() === (l.status || '').toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
@@ -24,9 +27,10 @@ async function render() {
       <td class="num">${balCell(l.present_balance)}</td>
       <td>${l.games}</td>
       <td class="row-actions">
-        <button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>
+        ${isCashier ? '<span class="hint">no contributions</span>'
+          : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
       </td>
-    </tr>`).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
+    </tr>`; }).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
 
   $('playersTable').querySelectorAll('[data-status]').forEach(sel =>
     sel.addEventListener('change', async () => {

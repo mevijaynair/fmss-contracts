@@ -36,13 +36,18 @@ export const statsRepo = {
     return { opening: opening?.opening_balance || 0, events, presentBalance: balance };
   },
 
+  // Descriptive stats (team history, games, costs, streaks) intentionally include
+  // BOTH historical (imported) and live games — they answer "what are this player's
+  // results across all past games", independent of the live-balance reconciliation.
+  // Only playerTimeline() is live-only, because it must reconcile to present balance.
+
   // Get player's team history across all games in contract
   playerTeamHistory(playerId, contractId) {
     return db.prepare(`
       SELECT DISTINCT ch.team, COUNT(*) as count
       FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
-      WHERE ch.player_id = ? AND g.contract_id = ? AND g.historical = 0
+      WHERE ch.player_id = ? AND g.contract_id = ? AND ch.team != ''
       GROUP BY ch.team
       ORDER BY count DESC`).all(playerId, contractId);
   },
@@ -53,7 +58,7 @@ export const statsRepo = {
       SELECT COUNT(DISTINCT ch.gameweek_id) as games
       FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
-      WHERE ch.player_id = ? AND g.contract_id = ? AND g.historical = 0`).get(playerId, contractId).games;
+      WHERE ch.player_id = ? AND g.contract_id = ?`).get(playerId, contractId).games;
   },
 
   // Cost breakdown: how many games at each rate type
@@ -62,7 +67,7 @@ export const statsRepo = {
       SELECT ch.rate_type, COUNT(*) as gameCount, SUM(ch.amount) as totalAmount
       FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
-      WHERE ch.player_id = ? AND g.contract_id = ? AND g.historical = 0
+      WHERE ch.player_id = ? AND g.contract_id = ?
       GROUP BY ch.rate_type
       ORDER BY gameCount DESC`).all(playerId, contractId);
   },
@@ -72,7 +77,7 @@ export const statsRepo = {
     const games = db.prepare(`
       SELECT DISTINCT g.date FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
-      WHERE ch.player_id = ? AND g.contract_id = ? AND g.historical = 0
+      WHERE ch.player_id = ? AND g.contract_id = ?
       ORDER BY g.date DESC`).all(playerId, contractId);
 
     if (!games.length) return { current: 0, longest: 0 };

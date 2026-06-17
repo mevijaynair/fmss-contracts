@@ -546,3 +546,6 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 /* ===== Edit modal ===== */
 .input-mini { padding: 0.3rem 0.4rem; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; width: 80px; }
 .input-mini:disabled { background: var(--bg-inset); color: var(--text-muted); }
+
+/* ===== Cashier badge ===== */
+.tag-cashier { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-color); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }

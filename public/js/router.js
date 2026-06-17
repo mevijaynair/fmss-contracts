@@ -2,6 +2,7 @@
 export const NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
   { view: 'gameday',       label: 'Game Day',      title: 'Game Day — paste WhatsApp teams' },
+  { view: 'results',       label: 'Results',       title: 'Match Results' },
   { view: 'players',       label: 'Players',       title: 'Player Ledger' },
   { view: 'contributions', label: 'Contributions', title: 'Contributions' },
   { view: 'gameweeks',     label: 'Game History',  title: 'Game History' },
@@ -14,6 +15,7 @@ const I = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 const ICONS = {
   dashboard:     I('<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>'),
   gameday:       I('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+  results:       I('<path d="M3 3v18h18"/><path d="M7 16l4-6 4 3 5-7"/>'),
   players:       I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
   contributions: I('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
   gameweeks:     I('<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),

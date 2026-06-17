@@ -24,9 +24,16 @@ export const playersRepo = {
       .run(id, name.trim(), JSON.stringify(aliases), new Date().toISOString());
     return this.get(id);
   },
-  update(id, { name, aliases }) {
-    db.prepare('UPDATE players SET name=?, aliases=? WHERE id=?')
-      .run(name.trim(), JSON.stringify(aliases || []), id);
+  update(id, { name, aliases, special_role }) {
+    // special_role is only touched when the key is present, so callers that
+    // omit it (e.g. the rename modal) don't accidentally clear the cashier role.
+    if (special_role !== undefined) {
+      db.prepare('UPDATE players SET name=?, aliases=?, special_role=? WHERE id=?')
+        .run(name.trim(), JSON.stringify(aliases || []), special_role || null, id);
+    } else {
+      db.prepare('UPDATE players SET name=?, aliases=? WHERE id=?')
+        .run(name.trim(), JSON.stringify(aliases || []), id);
+    }
     return this.get(id);
   },
 };

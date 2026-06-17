@@ -3,7 +3,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { initSchema, seed } from './db.js';
+import { initSchema, seed, applyRoles } from './db.js';
 import api from './routes/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3100;   // 3100 keeps FMSS clear of SAMS (3000)
 
 initSchema();
 seed();                       // loads data/seed.json on a fresh DB
+applyRoles();                 // idempotent business rules (Vijay = cashier)
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));

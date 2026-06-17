@@ -103,9 +103,12 @@ CREATE TABLE IF NOT EXISTS meta (
   value  TEXT
 );
 
+-- charge_id is a LOGICAL reference (no hard FK): an audit log must survive the
+-- deletion of the charge/gameweek it describes. A hard FK would otherwise block
+-- deleting any game that has edited charges.
 CREATE TABLE IF NOT EXISTS charge_audit (
   id                 TEXT PRIMARY KEY,
-  charge_id          TEXT REFERENCES charges(id),
+  charge_id          TEXT,
   original_amount    REAL,
   new_amount         REAL,
   reason             TEXT,
@@ -153,8 +156,37 @@ export function initSchema() {
         db.exec('ALTER TABLE contracts ADD COLUMN tournament_rates TEXT NOT NULL DEFAULT "{}"');
       }
     },
+    // charge_audit: drop the hard FK to charges so deleting a game with edited
+    // charges no longer fails. Rebuild the table only if a FK is still present.
+    () => {
+      const fks = db.prepare('PRAGMA foreign_key_list(charge_audit)').all();
+      if (fks.length === 0) return;
+      db.exec('PRAGMA foreign_keys = OFF;');
+      db.exec(`CREATE TABLE charge_audit_new (
+        id TEXT PRIMARY KEY, charge_id TEXT, original_amount REAL, new_amount REAL,
+        reason TEXT, changed_by TEXT, auto_recalculate INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL);`);
+      db.exec(`INSERT INTO charge_audit_new
+        SELECT id, charge_id, original_amount, new_amount, reason, changed_by,
+               auto_recalculate, created_at FROM charge_audit;`);
+      db.exec('DROP TABLE charge_audit;');
+      db.exec('ALTER TABLE charge_audit_new RENAME TO charge_audit;');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_audit_charge ON charge_audit(charge_id);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);');
+      db.exec('PRAGMA foreign_keys = ON;');
+    },
   ];
   for (const mig of migrations) mig();
+}
+
+// Apply persistent business rules that must hold regardless of seed state.
+// Idempotent — safe to run on every startup. Currently: Vijay is the cashier
+// (custodian of funds) and is excluded from contributions for audit integrity.
+export function applyRoles() {
+  db.prepare(
+    `UPDATE players SET special_role = 'cashier'
+     WHERE special_role IS NULL AND (id = 'vijay' OR LOWER(name) = 'vijay')`
+  ).run();
 }
 
 export function seed({ force = false } = {}) {
@@ -165,8 +197,8 @@ export function seed({ force = false } = {}) {
     return;
   }
   if (force) {
-    for (const t of ['charges', 'gameweeks', 'contributions', 'kitty', 'ledgers',
-                      'players', 'contracts', 'meta']) {
+    for (const t of ['charge_audit', 'charges', 'gameweeks', 'contributions', 'kitty',
+                      'ledgers', 'players', 'contracts', 'meta']) {
       db.exec(`DELETE FROM ${t};`);
     }
   }
