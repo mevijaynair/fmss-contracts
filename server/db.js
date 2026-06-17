@@ -14,7 +14,10 @@ const DATA_DIR = join(__dirname, '..', 'data');
 const DB_PATH = process.env.FMSS_DB_PATH || join(DATA_DIR, 'fmss.db');
 const SEED_PATH = join(DATA_DIR, 'seed.json');
 
-mkdirSync(DATA_DIR, { recursive: true });
+// Ensure the DB's own directory exists. Use dirname(DB_PATH) (not DATA_DIR) so a
+// production FMSS_DB_PATH like /data/fmss.db works even when the app dir is
+// read-only under systemd ProtectSystem=strict (only /data is writable then).
+mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
