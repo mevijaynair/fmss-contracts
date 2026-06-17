@@ -21,6 +21,10 @@ export const contributionsRepo = {
         throw new Error('Cashier cannot contribute; contributions excluded for audit integrity');
       }
     }
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) {
+      throw new Error(`Invalid contribution amount: ${amount} (must be a number ≥ 0)`);
+    }
     const id = `q_live_${Date.now()}`;
     const name = player_id
       ? (db.prepare('SELECT name FROM players WHERE id=?').get(player_id)?.name || '')

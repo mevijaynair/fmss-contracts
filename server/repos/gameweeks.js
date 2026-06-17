@@ -43,13 +43,33 @@ export const gameweeksRepo = {
     const insCharge = db.prepare(`INSERT INTO charges
       (id,gameweek_id,player_id,team,is_captain,rate_type,amount) VALUES (?,?,?,?,?,?,?)`);
     charges.forEach((ch, i) => {
+      const amt = Number(ch.amount);
+      if (!Number.isFinite(amt) || amt < 0) {
+        throw new Error(`Invalid charge amount for ${ch.player_id}: ${ch.amount} (must be ≥ 0)`);
+      }
       ledgersRepo.ensure(ch.player_id, gw.contract_id);
       insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
-        ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount) || 0);
+        ch.is_captain ? 1 : 0, ch.rate_type || '', amt);
     });
     return this.get(id);
   },
   remove(id) {
+    // Reverse any override (autoRecalculate=false) opening_balance compensations
+    // before deleting, otherwise the shift is orphaned and silently inflates the
+    // player's balance once the charge disappears. Only live games can carry these.
+    const g = this.get(id);
+    if (g && !g.historical) {
+      for (const ch of g.charges) {
+        const shift = db.prepare(
+          `SELECT COALESCE(SUM(new_amount - original_amount), 0) AS s
+           FROM charge_audit WHERE charge_id = ? AND auto_recalculate = 0`).get(ch.id).s;
+        if (shift !== 0) {
+          db.prepare(`UPDATE ledgers SET opening_balance = opening_balance - ?
+                      WHERE player_id = ? AND contract_id = ?`)
+            .run(shift, ch.player_id, g.contract_id);
+        }
+      }
+    }
     db.prepare('DELETE FROM gameweeks WHERE id = ?').run(id);   // charges cascade
   },
 
@@ -62,13 +82,16 @@ export const gameweeksRepo = {
     return this.get(id);
   },
 
-  // Preview impact of charge edits (returns summary of what would change, no commit)
+  // Preview impact of charge edits (returns summary of what would change, no commit).
+  // chargeEdits may be a SUBSET of the game's charges, so totalDelta is summed from
+  // the per-charge deltas (not newTotal − fullGameTotal, which would be wrong for a
+  // partial edit) and newTotal is derived as originalTotal + totalDelta.
   previewChargeEdits(gameweekId, chargeEdits) {
-    // chargeEdits = [{ chargeId, newAmount }, ...]
     const gameweek = this.get(gameweekId);
     const impact = {
       originalTotal: this.chargeTotal(gameweekId),
       newTotal: 0,
+      totalDelta: 0,
       playerImpacts: [],
       changedCount: 0,
     };
@@ -85,13 +108,11 @@ export const gameweeksRepo = {
           newAmount: edit.newAmount,
           delta,
         });
-        impact.newTotal += edit.newAmount;
+        impact.totalDelta += delta;
         impact.changedCount++;
-      } else {
-        impact.newTotal += charge.amount;
       }
     }
-    impact.totalDelta = impact.newTotal - impact.originalTotal;
+    impact.newTotal = impact.originalTotal + impact.totalDelta;
     return impact;
   },
 
@@ -110,6 +131,9 @@ export const gameweeksRepo = {
     for (const edit of chargeEdits) {
       const charge = gameweek.charges.find(c => c.id === edit.chargeId);
       if (!charge || edit.newAmount === charge.amount) continue;
+      if (!Number.isFinite(edit.newAmount) || edit.newAmount < 0) {
+        throw new Error(`Invalid charge amount: ${edit.newAmount} (must be a number ≥ 0)`);
+      }
       const delta = edit.newAmount - charge.amount;
 
       db.prepare('UPDATE charges SET amount=? WHERE id=?').run(edit.newAmount, edit.chargeId);
