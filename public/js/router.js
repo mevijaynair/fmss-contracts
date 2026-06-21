@@ -1,5 +1,5 @@
-// router.js — sidebar nav + single active view (no permissions).
-export const NAV = [
+// router.js — sidebar nav + single active view. Two-tier role-based nav.
+const ADMIN_NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
   { view: 'gameday',       label: 'Game Day',      title: 'Game Day — paste WhatsApp teams' },
   { view: 'results',       label: 'Results',       title: 'Match Results' },
@@ -9,6 +9,16 @@ export const NAV = [
   { view: 'kitty',         label: 'Kitty',         title: 'Club Kitty' },
   { view: 'settings',      label: 'Settings',      title: 'Contract Settings' },
 ];
+
+const PLAYER_NAV = [
+  { view: 'dashboard',     label: 'Dashboard',     title: 'My Dashboard' },
+  { view: 'results',       label: 'Results',       title: 'Match Results' },
+  { view: 'players',       label: 'My Ledger',     title: 'My Account' },
+  { view: 'contributions', label: 'Contributions', title: 'My Contributions' },
+  { view: 'settings',      label: 'Account',       title: 'Account Settings' },
+];
+
+export const NAV = ADMIN_NAV;  // Export admin nav by default for compatibility
 
 const I = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
   stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -24,17 +34,19 @@ const ICONS = {
 };
 
 let current = null;
+let currentNav = ADMIN_NAV;
 
-export function buildNav() {
+export function buildNav(role = 'admin') {
+  currentNav = role === 'player' ? PLAYER_NAV : ADMIN_NAV;
   const nav = document.getElementById('nav');
-  nav.innerHTML = NAV.map(n =>
+  nav.innerHTML = currentNav.map(n =>
     `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`).join('');
   nav.querySelectorAll('button').forEach(b =>
     b.addEventListener('click', () => showView(b.dataset.view)));
 }
 
 export function showView(view) {
-  const meta = NAV.find(n => n.view === view);
+  const meta = currentNav.find(n => n.view === view);
   if (!meta) return;
   current = view;
   document.querySelectorAll('.view').forEach(el => { el.hidden = el.dataset.view !== view; });

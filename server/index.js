@@ -1,10 +1,10 @@
 // index.js — Express entry point. Serves the API and the static frontend.
-// Single-user app: password-protected (JWT auth). /api/login is public; all other
-// API endpoints require a valid Bearer token from FMSS_AUTH_PASSWORD.
+// Two-tier app: admin (password-only) + players (email+password). JWT auth.
+// /api/login and /api/health are public; all other API endpoints require a valid Bearer token.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { initSchema, seed, applyRoles } from './db.js';
+import { initSchema, seed, applyRoles, db } from './db.js';
 import { auth, authMiddleware } from './auth.js';
 import api from './routes/index.js';
 
@@ -23,8 +23,21 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.post('/api/login', (req, res) => {
   try {
-    const { password } = req.body;
-    const result = auth.login(password);
+    const { email, password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: 'password is required' });
+    }
+
+    let result;
+    if (email) {
+      // Player login
+      result = auth.loginPlayer(db, email, password);
+    } else {
+      // Admin login
+      result = auth.loginAdmin(password);
+    }
+
     res.json(result);
   } catch (e) {
     res.status(401).json({ error: e.message });

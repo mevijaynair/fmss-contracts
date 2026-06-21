@@ -121,7 +121,40 @@ CREATE TABLE IF NOT EXISTS charge_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_charge ON charge_audit(charge_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);
+
+CREATE TABLE IF NOT EXISTS auth_users (
+  id            TEXT PRIMARY KEY,
+  email         TEXT UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'player' CHECK(role IN ('player', 'admin')),
+  player_id     TEXT REFERENCES players(id),
+  is_active     INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_email ON auth_users(email);
+CREATE INDEX IF NOT EXISTS idx_auth_role ON auth_users(role);
+
+CREATE TABLE IF NOT EXISTS admin_config (
+  id                   TEXT PRIMARY KEY,
+  admin_password_hash  TEXT NOT NULL,
+  created_at           TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contributions_pending (
+  id            TEXT PRIMARY KEY,
+  player_id     TEXT NOT NULL REFERENCES players(id),
+  contract_id   TEXT NOT NULL REFERENCES contracts(id),
+  amount        REAL NOT NULL DEFAULT 0,
+  date          TEXT,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+  reviewed_by   TEXT,
+  reviewed_at   TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contrib_pending_player ON contributions_pending(player_id, status);
 `;
+
 
 
 export function initSchema() {
@@ -177,6 +210,30 @@ export function initSchema() {
       db.exec('CREATE INDEX IF NOT EXISTS idx_audit_charge ON charge_audit(charge_id);');
       db.exec('CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);');
       db.exec('PRAGMA foreign_keys = ON;');
+    },
+    // auth_users: exists (created in SCHEMA above)
+    () => {
+      try {
+        db.prepare('SELECT id FROM auth_users LIMIT 1').get();
+      } catch {
+        // Already created in SCHEMA
+      }
+    },
+    // admin_config: exists (created in SCHEMA above)
+    () => {
+      try {
+        db.prepare('SELECT id FROM admin_config LIMIT 1').get();
+      } catch {
+        // Already created in SCHEMA
+      }
+    },
+    // contributions_pending: exists (created in SCHEMA above)
+    () => {
+      try {
+        db.prepare('SELECT id FROM contributions_pending LIMIT 1').get();
+      } catch {
+        // Already created in SCHEMA
+      }
     },
   ];
   for (const mig of migrations) mig();

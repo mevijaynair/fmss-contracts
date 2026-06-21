@@ -1,4 +1,5 @@
-// routes/index.js — all FMSS API endpoints (no auth; single local user).
+// routes/index.js — all FMSS API endpoints (auth required; role-based filtering).
+// Two-tier: admin sees everything, players see only their own data.
 import { Router } from 'express';
 import { contractsRepo } from '../repos/contracts.js';
 import { playersRepo } from '../repos/players.js';
@@ -16,15 +17,49 @@ const wrap = (fn) => (req, res) => {
   catch (e) { console.error(e); res.status(400).json({ error: e.message }); }
 };
 
+// ---- authentication ----
+r.get('/me', wrap((req) => ({
+  id: req.user.id,
+  role: req.user.role,
+  playerId: req.user.playerId,
+  email: req.user.email,
+})));
+
 // ---- contracts ----
 r.get('/contracts', wrap(() => contractsRepo.all()));
 r.put('/contracts/:id', wrap((req) => contractsRepo.update(req.params.id, req.body)));
 
 // ---- players + ledgers ----
-r.get('/players', wrap(() => playersRepo.all()));
-r.post('/players', wrap((req) => playersRepo.create(req.body)));
-r.put('/players/:id', wrap((req) => playersRepo.update(req.params.id, req.body)));
-r.get('/players/:id/ledgers', wrap((req) => ledgersRepo.forPlayer(req.params.id)));
+r.get('/players', wrap((req) => {
+  // Admin: see all players; Player: see only self
+  if (req.user.role === 'player') {
+    const player = playersRepo.get(req.user.playerId);
+    return player ? [player] : [];
+  }
+  return playersRepo.all();
+}));
+r.post('/players', wrap((req) => {
+  // Admin only
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  return playersRepo.create(req.body);
+}));
+r.put('/players/:id', wrap((req) => {
+  // Admin only
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  return playersRepo.update(req.params.id, req.body);
+}));
+r.get('/players/:id/ledgers', wrap((req) => {
+  // Admin: see any player's ledgers; Player: see only self
+  if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
+    throw new Error('Forbidden');
+  }
+  return ledgersRepo.forPlayer(req.params.id);
+}));
+r.get('/my/ledgers', wrap((req) => {
+  // Player view: their ledgers across all contracts
+  if (req.user.role !== 'player') throw new Error('Player only');
+  return ledgersRepo.forPlayer(req.user.playerId);
+}));
 
 r.get('/ledgers', wrap((req) =>
   req.query.contract ? ledgersRepo.forContract(req.query.contract) : ledgersRepo.all()));

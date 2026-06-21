@@ -36,4 +36,8 @@ export const playersRepo = {
     }
     return this.get(id);
   },
+  getByName(name) {
+    // Find player by exact name match (case-insensitive)
+    return row(db.prepare('SELECT * FROM players WHERE LOWER(name) = LOWER(?)').get(name));
+  },
 };
