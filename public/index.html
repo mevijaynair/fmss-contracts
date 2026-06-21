@@ -3,14 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FMSS — Football Club Fee Management</title>
+  <title>FMSS — Love and Love Only</title>
+  <link rel="icon" href="/fmss-logo.png">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Oswald:wght@500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css">
   <script>
-    // Apply saved/system theme before first paint to avoid a flash.
+    // FMSS identity is dark (matches the main fmss.ae site). Default to dark
+    // unless the user has explicitly chosen light before.
     (function () {
       try {
-        var t = localStorage.getItem('fmss_theme')
-          || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        var t = localStorage.getItem('fmss_theme') || 'dark';
         document.documentElement.setAttribute('data-theme', t);
       } catch (e) {}
     })();
@@ -18,19 +20,42 @@
 </head>
 <body class="sport-football">
 
+  <!-- LOGIN (full-screen overlay; lives outside .shell so it shows when the shell is hidden) -->
+  <section id="loginView" class="login-view" style="display:none;">
+    <div class="login-card">
+      <div class="login-header">
+        <img src="/fmss-logo.png" alt="FMSS" class="login-logo">
+        <h1>FMSS</h1>
+        <p>Love and Love Only · contract manager</p>
+      </div>
+      <form id="loginForm">
+        <label class="login-toggle">
+          <input type="checkbox" id="playerLoginToggle">
+          <span>I'm a player (log in with email)</span>
+        </label>
+        <div class="form-group" id="emailGroup" style="display:none;">
+          <label>Email</label>
+          <input type="email" id="loginEmail" placeholder="your@email.com">
+        </div>
+        <div class="form-group">
+          <label id="passwordLabel">Password</label>
+          <input type="password" id="loginPassword" placeholder="Enter password" required>
+        </div>
+        <button type="submit" class="btn">Login</button>
+        <div id="loginError" class="login-error" style="display:none;"></div>
+      </form>
+    </div>
+  </section>
+
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark" id="brandMark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="9.2"/>
-            <path d="M12 6.6l3.1 2.3-1.2 3.7h-3.8L8.9 8.9 12 6.6z"/>
-            <path d="M12 6.6V3.2M15.1 8.9l3.1-1M13.9 12.6l2 3.1M10.1 12.6l-2 3.1M8.9 8.9l-3.1-1"/>
-          </svg>
+          <img src="/fmss-logo.png" alt="FMSS" class="brand-logo">
         </span>
         <span class="brand-text">
           <span class="brand-name">FMSS</span>
-          <span class="brand-tag">Football Club</span>
+          <span class="brand-tag">Love and Love Only</span>
         </span>
       </div>
       <nav class="nav" id="nav"></nav>
@@ -58,33 +83,6 @@
       </header>
 
       <main class="content" id="content">
-
-        <!-- LOGIN -->
-        <section id="loginView" class="login-view">
-          <div class="login-card">
-            <div class="login-header">
-              <h1>FMSS Contracts</h1>
-              <p>Two-tier access · admin + players</p>
-            </div>
-            <form id="loginForm">
-              <div class="form-group">
-                <label>
-                  <input type="checkbox" id="playerLoginToggle"> Player login
-                </label>
-              </div>
-              <div class="form-group" id="emailGroup" style="display:none;">
-                <label>Email</label>
-                <input type="email" id="loginEmail" placeholder="your@email.com">
-              </div>
-              <div class="form-group">
-                <label id="passwordLabel">Password</label>
-                <input type="password" id="loginPassword" placeholder="Enter password" required>
-              </div>
-              <button type="submit" class="btn">Login</button>
-              <div id="loginError" class="login-error" style="display:none;"></div>
-            </form>
-          </div>
-        </section>
 
         <!-- DASHBOARD -->
         <section class="view" data-view="dashboard">

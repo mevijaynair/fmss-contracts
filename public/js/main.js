@@ -58,6 +58,8 @@ async function start() {
 
   // Load app with role-based nav
   const user = getUser();
+  document.body.classList.toggle('role-player', user?.role === 'player');
+  document.body.classList.toggle('role-admin', user?.role === 'admin');
   buildNav(user?.role);
   [store.contracts, store.players] = await Promise.all([api.contracts(), api.players()]);
   store.activeContract = store.contracts[0]?.id || 'sat';
@@ -77,9 +79,9 @@ async function start() {
 }
 
 function showLoginView() {
-  // Hide the main shell; show login form
+  // Hide the main shell; show the full-screen login overlay (flex-centered).
   document.querySelector('.shell').style.display = 'none';
-  $('loginView').style.display = 'block';
+  $('loginView').style.display = 'flex';
 
   const emailGroup = $('emailGroup');
   const passwordLabel = $('passwordLabel');
@@ -116,9 +118,8 @@ function showLoginView() {
       const user = await api.get('/me');
       setUser(user);
 
-      $('loginView').style.display = 'none';
-      document.querySelector('.shell').style.display = 'flex';
-      start();  // restart the app with the new token
+      // start() (authenticated path) hides the overlay and restores the shell.
+      start();
     } catch (err) {
       showLoginError(err.message || 'Login failed');
     }
