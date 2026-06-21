@@ -1,6 +1,7 @@
 // routes/index.js — all FMSS API endpoints (auth required; role-based filtering).
 // Two-tier: admin sees everything, players see only their own data.
 import { Router } from 'express';
+import { db } from '../db.js';
 import { contractsRepo } from '../repos/contracts.js';
 import { playersRepo } from '../repos/players.js';
 import { ledgersRepo } from '../repos/ledgers.js';
@@ -9,6 +10,7 @@ import { contributionsRepo } from '../repos/contributions.js';
 import { kittyRepo } from '../repos/kitty.js';
 import { statsRepo } from '../repos/stats.js';
 import { auditRepo } from '../repos/audit.js';
+import { authUsersRepo } from '../repos/auth_users.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -186,6 +188,41 @@ r.get('/dashboard', wrap(() => {
     kitty: kittyRepo.balance(),
     contracts: perContract,
   };
+}));
+
+// ---- admin: user management ----
+r.post('/admin/users', wrap((req) => {
+  // Admin only: create a new player account
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  const { email, password, player_id } = req.body;
+  if (!email || !password || !player_id) {
+    throw new Error('email, password, and player_id are required');
+  }
+  return authUsersRepo.createPlayer(db, { email, password, playerId: player_id });
+}));
+
+r.get('/admin/users', wrap((req) => {
+  // Admin only: list all player accounts
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  return authUsersRepo.listUsers(db, { role: 'player' });
+}));
+
+r.put('/admin/users/:id', wrap((req) => {
+  // Admin only: update player account (email, password, reset password)
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  const { email, password } = req.body;
+  if (password === 'RESET') {
+    const tempPassword = authUsersRepo.resetPassword(db, req.params.id);
+    return { id: req.params.id, tempPassword, note: 'Password has been reset to temp value' };
+  }
+  return authUsersRepo.updateUser(db, req.params.id, { email, password });
+}));
+
+r.delete('/admin/users/:id', wrap((req) => {
+  // Admin only: deactivate player account
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  authUsersRepo.deactivateUser(db, req.params.id);
+  return { ok: true };
 }));
 
 export default r;
