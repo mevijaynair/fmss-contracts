@@ -51,6 +51,11 @@ async function start() {
     return;
   }
 
+  // Authenticated: make sure the login overlay is hidden and the shell is shown
+  // (covers a reload with a valid token, where no interactive login ran).
+  $('loginView').style.display = 'none';
+  document.querySelector('.shell').style.display = '';
+
   // Load app with role-based nav
   const user = getUser();
   buildNav(user?.role);
