@@ -31,9 +31,13 @@ function card(c) {
   </div>`;
 }
 
+function isPlayer() { return store.user?.role === 'player'; }
+
 export function initSettings() {}
 
 export async function loadSettings() {
+  if (isPlayer()) return loadAccount();
+
   store.contracts = await api.contracts();
   $('settingsCards').innerHTML = store.contracts.map(card).join('');
   $('settingsCards').querySelectorAll('[data-save]').forEach(btn =>
@@ -50,4 +54,20 @@ export async function loadSettings() {
         toast('Contract saved ✓');
       } catch (e) { toast(e.message, true); }
     }));
+}
+
+// Player "Account" view: read-only profile (rate cards are not theirs to edit).
+function loadAccount() {
+  const view = document.querySelector('[data-view="settings"]');
+  const title = view.querySelector('.card-title');
+  const sub = view.querySelector('.card-sub');
+  if (title) title.textContent = 'My Account';
+  if (sub) sub.textContent = 'Your profile';
+
+  $('settingsCards').innerHTML = `
+    <div class="form-group"><label>Signed in as</label>
+      <input value="${esc(store.user?.email || '')}" disabled></div>
+    <div class="form-group mt"><label>Role</label>
+      <input value="Player (view + submit contributions)" disabled></div>
+    <p class="hint mt">To change your password or update your details, contact the club cashier.</p>`;
 }

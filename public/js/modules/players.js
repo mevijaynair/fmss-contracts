@@ -8,7 +8,11 @@ let currentDetailPlayerId = null;
 
 const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
+function isPlayer() { return store.user?.role === 'player'; }
+
 async function render() {
+  if (isPlayer()) return renderPlayerLedger();
+
   const ledgers = await api.ledgers(contractId);
   const roleOf = Object.fromEntries(store.players.map(p => [p.id, p.special_role]));
   $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => {
@@ -40,6 +44,41 @@ async function render() {
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
 }
+
+// Player "My Ledger": their own balances across all contracts (read-only), and
+// clicking a contract row opens their timeline for that contract.
+async function renderPlayerLedger() {
+  const ledgers = await api.myLedgers();
+  $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => `
+    <tr>
+      <td><strong onclick="window.showPlayerDetailFor('${l.player_id}','${l.contract_id}')" style="cursor:pointer; color:var(--sport);">${esc(contractLabel(l.contract_id))}</strong></td>
+      <td>${esc(l.status || '—')}</td>
+      <td class="num">${money(l.opening_balance)}</td>
+      <td class="num">${money(l.contributed)}</td>
+      <td class="num">${money(l.charged)}</td>
+      <td class="num">${balCell(l.present_balance)}</td>
+      <td>${l.games}</td>
+      <td class="row-actions"></td>
+    </tr>`).join('') || '<tr><td colspan="8" class="hint">No contracts yet.</td></tr>';
+}
+
+function contractLabel(id) {
+  return store.contracts.find(c => c.id === id)?.name || id;
+}
+
+// Player-scoped detail: load own stats for a specific contract.
+window.showPlayerDetailFor = async (playerId, cId) => {
+  try {
+    const stats = await api.get(`/players/${playerId}/stats?contract_id=${cId}`);
+    const player = { id: playerId, name: store.user?.email || 'My account' };
+    const prevContract = contractId;
+    contractId = cId;  // so renderPlayerDetail's contract lookup resolves
+    renderPlayerDetail(player, stats);
+    contractId = prevContract;
+  } catch (e) {
+    toast(`Failed to load stats: ${e.message}`, true);
+  }
+};
 
 window.showPlayerDetail = async (playerId) => {
   try {
@@ -153,11 +192,17 @@ function addPlayerModal() {
 }
 
 export function initPlayers() {
-  $('plAdd').addEventListener('click', addPlayerModal);
+  if (!isPlayer()) $('plAdd').addEventListener('click', addPlayerModal);
   $('playerDetailClose').addEventListener('click', closePlayerDetail);
 }
 
 export function loadPlayers() {
+  if (isPlayer()) {
+    // Hide admin-only chrome; "My Ledger" lists all contracts as rows.
+    $('plAdd').style.display = 'none';
+    $('plContractSeg').innerHTML = '';
+    return render();
+  }
   contractSeg($('plContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
   return render();
 }

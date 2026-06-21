@@ -7,6 +7,7 @@ import { playersRepo } from '../repos/players.js';
 import { ledgersRepo } from '../repos/ledgers.js';
 import { gameweeksRepo } from '../repos/gameweeks.js';
 import { contributionsRepo } from '../repos/contributions.js';
+import { pendingContributionsRepo } from '../repos/contributions_pending.js';
 import { kittyRepo } from '../repos/kitty.js';
 import { statsRepo } from '../repos/stats.js';
 import { auditRepo } from '../repos/audit.js';
@@ -19,6 +20,12 @@ const wrap = (fn) => (req, res) => {
   catch (e) { console.error(e); res.status(400).json({ error: e.message }); }
 };
 
+// Throw if the caller is not an admin. Used to gate all mutating endpoints so a
+// player token can never create/edit/delete club-wide data.
+function requireAdmin(req) {
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+}
+
 // ---- authentication ----
 r.get('/me', wrap((req) => ({
   id: req.user.id,
@@ -29,7 +36,7 @@ r.get('/me', wrap((req) => ({
 
 // ---- contracts ----
 r.get('/contracts', wrap(() => contractsRepo.all()));
-r.put('/contracts/:id', wrap((req) => contractsRepo.update(req.params.id, req.body)));
+r.put('/contracts/:id', wrap((req) => { requireAdmin(req); return contractsRepo.update(req.params.id, req.body); }));
 
 // ---- players + ledgers ----
 r.get('/players', wrap((req) => {
@@ -63,9 +70,16 @@ r.get('/my/ledgers', wrap((req) => {
   return ledgersRepo.forPlayer(req.user.playerId);
 }));
 
-r.get('/ledgers', wrap((req) =>
-  req.query.contract ? ledgersRepo.forContract(req.query.contract) : ledgersRepo.all()));
+r.get('/ledgers', wrap((req) => {
+  // Admin: all/by-contract; Player: scoped to self
+  if (req.user.role === 'player') {
+    return ledgersRepo.forPlayer(req.user.playerId)
+      .filter(l => !req.query.contract || l.contract_id === req.query.contract);
+  }
+  return req.query.contract ? ledgersRepo.forContract(req.query.contract) : ledgersRepo.all();
+}));
 r.put('/ledgers/:playerId/:contractId/status', wrap((req) => {
+  requireAdmin(req);
   ledgersRepo.setStatus(req.params.playerId, req.params.contractId, req.body.status || '');
   return ledgersRepo.get(req.params.playerId, req.params.contractId);
 }));
@@ -78,11 +92,12 @@ r.get('/gameweeks/:id', wrap((req) => {
   return g;
 }));
 r.post('/gameweeks', wrap((req) => {
+  requireAdmin(req);
   const { gameweek, charges } = req.body;
   if (!gameweek?.contract_id) throw new Error('contract_id required');
   return gameweeksRepo.create(gameweek, charges || []);
 }));
-r.delete('/gameweeks/:id', wrap((req) => { gameweeksRepo.remove(req.params.id); return { ok: true }; }));
+r.delete('/gameweeks/:id', wrap((req) => { requireAdmin(req); gameweeksRepo.remove(req.params.id); return { ok: true }; }));
 
 // ---- gameweek edit with impact preview & audit ----
 r.get('/gameweeks/:id/impact', wrap((req) => {
@@ -91,6 +106,7 @@ r.get('/gameweeks/:id/impact', wrap((req) => {
   return gameweeksRepo.previewChargeEdits(req.params.id, JSON.parse(chargeEdits));
 }));
 r.put('/gameweeks/:id', wrap((req) => {
+  requireAdmin(req);
   const { metadata, chargeEdits, reason, autoRecalculate } = req.body;
   const g = gameweeksRepo.get(req.params.id);
   if (!g) throw new Error('Gameweek not found');
@@ -109,6 +125,7 @@ r.put('/gameweeks/:id', wrap((req) => {
 
 // ---- WhatsApp parse → charge preview ----
 r.post('/parse', wrap((req) => {
+  requireAdmin(req);
   const { contract_id, text } = req.body;
   const contract = contractsRepo.get(contract_id);
   if (!contract) throw new Error('Unknown contract');
@@ -119,15 +136,58 @@ r.post('/parse', wrap((req) => {
 }));
 
 // ---- contributions ----
-r.get('/contributions', wrap((req) =>
-  contributionsRepo.all({ playerId: req.query.player, contractId: req.query.contract })));
-r.post('/contributions', wrap((req) => contributionsRepo.create(req.body)));
-r.delete('/contributions/:id', wrap((req) => { contributionsRepo.remove(req.params.id); return { ok: true }; }));
+r.get('/contributions', wrap((req) => {
+  // Player: scoped to self (ignores any player query param); Admin: full filter
+  if (req.user.role === 'player') {
+    return contributionsRepo.all({ playerId: req.user.playerId, contractId: req.query.contract });
+  }
+  return contributionsRepo.all({ playerId: req.query.player, contractId: req.query.contract });
+}));
+r.post('/contributions', wrap((req) => { requireAdmin(req); return contributionsRepo.create(req.body); }));
+r.delete('/contributions/:id', wrap((req) => { requireAdmin(req); contributionsRepo.remove(req.params.id); return { ok: true }; }));
+
+// ---- player self-service: submit contribution for approval ----
+r.get('/my/contributions', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Player only');
+  // Approved (live) contributions + the player's pending/rejected submissions.
+  const approved = contributionsRepo.all({ playerId: req.user.playerId });
+  const pending = pendingContributionsRepo.forPlayer(req.user.playerId);
+  return { approved, pending };
+}));
+r.post('/my/contributions', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Player only');
+  const { contract_id, amount, date, payment_method } = req.body;
+  return pendingContributionsRepo.create({
+    player_id: req.user.playerId, contract_id, amount, date, payment_method,
+  });
+}));
+r.get('/my/stats', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Player only');
+  const { contract_id } = req.query;
+  if (!contract_id) throw new Error('contract_id required');
+  const timeline = statsRepo.playerTimeline(req.user.playerId, contract_id);
+  const stats = statsRepo.playerStats(req.user.playerId, contract_id);
+  return { timeline, ...stats };
+}));
+
+// ---- admin: contribution approval queue ----
+r.get('/admin/contributions/pending', wrap((req) => {
+  requireAdmin(req);
+  return pendingContributionsRepo.allPending();
+}));
+r.post('/admin/contributions/:id/approve', wrap((req) => {
+  requireAdmin(req);
+  return pendingContributionsRepo.approve(req.params.id, req.user.email || 'admin');
+}));
+r.post('/admin/contributions/:id/reject', wrap((req) => {
+  requireAdmin(req);
+  return pendingContributionsRepo.reject(req.params.id, req.user.email || 'admin');
+}));
 
 // ---- kitty ----
-r.get('/kitty', wrap(() => ({ entries: kittyRepo.all(), ...kittyRepo.balance() })));
-r.post('/kitty', wrap((req) => kittyRepo.create(req.body)));
-r.delete('/kitty/:id', wrap((req) => { kittyRepo.remove(req.params.id); return { ok: true }; }));
+r.get('/kitty', wrap((req) => { requireAdmin(req); return { entries: kittyRepo.all(), ...kittyRepo.balance() }; }));
+r.post('/kitty', wrap((req) => { requireAdmin(req); return kittyRepo.create(req.body); }));
+r.delete('/kitty/:id', wrap((req) => { requireAdmin(req); kittyRepo.remove(req.params.id); return { ok: true }; }));
 
 // ---- results: match history with full context ----
 r.get('/results', wrap((req) => {
@@ -148,6 +208,10 @@ r.get('/results', wrap((req) => {
 
 // ---- player stats: timeline, cost breakdown, streaks ----
 r.get('/players/:id/stats', wrap((req) => {
+  // Player may only read their own stats; admin may read anyone's.
+  if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
+    throw new Error('Forbidden');
+  }
   const { contract_id } = req.query;
   if (!contract_id) throw new Error('contract_id required');
   const timeline = statsRepo.playerTimeline(req.params.id, contract_id);
@@ -165,7 +229,27 @@ r.get('/audit/charges', wrap((req) => {
 }));
 
 // ---- dashboard summary ----
-r.get('/dashboard', wrap(() => {
+r.get('/dashboard', wrap((req) => {
+  // Player dashboard: only their own balances across contracts.
+  if (req.user.role === 'player') {
+    const myLedgers = ledgersRepo.forPlayer(req.user.playerId);
+    return {
+      role: 'player',
+      player_id: req.user.playerId,
+      contracts: myLedgers.map(l => ({
+        id: l.contract_id,
+        name: store_contractName(l.contract_id),
+        opening_balance: l.opening_balance,
+        contributed: l.contributed,
+        charged: l.charged,
+        present_balance: l.present_balance,
+        games: l.games,
+        status: l.status,
+      })),
+    };
+  }
+
+  // Admin dashboard: club-wide aggregates.
   const contracts = contractsRepo.all();
   const perContract = contracts.map((c) => {
     const ledgers = ledgersRepo.forContract(c.id);
@@ -184,11 +268,18 @@ r.get('/dashboard', wrap(() => {
     };
   });
   return {
+    role: 'admin',
     players: playersRepo.all().length,
     kitty: kittyRepo.balance(),
+    pending_contributions: pendingContributionsRepo.pendingCount(),
     contracts: perContract,
   };
 }));
+
+// Helper: resolve a contract's display name (used by the player dashboard).
+function store_contractName(id) {
+  return contractsRepo.get(id)?.name || id;
+}
 
 // ---- admin: user management ----
 r.post('/admin/users', wrap((req) => {

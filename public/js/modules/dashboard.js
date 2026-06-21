@@ -1,9 +1,12 @@
 // dashboard.js — KPI strip, per-contract cards, refill watchlist.
+// Role-aware: admin sees club-wide aggregates; player sees only their balances.
 import { api } from '../api.js';
 import { $, esc, money, balCell } from '../util.js';
 
 export async function loadDashboard() {
   const d = await api.dashboard();
+
+  if (d.role === 'player') return renderPlayerDashboard(d);
 
   const totalNet = d.contracts.reduce((s, c) => s + c.net, 0);
   const totalRefills = d.contracts.reduce((s, c) => s + c.refill_count, 0);
@@ -35,4 +38,36 @@ export async function loadDashboard() {
   $('watchlist').innerHTML = watch.length
     ? watch.map(w => `<span class="watch-chip">${esc(w.name)} · ${esc(w.contract)} ${money(w.balance)}</span>`).join('')
     : '<p class="hint">Everyone is in credit. 🎉</p>';
+}
+
+// Player dashboard: a personal balance snapshot per contract, no club aggregates.
+function renderPlayerDashboard(d) {
+  const totalBalance = d.contracts.reduce((s, c) => s + (c.present_balance || 0), 0);
+  const inRed = d.contracts.filter(c => c.present_balance < 0).length;
+
+  const kpis = [
+    { v: money(totalBalance), l: 'My balance (AED)', cls: totalBalance >= 0 ? 'good' : 'bad' },
+    { v: d.contracts.length, l: 'My contracts' },
+    { v: inRed, l: 'Need refill', cls: inRed ? 'warn' : 'good' },
+  ];
+  $('kpiStrip').innerHTML = kpis.map(k =>
+    `<div class="kpi ${k.cls || ''}"><div class="v">${k.v}</div><div class="l">${esc(k.l)}</div></div>`).join('');
+
+  $('contractCards').innerHTML = d.contracts.map(c => `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">${esc(c.name)}</h3>
+        <span class="card-sub">${c.present_balance >= 0 ? 'In credit' : 'Refill needed'}</span></div>
+      <div>
+        <div class="kv"><span class="k">Opening balance</span><span class="v">${money(c.opening_balance)}</span></div>
+        <div class="kv"><span class="k">Contributed</span><span class="v">${money(c.contributed)}</span></div>
+        <div class="kv"><span class="k">Charged (games)</span><span class="v">${money(c.charged)}</span></div>
+        <div class="kv"><span class="k">Games played</span><span class="v">${c.games}</span></div>
+        <div class="kv"><span class="k">Present balance</span><span class="v">${balCell(c.present_balance)}</span></div>
+      </div>
+    </div>`).join('') || '<p class="hint">No contracts yet.</p>';
+
+  // Watchlist card not relevant to a single player — show a friendly note.
+  $('watchlist').innerHTML = totalBalance >= 0
+    ? '<p class="hint">You\'re in credit. ⚽</p>'
+    : '<p class="hint">Your balance is in the red — please top up via the Contributions tab.</p>';
 }

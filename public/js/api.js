@@ -74,4 +74,22 @@ export const api = {
     const p = new URLSearchParams(q).toString();
     return req('GET', `/audit/charges${p ? `?${p}` : ''}`);
   },
+
+  // ---- two-tier (Phase 2) ----
+  me: () => req('GET', '/me'),
+  myLedgers: () => req('GET', '/my/ledgers'),
+  myContributions: () => req('GET', '/my/contributions'),
+  submitContribution: (c) => req('POST', '/my/contributions', c),
+  myStats: (contractId) => req('GET', `/my/stats?contract_id=${contractId}`),
+
+  // ---- admin: contribution approval ----
+  pendingContributions: () => req('GET', '/admin/contributions/pending'),
+  approveContribution: (id) => req('POST', `/admin/contributions/${id}/approve`, {}),
+  rejectContribution: (id) => req('POST', `/admin/contributions/${id}/reject`, {}),
+
+  // ---- admin: user management ----
+  users: () => req('GET', '/admin/users'),
+  createUser: (u) => req('POST', '/admin/users', u),
+  updateUser: (id, u) => req('PUT', `/admin/users/${id}`, u),
+  deleteUser: (id) => req('DELETE', `/admin/users/${id}`),
 };
