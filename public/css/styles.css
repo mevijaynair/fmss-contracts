@@ -653,3 +653,9 @@ body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-dee
 .login-toggle { display: flex; align-items: center; gap: 0.55rem; cursor: pointer;
   font-size: 0.88rem; color: var(--text-muted); }
 .login-toggle input { width: 16px; height: 16px; accent-color: var(--sport); cursor: pointer; flex: none; }
+
+/* PIN chip in the admin Player Logins table. */
+.pin-chip { display: inline-block; font-family: 'Oswald', sans-serif; font-weight: 600;
+  letter-spacing: 0.14em; font-size: 1rem; color: var(--sport);
+  background: rgba(255, 215, 0, 0.1); border: 1px solid rgba(255, 215, 0, 0.3);
+  padding: 0.1rem 0.6rem; border-radius: 7px; }

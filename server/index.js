@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { initSchema, seed, applyRoles, db } from './db.js';
 import { auth, authMiddleware } from './auth.js';
+import { authUsersRepo } from './repos/auth_users.js';
 import api from './routes/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -21,20 +22,28 @@ app.use(express.json({ limit: '1mb' }));
 
 // Public endpoints (no auth required)
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Public: player name list for the login name-picker (no balances, no PINs).
+app.get('/api/login/players', (_req, res) => {
+  try {
+    res.json(authUsersRepo.publicPlayerList(db));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/login', (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    if (!password) {
-      return res.status(400).json({ error: 'password is required' });
-    }
+    const { player_id, pin, password } = req.body;
 
     let result;
-    if (email) {
-      // Player login
-      result = auth.loginPlayer(db, email, password);
+    if (player_id) {
+      // Player login: name (player_id) + PIN
+      if (!pin) return res.status(400).json({ error: 'PIN is required' });
+      result = auth.loginPlayer(db, player_id, pin);
     } else {
-      // Admin login
+      // Admin login: password only
+      if (!password) return res.status(400).json({ error: 'password is required' });
       result = auth.loginAdmin(password);
     }
 

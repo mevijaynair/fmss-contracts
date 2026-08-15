@@ -87,9 +87,10 @@ export const api = {
   approveContribution: (id) => req('POST', `/admin/contributions/${id}/approve`, {}),
   rejectContribution: (id) => req('POST', `/admin/contributions/${id}/reject`, {}),
 
-  // ---- admin: user management ----
-  users: () => req('GET', '/admin/users'),
-  createUser: (u) => req('POST', '/admin/users', u),
-  updateUser: (id, u) => req('PUT', `/admin/users/${id}`, u),
-  deleteUser: (id) => req('DELETE', `/admin/users/${id}`),
+  // ---- admin: player login (name + PIN) management ----
+  logins: () => req('GET', '/admin/logins'),
+  generateLogins: () => req('POST', '/admin/logins/generate', {}),
+  createLogin: (playerId) => req('POST', `/admin/logins/${playerId}`, {}),
+  resetPin: (playerId) => req('POST', `/admin/logins/${playerId}/reset`, {}),
+  setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
 };

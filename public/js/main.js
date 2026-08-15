@@ -30,6 +30,7 @@ import { initContributions, loadContributions } from './modules/contributions.js
 import { initGameweeks, loadGameweeks } from './modules/gameweeks.js';
 import { initKitty, loadKitty } from './modules/kitty.js';
 import { initSettings, loadSettings } from './modules/settings.js';
+import { initLogins, loadLogins } from './modules/logins.js';
 
 const LOADERS = {
   dashboard: loadDashboard,
@@ -39,6 +40,7 @@ const LOADERS = {
   contributions: loadContributions,
   gameweeks: loadGameweeks,
   kitty: loadKitty,
+  logins: loadLogins,
   settings: loadSettings,
 };
 
@@ -66,6 +68,7 @@ async function start() {
   store.user = user;
 
   initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
+  if (user?.role === 'admin') initLogins();
 
   window.addEventListener('fmss:view', (e) => {
     const fn = LOADERS[e.detail];
@@ -78,23 +81,44 @@ async function start() {
   showView('dashboard');
 }
 
+let loginWired = false;
+
 function showLoginView() {
   // Hide the main shell; show the full-screen login overlay (flex-centered).
   document.querySelector('.shell').style.display = 'none';
   $('loginView').style.display = 'flex';
 
-  const emailGroup = $('emailGroup');
-  const passwordLabel = $('passwordLabel');
-  const toggle = $('playerLoginToggle');
+  if (loginWired) return;   // wire the form once
+  loginWired = true;
 
-  // Toggle between player and admin login modes
+  const playerGroup = $('playerGroup');
+  const passwordLabel = $('passwordLabel');
+  const passwordInput = $('loginPassword');
+  const toggle = $('playerLoginToggle');
+  const playerSelect = $('loginPlayer');
+
+  let playersLoaded = false;
+  async function loadPlayerNames() {
+    if (playersLoaded) return;
+    try {
+      const players = await api.get('/login/players');
+      playerSelect.innerHTML = '<option value="">Select your name…</option>'
+        + players.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      playersLoaded = true;
+    } catch { /* leave placeholder */ }
+  }
+
+  // Toggle between player (name + PIN) and admin (password) modes
   toggle.addEventListener('change', () => {
     if (toggle.checked) {
-      emailGroup.style.display = 'block';
-      passwordLabel.textContent = 'Password';
+      playerGroup.style.display = 'block';
+      passwordLabel.textContent = 'PIN';
+      passwordInput.placeholder = 'Enter your PIN';
+      loadPlayerNames();
     } else {
-      emailGroup.style.display = 'none';
+      playerGroup.style.display = 'none';
       passwordLabel.textContent = 'Admin Password';
+      passwordInput.placeholder = 'Enter password';
     }
   });
 
@@ -102,22 +126,23 @@ function showLoginView() {
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const isPlayerLogin = toggle.checked;
-    const email = isPlayerLogin ? $('loginEmail').value : null;
-    const password = $('loginPassword').value;
+    const secret = passwordInput.value;
 
-    if (isPlayerLogin && !email) {
-      showLoginError('Please enter your email');
-      return;
+    let body;
+    if (isPlayerLogin) {
+      const playerId = playerSelect.value;
+      if (!playerId) { showLoginError('Please select your name'); return; }
+      if (!secret) { showLoginError('Please enter your PIN'); return; }
+      body = { player_id: playerId, pin: secret };
+    } else {
+      body = { password: secret };
     }
 
     try {
-      const result = await api.post('/login', { email, password });
+      const result = await api.post('/login', body);
       setToken(result.token);
-
-      // Fetch user info to store role + playerId
       const user = await api.get('/me');
       setUser(user);
-
       // start() (authenticated path) hides the overlay and restores the shell.
       start();
     } catch (err) {

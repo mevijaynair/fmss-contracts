@@ -31,15 +31,16 @@
       <form id="loginForm">
         <label class="login-toggle">
           <input type="checkbox" id="playerLoginToggle">
-          <span>I'm a player (log in with email)</span>
+          <span>I'm a player</span>
         </label>
-        <div class="form-group" id="emailGroup" style="display:none;">
-          <label>Email</label>
-          <input type="email" id="loginEmail" placeholder="your@email.com">
+        <div class="form-group" id="playerGroup" style="display:none;">
+          <label>Your name</label>
+          <select id="loginPlayer"><option value="">Select your name…</option></select>
         </div>
         <div class="form-group">
-          <label id="passwordLabel">Password</label>
-          <input type="password" id="loginPassword" placeholder="Enter password" required>
+          <label id="passwordLabel">Admin Password</label>
+          <input type="password" id="loginPassword" placeholder="Enter password" required
+            autocomplete="off" inputmode="text">
         </div>
         <button type="submit" class="btn">Login</button>
         <div id="loginError" class="login-error" style="display:none;"></div>
@@ -254,6 +255,25 @@
             <div class="card-header"><h3 class="card-title">Contract Settings &amp; Rate Cards</h3>
               <span class="card-sub">Edit venue, cost per game and per-player rates</span></div>
             <div id="settingsCards"></div>
+          </div>
+        </section>
+
+        <!-- PLAYER LOGINS (admin) -->
+        <section class="view" data-view="logins" hidden>
+          <div class="sams-card">
+            <div class="card-header">
+              <h3 class="card-title">Player Logins</h3>
+              <button class="btn btn-sm" id="loginsGenerate">Generate logins for all players</button>
+            </div>
+            <p class="hint">Every player logs in by picking their name and entering their PIN.
+              Share each player's PIN with them (e.g. over WhatsApp). Players can only view their
+              own balance and submit contributions — they can't edit anything.</p>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="loginsTable">
+                <thead><tr><th>Player</th><th>PIN</th><th>Status</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
           </div>
         </section>
 

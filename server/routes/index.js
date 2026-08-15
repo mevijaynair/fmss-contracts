@@ -281,38 +281,36 @@ function store_contractName(id) {
   return contractsRepo.get(id)?.name || id;
 }
 
-// ---- admin: user management ----
-r.post('/admin/users', wrap((req) => {
-  // Admin only: create a new player account
-  if (req.user.role !== 'admin') throw new Error('Admin only');
-  const { email, password, player_id } = req.body;
-  if (!email || !password || !player_id) {
-    throw new Error('email, password, and player_id are required');
-  }
-  return authUsersRepo.createPlayer(db, { email, password, playerId: player_id });
+// ---- admin: player login management (name + PIN) ----
+
+// List every player + login status + PIN (for the shareable credentials panel).
+r.get('/admin/logins', wrap((req) => {
+  requireAdmin(req);
+  return authUsersRepo.listPlayerLogins(db, playersRepo);
 }));
 
-r.get('/admin/users', wrap((req) => {
-  // Admin only: list all player accounts
-  if (req.user.role !== 'admin') throw new Error('Admin only');
-  return authUsersRepo.listUsers(db, { role: 'player' });
+// One-click: generate logins (random PINs) for every player without one.
+r.post('/admin/logins/generate', wrap((req) => {
+  requireAdmin(req);
+  return authUsersRepo.generateAllPlayerLogins(db, playersRepo);
 }));
 
-r.put('/admin/users/:id', wrap((req) => {
-  // Admin only: update player account (email, password, reset password)
-  if (req.user.role !== 'admin') throw new Error('Admin only');
-  const { email, password } = req.body;
-  if (password === 'RESET') {
-    const tempPassword = authUsersRepo.resetPassword(db, req.params.id);
-    return { id: req.params.id, tempPassword, note: 'Password has been reset to temp value' };
-  }
-  return authUsersRepo.updateUser(db, req.params.id, { email, password });
+// Create a login for a single player.
+r.post('/admin/logins/:playerId', wrap((req) => {
+  requireAdmin(req);
+  return authUsersRepo.createPlayerLogin(db, playersRepo, req.params.playerId);
 }));
 
-r.delete('/admin/users/:id', wrap((req) => {
-  // Admin only: deactivate player account
-  if (req.user.role !== 'admin') throw new Error('Admin only');
-  authUsersRepo.deactivateUser(db, req.params.id);
+// Reset a player's PIN → returns the new PIN.
+r.post('/admin/logins/:playerId/reset', wrap((req) => {
+  requireAdmin(req);
+  return authUsersRepo.resetPin(db, playersRepo, req.params.playerId);
+}));
+
+// Activate / deactivate a player's login.
+r.put('/admin/logins/:playerId/active', wrap((req) => {
+  requireAdmin(req);
+  authUsersRepo.setActive(db, req.params.playerId, !!req.body.active);
   return { ok: true };
 }));
 

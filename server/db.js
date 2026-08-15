@@ -125,7 +125,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON charge_audit(created_at);
 CREATE TABLE IF NOT EXISTS auth_users (
   id            TEXT PRIMARY KEY,
   email         TEXT UNIQUE,
-  password_hash TEXT NOT NULL,
+  password_hash TEXT NOT NULL DEFAULT '',
+  pin           TEXT,                 -- players log in with a short PIN (low-stakes: view own balance)
   role          TEXT NOT NULL DEFAULT 'player' CHECK(role IN ('player', 'admin')),
   player_id     TEXT REFERENCES players(id),
   is_active     INTEGER NOT NULL DEFAULT 1,
@@ -133,6 +134,7 @@ CREATE TABLE IF NOT EXISTS auth_users (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_email ON auth_users(email);
 CREATE INDEX IF NOT EXISTS idx_auth_role ON auth_users(role);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_player ON auth_users(player_id);
 
 CREATE TABLE IF NOT EXISTS admin_config (
   id                   TEXT PRIMARY KEY,
@@ -218,6 +220,16 @@ export function initSchema() {
       } catch {
         // Already created in SCHEMA
       }
+    },
+    // auth_users.pin: add for the name+PIN player login model
+    () => {
+      try {
+        db.prepare('SELECT pin FROM auth_users LIMIT 1').get();
+      } catch {
+        db.exec('ALTER TABLE auth_users ADD COLUMN pin TEXT');
+      }
+      // One login per player (idempotent).
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_player ON auth_users(player_id)');
     },
     // admin_config: exists (created in SCHEMA above)
     () => {

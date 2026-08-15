@@ -1,42 +1,27 @@
-// auth.js — role-based authentication (admin password + player email+password) via JWT.
+// auth.js — role-based authentication via JWT.
 // Admin: password-only login (stored in FMSS_AUTH_PASSWORD env var).
-// Players: email+password login (stored in auth_users table with hashed passwords).
+// Players: name (player_id) + PIN login (stored in auth_users.pin).
 // Both return JWT with role + player_id; subsequent requests include token in Authorization header.
 
 import jwt from 'jsonwebtoken';
-import { createHash } from 'node:crypto';
 
 const SECRET = process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
 const TOKEN_EXPIRY = '7d';
 
-// Simple hash for password storage (not bcrypt, to avoid npm dependencies).
-// In production, use bcrypt for better security.
-function hashPassword(password) {
-  return createHash('sha256').update(password).digest('hex');
-}
-
-function verifyPasswordHash(password, hash) {
-  return hashPassword(password) === hash;
-}
-
 export const auth = {
-  // Player login: email + password
-  loginPlayer(db, email, password) {
+  // Player login: player_id + PIN
+  loginPlayer(db, playerId, pin) {
     const user = db.prepare(
-      'SELECT id, email, password_hash, player_id FROM auth_users WHERE email = ? AND role = ? AND is_active = 1'
-    ).get(email, 'player');
+      `SELECT id, player_id, pin FROM auth_users
+       WHERE player_id = ? AND role = 'player' AND is_active = 1`
+    ).get(playerId);
 
-    if (!user) {
-      throw new Error('Invalid email or password');
-    }
-
-    if (!verifyPasswordHash(password, user.password_hash)) {
-      throw new Error('Invalid email or password');
+    if (!user || String(user.pin) !== String(pin)) {
+      throw new Error('Wrong name or PIN');
     }
 
     const payload = {
       userId: user.id,
-      email: user.email,
       role: 'player',
       playerId: user.player_id,
     };
