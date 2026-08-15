@@ -73,6 +73,13 @@ async function doConfirm() {
     teams_raw: $('gdText').value.trim(),
     score: $('gdScore').value.trim(),
     comments: $('gdComments').value.trim(),
+    // New game accounting fields
+    scoreline: `${Number($('gdTeamAGoals').value) || 0}-${Number($('gdTeamBGoals').value) || 0}`,
+    teams_json: JSON.stringify(rows.map(r => ({ player_id: r.player_id, team: r.team }))),
+    whatsapp_message: $('gdGameMessage').value.trim(),
+    game_cost: Number($('gdGameCost').value) || 0,
+    game_cost_paid_by: $('gdCostPaidBy').value || 'self',
+    kitty_earned: Number($('gdKittyEarned').value) || 0,
   };
   const charges = rows.map(r => ({
     player_id: r.player_id, team: r.team, is_captain: r.is_captain,
@@ -91,7 +98,28 @@ async function doConfirm() {
     store.players = await api.players();
   }
   try {
-    await api.createGameweek(gameweek, charges);
+    const gwResult = await api.createGameweek(gameweek, charges);
+
+    // If team scores provided, record the game result
+    const teamAName = $('gdTeamAName').value.trim();
+    const teamBName = $('gdTeamBName').value.trim();
+    const goalsA = Number($('gdTeamAGoals').value) || 0;
+    const goalsB = Number($('gdTeamBGoals').value) || 0;
+    if (teamAName && teamBName) {
+      await api.post(`/gameweeks/${gwResult.id}/accounting`, {
+        scoreline: `${goalsA}-${goalsB}`,
+        team_a_name: teamAName,
+        team_b_name: teamBName,
+        goals_team_a: goalsA,
+        goals_team_b: goalsB,
+        teams_json: gameweek.teams_json,
+        whatsapp_message: gameweek.whatsapp_message,
+        game_cost: gameweek.game_cost,
+        game_cost_paid_by: gameweek.game_cost_paid_by,
+        kitty_earned: gameweek.kitty_earned,
+      });
+    }
+
     toast('Game recorded — balances deducted ✓');
     clearForm();
     await loadDashboard();
@@ -101,13 +129,29 @@ async function doConfirm() {
 function clearForm() {
   rows = [];
   $('gdText').value = '';
-  ['gdScore', 'gdComments', 'gdContractNo'].forEach(id => $(id).value = '');
+  ['gdScore', 'gdComments', 'gdContractNo', 'gdTeamAName', 'gdTeamBName', 'gdTeamAGoals', 'gdTeamBGoals', 'gdGameCost', 'gdGameMessage'].forEach(id => $(id).value = '');
+  $('gdKittyEarned').value = '';
+  $('gdCostPaidBy').value = 'self';
+  $('gdGameCost').value = '15'; // Reset to default water cost
   $('gdPreviewCard').hidden = true;
 }
 
 export function initGameday() {
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => { contractId = id; recalcTotal(); });
   $('gdDate').value = today();
+  $('gdGameCost').value = '15'; // Default water cost
+
+  // Populate "Who Paid Water Cost" dropdown with players
+  const costPaidBySelect = $('gdCostPaidBy');
+  if (costPaidBySelect && store.players?.length) {
+    const options = '<option value="self">Me (Vijay)</option>' +
+      store.players
+        .filter(p => p.special_role !== 'cashier') // Exclude cashier
+        .map(p => `<option value="${p.id}">${esc(p.name)}</option>`)
+        .join('');
+    costPaidBySelect.innerHTML = options;
+  }
+
   $('gdParse').addEventListener('click', doParse);
   $('gdConfirm').addEventListener('click', doConfirm);
   $('gdClear').addEventListener('click', clearForm);

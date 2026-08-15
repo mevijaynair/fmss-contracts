@@ -122,6 +122,36 @@
               <div class="form-group"><label>Score / Result</label><input type="text" id="gdScore" placeholder="e.g. Reds win 7-5"></div>
               <div class="form-group"><label>Comments</label><input type="text" id="gdComments" placeholder="optional"></div>
             </div>
+
+            <!-- Game Accounting Section -->
+            <div style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px; border-left: 4px solid var(--accent);">
+              <div style="color: var(--accent); font-weight: 600; margin-bottom: 0.5rem;">💰 Game Accounting</div>
+
+              <!-- Team Scores -->
+              <div class="form-row">
+                <div class="form-group"><label>Team A Name</label><input type="text" id="gdTeamAName" placeholder="e.g. Red, Team 1"></div>
+                <div class="form-group"><label>Team A Goals</label><input type="number" id="gdTeamAGoals" min="0" placeholder="0"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>Team B Name</label><input type="text" id="gdTeamBName" placeholder="e.g. Blue, Team 2"></div>
+                <div class="form-group"><label>Team B Goals</label><input type="number" id="gdTeamBGoals" min="0" placeholder="0"></div>
+              </div>
+
+              <!-- Costs & Kitty -->
+              <div class="form-row">
+                <div class="form-group"><label>Water Cost (AED)</label><input type="number" id="gdGameCost" step="0.5" min="0" value="15" placeholder="15"></div>
+                <div class="form-group"><label>Who Paid Water Cost</label>
+                  <select id="gdCostPaidBy">
+                    <option value="self">Me (Vijay)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group"><label>Kitty Earned (AED) — provisional, can be +/-</label><input type="number" id="gdKittyEarned" step="0.5" placeholder="0 (collected from players)"></div>
+
+              <!-- Game Message -->
+              <div class="form-group"><label>Game Message (optional)</label><textarea id="gdGameMessage" placeholder="Store elaborate WhatsApp details..." style="font-size: 0.9rem; height: 3rem;"></textarea></div>
+            </div>
+
             <div style="overflow-x:auto; margin-top:1rem;">
               <table class="sams-table" id="gdTable">
                 <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
