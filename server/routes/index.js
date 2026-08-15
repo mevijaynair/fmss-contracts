@@ -358,15 +358,16 @@ r.get('/admin/audit', wrap((req) => {
 
 // ---- external events (restaurant bills, venue costs, etc.) ----
 
-// Admin: create an external event with per-player deductions.
+// Admin: create an external event where one person paid and costs are divided among others.
+// payer_id: who paid (gets credit/incoming), participants: who shares cost (get debits/deductions)
 r.post('/admin/events', wrap((req) => {
   requireAdmin(req);
-  const { title, description, event_type, event_date, participants } = req.body;
-  if (!title || !event_type || !event_date || !participants?.length) {
-    throw new Error('title, event_type, event_date, and participants (array) required');
+  const { title, description, event_type, event_date, payer_id, participants } = req.body;
+  if (!title || !event_type || !event_date || !payer_id || !participants?.length) {
+    throw new Error('title, event_type, event_date, payer_id, and participants (array) required');
   }
   return externalEventsRepo.createEvent(db, authUsersRepo, req.user.id, {
-    title, description, event_type, event_date, participants
+    title, description, event_type, event_date, payer_id, participants
   });
 }));
 

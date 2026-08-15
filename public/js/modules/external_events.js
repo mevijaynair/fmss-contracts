@@ -29,14 +29,22 @@ function renderEventForm() {
       <label>Description</label>
       <input type="text" id="eventDesc" placeholder="Optional notes">
     </div>
+    <div class="form-group" style="background: var(--bg-subtle); padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+      <label style="font-weight: 600; color: var(--accent);">Who Paid the Bill?</label>
+      <p class="hint" style="margin: 0.4rem 0 0.8rem;">This person will get credited for the full amount</p>
+      <select id="eventPayer" required>
+        <option value="">Select payer…</option>
+      </select>
+    </div>
     <div id="participantsSection" style="margin: 1.5rem 0;">
-      <h4>Players Involved</h4>
-      <p class="hint" style="margin-bottom: 0.8rem;">Select players and enter what each person should pay:</p>
+      <h4>Who Shares the Cost?</h4>
+      <p class="hint" style="margin-bottom: 0.8rem;">Each person's share will be deducted from their balance:</p>
       <div id="participantsList" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); padding: 0.8rem; border-radius: 8px;"></div>
       <button class="btn btn-secondary btn-sm" type="button" id="addParticipant" style="margin-top: 0.8rem;">+ Add participant</button>
     </div>
     <div class="form-group">
-      <strong>Total: <span id="totalAmount">0</span> AED</strong>
+      <strong>Total Bill: <span id="totalAmount">0</span> AED</strong>
+      <p class="hint" style="margin: 0.5rem 0 0;">Payer will be credited this amount</p>
     </div>
     <button type="button" class="btn" id="submitEvent">Create Event</button>
   `;
@@ -105,30 +113,33 @@ function updateTotal() {
 function renderEventsList(events) {
   const list = $('eventsTable').querySelector('tbody');
   if (!events?.length) {
-    list.innerHTML = '<tr><td colspan="6" class="hint">No events yet.</td></tr>';
+    list.innerHTML = '<tr><td colspan="7" class="hint">No events yet.</td></tr>';
     return;
   }
 
-  list.innerHTML = events.map(e => `
+  list.innerHTML = events.map(e => {
+    const payerName = store.players?.find(p => p.id === e.payer_id)?.name || 'Unknown';
+    return `
     <tr>
       <td><strong>${esc(e.title)}</strong></td>
+      <td><span style="color: var(--success); font-weight: 600;">Paid by ${esc(payerName)}</span></td>
       <td>${e.event_type}</td>
       <td>${e.event_date}</td>
-      <td>${e.participant_count || 0} players</td>
+      <td>${e.participant_count || 0} share</td>
       <td>AED ${(e.total || 0).toFixed(2)}</td>
       <td class="row-actions">
-        <button class="btn btn-secondary btn-sm" data-view-event="${e.id}">View</button>
         <button class="btn btn-danger btn-sm" data-delete-event="${e.id}">Delete</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   // Wire buttons
   list.querySelectorAll('[data-delete-event]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Delete this event?')) return;
+      if (!confirm('Delete this event? (Refunds all participants)')) return;
       try {
         await api.deleteEvent(btn.dataset.deleteEvent);
-        toast('Event deleted');
+        toast('Event deleted and refunded');
         load();
       } catch (e) { toast(e.message, true); }
     });
@@ -147,14 +158,25 @@ export function initExternalEvents() {
     formContainer.appendChild(renderEventForm());
   }
 
+  // Populate payer dropdown
+  const payerSelect = $('eventPayer');
+  if (payerSelect && store.players) {
+    payerSelect.innerHTML = '<option value="">Select payer…</option>' +
+      store.players
+        .filter(p => p.special_role !== 'cashier')
+        .map(p => `<option value="${p.id}">${esc(p.name)}</option>`)
+        .join('');
+  }
+
   $('submitEvent').addEventListener('click', async () => {
     const title = $('eventTitle').value;
     const event_type = $('eventType').value;
     const event_date = $('eventDate').value;
     const description = $('eventDesc').value;
+    const payer_id = $('eventPayer').value;
 
-    if (!title || !event_type || !event_date) {
-      toast('Title, type, and date required', true);
+    if (!title || !event_type || !event_date || !payer_id) {
+      toast('Title, type, date, and payer required', true);
       return;
     }
 
@@ -167,17 +189,18 @@ export function initExternalEvents() {
       }));
 
     if (!participants.length) {
-      toast('Select at least one player', true);
+      toast('Select at least one player to share the cost', true);
       return;
     }
 
     try {
-      const event = await api.createEvent(title, event_type, event_date, participants, description);
-      toast(`Event created: ${event.title} (AED ${event.total_deducted.toFixed(2)})`);
+      const event = await api.createEvent(title, event_type, event_date, participants, description, payer_id);
+      toast(`Event created: ${event.title} (AED ${event.total_paid.toFixed(2)} credited to payer)`);
       $('eventTitle').value = '';
       $('eventType').value = '';
       $('eventDate').value = new Date().toISOString().split('T')[0];
       $('eventDesc').value = '';
+      $('eventPayer').value = '';
       updateParticipantsList(store.players);
       load();
     } catch (e) { toast(e.message, true); }

@@ -9,12 +9,15 @@ function generateId() {
 }
 
 export const externalEventsRepo = {
-  // Create an external event and deduct from selected players' balances.
-  // payload: { title, description, event_type, event_date, participants: [{player_id, contract_id, amount}] }
+  // Create an external event where one person paid and costs are divided among others.
+  // payer_id: who paid the bill (gets CREDIT / incoming funds)
+  // participants: who shares the cost (get DEBIT / deductions)
+  // Example: Player A paid 500 AED for team lunch. Players B,C,D each owe 100 AED.
+  //   → Player A gets +500 (incoming), B,C,D each get -100 (deduction)
   createEvent(db, authUsersRepo, adminUserId, payload) {
-    const { title, description, event_type, event_date, participants } = payload;
-    if (!title || !event_type || !event_date || !participants?.length) {
-      throw new Error('title, event_type, event_date, and participants required');
+    const { title, description, event_type, event_date, payer_id, participants } = payload;
+    if (!title || !event_type || !event_date || !payer_id || !participants?.length) {
+      throw new Error('title, event_type, event_date, payer_id, and participants required');
     }
 
     const eventId = generateId();
@@ -26,7 +29,18 @@ export const externalEventsRepo = {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(eventId, title, description, event_type, event_date, adminUserId, now, now);
 
-    // Create a transaction for each participant (deduction from their balance)
+    // Credit the payer (incoming funds)
+    const totalAmount = participants.reduce((s, p) => s + p.amount, 0);
+    db.prepare(
+      `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, event_id, status, created_by, created_at, updated_at)
+       VALUES (?, ?, NULL, 'contribution', ?, ?, ?, 'approved', ?, ?, ?)`
+    ).run(
+      generateId(), payer_id,
+      totalAmount,  // positive = credit / incoming
+      `Paid for: ${title}`, eventId, adminUserId, now, now
+    );
+
+    // Debit each participant (who shares the cost)
     for (const p of participants) {
       if (!p.player_id || p.amount === undefined) {
         throw new Error('Each participant needs player_id and amount');
@@ -44,10 +58,10 @@ export const externalEventsRepo = {
     // Audit log
     authUsersRepo.auditLog?.(db, {
       action: 'external_event_created',
-      details: { event_id: eventId, title, participant_count: participants.length }
+      details: { event_id: eventId, title, payer_id, participant_count: participants.length, total_amount: totalAmount }
     });
 
-    return { id: eventId, title, event_type, total_deducted: participants.reduce((s, p) => s + p.amount, 0) };
+    return { id: eventId, title, event_type, payer_id, total_paid: totalAmount };
   },
 
   // Get all external events with participant breakdown

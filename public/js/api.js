@@ -95,8 +95,8 @@ export const api = {
   setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
 
   // ---- external events (restaurant bills, venue costs) ----
-  createEvent: (title, event_type, event_date, participants, description) =>
-    req('POST', '/admin/events', { title, description, event_type, event_date, participants }),
+  createEvent: (title, event_type, event_date, participants, description, payer_id) =>
+    req('POST', '/admin/events', { title, description, event_type, event_date, payer_id, participants }),
   listEvents: (q = {}) => {
     const p = new URLSearchParams(q).toString();
     return req('GET', `/admin/events${p ? `?${p}` : ''}`);
