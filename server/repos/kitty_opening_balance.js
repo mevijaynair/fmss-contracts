@@ -19,7 +19,7 @@ export const kittyOpeningBalanceRepo = {
       INSERT INTO kitty_opening_balance
       (id, contract_id, snapshot_date, opening_amount, imported_by, locked_at, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, contractId, snapshotDate || now, openingAmount, importedById, now, notes);
+    `).run(id, contractId, snapshotDate || now, openingAmount, importedById || 'system', now, notes || '');
 
     return this.get(contractId);
   },
