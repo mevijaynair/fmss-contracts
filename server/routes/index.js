@@ -12,6 +12,7 @@ import { kittyRepo } from '../repos/kitty.js';
 import { statsRepo } from '../repos/stats.js';
 import { auditRepo } from '../repos/audit.js';
 import { authUsersRepo } from '../repos/auth_users.js';
+import { externalEventsRepo } from '../repos/external_events.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -353,6 +354,138 @@ r.get('/admin/audit', wrap((req) => {
     since: req.query.since,
   }, Number(req.query.limit) || 100);
   return logs.map(l => ({ ...l, details: l.details ? JSON.parse(l.details) : null }));
+}));
+
+// ---- external events (restaurant bills, venue costs, etc.) ----
+
+// Admin: create an external event with per-player deductions.
+r.post('/admin/events', wrap((req) => {
+  requireAdmin(req);
+  const { title, description, event_type, event_date, participants } = req.body;
+  if (!title || !event_type || !event_date || !participants?.length) {
+    throw new Error('title, event_type, event_date, and participants (array) required');
+  }
+  return externalEventsRepo.createEvent(db, authUsersRepo, req.user.id, {
+    title, description, event_type, event_date, participants
+  });
+}));
+
+// Admin: list all external events.
+r.get('/admin/events', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.listEvents(db, {
+    event_type: req.query.event_type,
+    since: req.query.since,
+    limit: Number(req.query.limit) || 100
+  });
+}));
+
+// Admin: get transactions for a specific event (who paid what).
+r.get('/admin/events/:eventId', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.getEventTransactions(db, req.params.eventId);
+}));
+
+// Admin: delete an external event (refunds all participants).
+r.delete('/admin/events/:eventId', wrap((req) => {
+  requireAdmin(req);
+  externalEventsRepo.deleteEvent(db, req.params.eventId);
+  return { ok: true };
+}));
+
+// ---- player-to-player transfers (kitty transfers) ----
+
+// Player: initiate a transfer to another player's kitty.
+r.post('/my/transfers', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Players only');
+  const { to_player_id, contract_id, amount, notes } = req.body;
+  if (!to_player_id || !amount || amount <= 0) {
+    throw new Error('to_player_id, contract_id, and amount (positive) required');
+  }
+  if (to_player_id === req.user.playerId) {
+    throw new Error('Cannot transfer to yourself');
+  }
+  // Create pending transfer transaction
+  const now = new Date().toISOString();
+  const txnId = require('crypto').randomBytes(8).toString('hex');
+  db.prepare(
+    `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, related_player_id, status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, 'transfer_out', ?, ?, ?, 'pending', ?, ?, ?)`
+  ).run(txnId, req.user.playerId, contract_id, -amount, notes || 'Transfer to player', to_player_id, req.user.playerId, now, now);
+  return { id: txnId, status: 'pending', amount, to_player_id, message: 'Transfer pending admin approval' };
+}));
+
+// Player: view their transfers (sent and received).
+r.get('/my/transfers', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Players only');
+  const sent = db.prepare(
+    `SELECT t.id, t.amount, t.related_player_id, p.name as to_player_name, t.status, t.created_at
+     FROM transactions t
+     JOIN players p ON p.id = t.related_player_id
+     WHERE t.player_id = ? AND t.type = 'transfer_out'
+     ORDER BY t.created_at DESC`
+  ).all(req.user.playerId);
+  const received = db.prepare(
+    `SELECT t.id, t.amount, t.player_id, p.name as from_player_name, t.status, t.created_at
+     FROM transactions t
+     JOIN players p ON p.id = t.player_id
+     WHERE t.related_player_id = ? AND t.type IN ('transfer_in', 'transfer_out')
+     ORDER BY t.created_at DESC`
+  ).all(req.user.playerId);
+  return { sent, received };
+}));
+
+// Admin: approve a pending transfer (creates matching credit to recipient).
+r.post('/admin/transfers/:txnId/approve', wrap((req) => {
+  requireAdmin(req);
+  const txn = db.prepare('SELECT * FROM transactions WHERE id = ? AND type = \'transfer_out\'').get(req.params.txnId);
+  if (!txn) throw new Error('Transfer not found');
+  if (txn.status !== 'pending') throw new Error('Only pending transfers can be approved');
+
+  const now = new Date().toISOString();
+  // Mark transfer_out as approved
+  db.prepare('UPDATE transactions SET status = ?, approved_by = ?, updated_at = ? WHERE id = ?')
+    .run('approved', req.user.id, now, req.params.txnId);
+
+  // Create matching transfer_in for recipient
+  db.prepare(
+    `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, related_player_id, status, approved_by, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, 'transfer_in', ?, ?, ?, 'approved', ?, ?, ?, ?)`
+  ).run(
+    require('crypto').randomBytes(8).toString('hex'),
+    txn.related_player_id, txn.contract_id, txn.amount, // positive = credit
+    txn.description, txn.player_id, req.user.id, req.user.id, now, now
+  );
+
+  return { ok: true, status: 'approved' };
+}));
+
+// Admin: reject a pending transfer.
+r.post('/admin/transfers/:txnId/reject', wrap((req) => {
+  requireAdmin(req);
+  const txn = db.prepare('SELECT * FROM transactions WHERE id = ?').get(req.params.txnId);
+  if (!txn) throw new Error('Transfer not found');
+  if (txn.status !== 'pending') throw new Error('Only pending transfers can be rejected');
+
+  db.prepare('UPDATE transactions SET status = ?, approved_by = ? WHERE id = ?')
+    .run('rejected', req.user.id, req.params.txnId);
+  return { ok: true, status: 'rejected' };
+}));
+
+// Admin: view all pending transfers.
+r.get('/admin/transfers', wrap((req) => {
+  requireAdmin(req);
+  const status = req.query.status || 'pending';
+  return db.prepare(
+    `SELECT t.id, t.player_id, p1.name as from_player, t.related_player_id, p2.name as to_player,
+            t.amount, t.contract_id, t.status, t.created_at
+     FROM transactions t
+     JOIN players p1 ON p1.id = t.player_id
+     JOIN players p2 ON p2.id = t.related_player_id
+     WHERE t.type = 'transfer_out' AND t.status = ?
+     ORDER BY t.created_at DESC
+     LIMIT ?`
+  ).all(status, Number(req.query.limit) || 100);
 }));
 
 export default r;

@@ -277,6 +277,46 @@
           </div>
         </section>
 
+        <!-- EXTERNAL EVENTS (admin) — restaurant bills, venue costs, etc. -->
+        <section class="view" data-view="events" hidden>
+          <div class="sams-card">
+            <div class="card-header">
+              <h3 class="card-title">External Events</h3>
+              <span class="card-sub">Restaurant bills, venue costs, equipment — deduct from players' balances</span>
+            </div>
+            <div id="eventFormContainer"></div>
+          </div>
+          <div class="sams-card" style="margin-top: 1.5rem;">
+            <h4 class="card-title">Recent Events</h4>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="eventsTable">
+                <thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Players</th><th>Total (AED)</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- TRANSFERS (both) — player-to-player kitty transfers -->
+        <section class="view" data-view="transfers" hidden>
+          <div class="sams-card">
+            <div class="card-header">
+              <h3 class="card-title">Transfers</h3>
+              <span class="card-sub">Send money to another player's kitty</span>
+            </div>
+            <div id="transferFormContainer"></div>
+          </div>
+          <div class="sams-card" style="margin-top: 1.5rem;">
+            <h4 class="card-title" id="transfersListTitle">Pending Transfers (Admin)</h4>
+            <div style="overflow-x:auto;">
+              <table class="sams-table" id="transfersTable">
+                <thead><tr><th>From</th><th>To</th><th>Amount (AED)</th><th>Status</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
       </main>
 
       <footer class="legal-footer">

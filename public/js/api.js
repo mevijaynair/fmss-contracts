@@ -93,4 +93,25 @@ export const api = {
   createLogin: (playerId) => req('POST', `/admin/logins/${playerId}`, {}),
   resetPin: (playerId) => req('POST', `/admin/logins/${playerId}/reset`, {}),
   setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
+
+  // ---- external events (restaurant bills, venue costs) ----
+  createEvent: (title, event_type, event_date, participants, description) =>
+    req('POST', '/admin/events', { title, description, event_type, event_date, participants }),
+  listEvents: (q = {}) => {
+    const p = new URLSearchParams(q).toString();
+    return req('GET', `/admin/events${p ? `?${p}` : ''}`);
+  },
+  getEventTransactions: (eventId) => req('GET', `/admin/events/${eventId}`),
+  deleteEvent: (eventId) => req('DELETE', `/admin/events/${eventId}`),
+
+  // ---- player-to-player transfers (kitty transfers) ----
+  submitTransfer: (to_player_id, contract_id, amount, notes) =>
+    req('POST', '/my/transfers', { to_player_id, contract_id, amount, notes }),
+  myTransfers: () => req('GET', '/my/transfers'),
+  listPendingTransfers: (q = {}) => {
+    const p = new URLSearchParams(q).toString();
+    return req('GET', `/admin/transfers${p ? `?${p}` : ''}`);
+  },
+  approveTransfer: (txnId) => req('POST', `/admin/transfers/${txnId}/approve`, {}),
+  rejectTransfer: (txnId) => req('POST', `/admin/transfers/${txnId}/reject`, {}),
 };
