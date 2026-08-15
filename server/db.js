@@ -386,6 +386,44 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_event_date ON external_events(event_date)');
       }
     },
+    // players: add is_sandbox flag for test players that can be deleted without affecting data
+    () => {
+      const cols = db.prepare('PRAGMA table_info(players)').all();
+      const hasSandbox = cols.some(c => c.name === 'is_sandbox');
+      if (!hasSandbox) {
+        db.exec('ALTER TABLE players ADD COLUMN is_sandbox INTEGER NOT NULL DEFAULT 0');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_players_sandbox ON players(is_sandbox)');
+      }
+    },
+    // opening_balances_snapshot: immutable record of opening balance imports (1 Aug baseline per contract)
+    () => {
+      try {
+        db.prepare('SELECT id FROM opening_balances_snapshot LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE opening_balances_snapshot (
+          id TEXT PRIMARY KEY,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          player_id TEXT NOT NULL REFERENCES players(id),
+          opening_balance REAL NOT NULL,
+          imported_by TEXT NOT NULL REFERENCES auth_users(id),
+          import_batch TEXT NOT NULL,
+          locked_at TEXT NOT NULL,
+          notes TEXT
+        )`);
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_contract_player ON opening_balances_snapshot(contract_id, player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_snapshot_batch ON opening_balances_snapshot(import_batch)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_snapshot_locked ON opening_balances_snapshot(locked_at)');
+      }
+    },
+    // ledgers: add is_opening_balanced flag (immutable once set) for data integrity
+    () => {
+      const cols = db.prepare('PRAGMA table_info(ledgers)').all();
+      const hasLocked = cols.some(c => c.name === 'is_opening_balanced');
+      if (!hasLocked) {
+        db.exec('ALTER TABLE ledgers ADD COLUMN is_opening_balanced INTEGER NOT NULL DEFAULT 0');
+        db.exec('ALTER TABLE ledgers ADD COLUMN opening_balanced_at TEXT');
+      }
+    },
   ];
   for (const mig of migrations) mig();
 }

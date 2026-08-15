@@ -34,6 +34,7 @@ import { initLogins, loadLogins } from './modules/logins.js';
 import { initExternalEvents, loadExternalEvents } from './modules/external_events.js';
 import { initTransfers, loadTransfers } from './modules/transfers.js';
 import { initOpeningBalances, loadOpeningBalances } from './modules/opening_balances.js';
+import { initSandbox, loadSandbox } from './modules/sandbox.js';
 
 const LOADERS = {
   dashboard: loadDashboard,
@@ -47,6 +48,7 @@ const LOADERS = {
   transfers: loadTransfers,
   logins: loadLogins,
   'opening-balances': loadOpeningBalances,
+  sandbox: loadSandbox,
   settings: loadSettings,
 };
 
@@ -74,7 +76,7 @@ async function start() {
   store.user = user;
 
   initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
-  if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); }
+  if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); initSandbox(); }
   initTransfers();
 
   window.addEventListener('fmss:view', (e) => {

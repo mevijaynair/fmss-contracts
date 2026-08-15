@@ -14,6 +14,7 @@ import { auditRepo } from '../repos/audit.js';
 import { authUsersRepo } from '../repos/auth_users.js';
 import { externalEventsRepo } from '../repos/external_events.js';
 import { openingBalancesRepo } from '../repos/opening_balances.js';
+import { sandboxPlayersRepo } from '../repos/sandbox_players.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -508,6 +509,26 @@ r.get('/admin/opening-balances/:contractId', wrap((req) => {
   const balances = openingBalancesRepo.getBalances(db, playersRepo, req.params.contractId);
   const summary = openingBalancesRepo.getSummary(db, req.params.contractId);
   return { balances, summary };
+}));
+
+// ---- Sandbox Players (test environment) ----
+// Admin: create a test player (sandboxed, can be safely deleted with all data)
+r.post('/admin/sandbox/players', wrap((req) => {
+  requireAdmin(req);
+  if (!req.body.name) throw new Error('name required');
+  return sandboxPlayersRepo.createSandbox(db, req.body.name);
+}));
+
+// Admin: list all test players
+r.get('/admin/sandbox/players', wrap((req) => {
+  requireAdmin(req);
+  return sandboxPlayersRepo.listSandbox(db);
+}));
+
+// Admin: delete a test player and cascade-clean all their data
+r.delete('/admin/sandbox/players/:playerId', wrap((req) => {
+  requireAdmin(req);
+  return sandboxPlayersRepo.deleteSandbox(db, req.params.playerId);
 }));
 
 export default r;
