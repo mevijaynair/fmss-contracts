@@ -17,6 +17,8 @@ import { openingBalancesRepo } from '../repos/opening_balances.js';
 import { sandboxPlayersRepo } from '../repos/sandbox_players.js';
 import { gameResultsRepo } from '../repos/game_results.js';
 import { gameFinancingRepo } from '../repos/game_financing.js';
+import { playerRelationshipsRepo } from '../repos/player_relationships.js';
+import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -592,6 +594,126 @@ r.get('/admin/sandbox/players', wrap((req) => {
 r.delete('/admin/sandbox/players/:playerId', wrap((req) => {
   requireAdmin(req);
   return sandboxPlayersRepo.deleteSandbox(db, req.params.playerId);
+}));
+
+// ---- player relationships (outside players, shared balances) ----
+
+// Mark a player as outside (introduced by someone, costs 35-40 AED)
+r.post('/admin/players/:playerId/mark-outside', wrap((req) => {
+  requireAdmin(req);
+  const { introduced_by, cost } = req.body;
+  if (!introduced_by) throw new Error('introduced_by required');
+  playerRelationshipsRepo.markOutside(db, req.params.playerId, introduced_by, cost || 35);
+  return { ok: true, message: 'Player marked as outside' };
+}));
+
+// Mark a player as regular (remove outside status)
+r.post('/admin/players/:playerId/mark-regular', wrap((req) => {
+  requireAdmin(req);
+  playerRelationshipsRepo.markRegular(db, req.params.playerId);
+  return { ok: true, message: 'Player marked as regular' };
+}));
+
+// Get outside players for a contract
+r.get('/admin/contracts/:contractId/outside-players', wrap((req) => {
+  requireAdmin(req);
+  return playerRelationshipsRepo.getOutsidePlayersForContract(db, req.params.contractId);
+}));
+
+// Create a balance group (for shared balances like Aws & Ali)
+r.post('/admin/contracts/:contractId/balance-groups', wrap((req) => {
+  requireAdmin(req);
+  const { group_name, player_ids, description } = req.body;
+  if (!group_name || !player_ids?.length) throw new Error('group_name and player_ids required');
+  return playerRelationshipsRepo.createBalanceGroup(db, req.params.contractId, group_name, player_ids, description);
+}));
+
+// Get balance group details
+r.get('/admin/balance-groups/:groupId', wrap((req) => {
+  requireAdmin(req);
+  const group = playerRelationshipsRepo.getBalanceGroup(db, req.params.groupId);
+  if (!group) throw new Error('Balance group not found');
+  return group;
+}));
+
+// Get combined balance for a group
+r.get('/admin/contracts/:contractId/balance-groups/:groupId/balance', wrap((req) => {
+  requireAdmin(req);
+  const balance = ledgersRepo.getGroupBalance(req.params.contractId, req.params.groupId);
+  if (!balance) throw new Error('Group or balance not found');
+  return balance;
+}));
+
+// Record outside player charge and introducer credit
+r.post('/gameweeks/:gameweekId/outside-player-charge', wrap((req) => {
+  requireAdmin(req);
+  const { outside_player_id, introducer_id, cost } = req.body;
+  const gw = gameweeksRepo.get(req.params.gameweekId);
+  if (!gw) throw new Error('Gameweek not found');
+  return outsidePlayersRepo.recordOutsidePlayerCharge(db, req.params.gameweekId, gw.contract_id, outside_player_id, introducer_id, cost || 35);
+}));
+
+// Get outside player charges for a game
+r.get('/gameweeks/:gameweekId/outside-player-charges', wrap((req) => {
+  requireAdmin(req);
+  const gw = gameweeksRepo.get(req.params.gameweekId);
+  if (!gw) throw new Error('Gameweek not found');
+  return outsidePlayersRepo.getOutsidePlayerCharges(db, req.params.gameweekId, gw.contract_id);
+}));
+
+// Get introducer summary (how much they earned, how many outside players brought)
+r.get('/admin/players/:playerId/introducer-summary', wrap((req) => {
+  requireAdmin(req);
+  const { contract_id } = req.query;
+  if (!contract_id) throw new Error('contract_id required');
+  return outsidePlayersRepo.getIntroducerSummary(db, req.params.playerId, contract_id);
+}));
+
+// Record bank transfer (transfer credits from one player to another)
+r.post('/admin/contracts/:contractId/bank-transfer', wrap((req) => {
+  requireAdmin(req);
+  const { from_player_id, to_player_id, amount, description } = req.body;
+  if (!from_player_id || !to_player_id || !amount) throw new Error('from_player_id, to_player_id, and amount required');
+  return outsidePlayersRepo.recordBankTransfer(db, from_player_id, to_player_id, req.params.contractId, amount, description);
+}));
+
+// Get club accounting summary (all financial flows)
+r.get('/admin/contracts/:contractId/accounting-summary', wrap((req) => {
+  requireAdmin(req);
+  const contractId = req.params.contractId;
+
+  // Get all outside player introducers and their earnings
+  const introducers = playersRepo.all()
+    .filter(p => {
+      const introduced = db.prepare('SELECT COUNT(*) as count FROM players WHERE introduced_by = ?').get(p.id).count;
+      return introduced > 0;
+    })
+    .map(p => ({
+      introducer_id: p.id,
+      introducer_name: p.name,
+      ...outsidePlayersRepo.getIntroducerSummary(db, p.id, contractId),
+    }));
+
+  // Get all balance groups
+  const groupBalances = ledgersRepo.getAllGroupBalances(contractId);
+
+  // Get overall contract finances
+  const totalGameCost = db.prepare(`
+    SELECT COALESCE(SUM(game_cost), 0) as total FROM gameweeks WHERE contract_id = ?
+  `).get(contractId).total;
+
+  const totalKitty = db.prepare(`
+    SELECT COALESCE(SUM(kitty_earned), 0) as total FROM gameweeks WHERE contract_id = ?
+  `).get(contractId).total;
+
+  return {
+    contract_id: contractId,
+    introducers,
+    shared_balances: groupBalances,
+    total_water_costs: totalGameCost,
+    total_kitty_earned: totalKitty,
+    net_club_position: totalKitty - totalGameCost,
+  };
 }));
 
 export default r;

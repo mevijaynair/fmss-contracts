@@ -424,6 +424,34 @@ export function initSchema() {
         db.exec('ALTER TABLE ledgers ADD COLUMN opening_balanced_at TEXT');
       }
     },
+    // players: add relationship fields (introduced_by, player_type, outside_cost)
+    () => {
+      const cols = db.prepare('PRAGMA table_info(players)').all();
+      const hasIntroducedBy = cols.some(c => c.name === 'introduced_by');
+      if (!hasIntroducedBy) {
+        db.exec('ALTER TABLE players ADD COLUMN introduced_by TEXT REFERENCES players(id)'); // Who brought them in
+        db.exec('ALTER TABLE players ADD COLUMN player_type TEXT NOT NULL DEFAULT "regular" CHECK(player_type IN ("regular", "outside"))');
+        db.exec('ALTER TABLE players ADD COLUMN outside_cost REAL'); // 35 or 40 for outside players
+        db.exec('ALTER TABLE players ADD COLUMN balance_group_id TEXT'); // Shared balance group (e.g., "aws_ali")
+      }
+    },
+
+    // player_balance_groups: manage linked/shared balances (Aws & Ali as one)
+    () => {
+      try {
+        db.prepare('SELECT id FROM player_balance_groups LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE player_balance_groups (
+          id TEXT PRIMARY KEY,
+          group_name TEXT NOT NULL,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          description TEXT,
+          created_at TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_balance_groups_contract ON player_balance_groups(contract_id)');
+      }
+    },
+
     // gameweeks: add game accounting fields (scoreline, teams, message, costs, kitty)
     () => {
       const cols = db.prepare('PRAGMA table_info(gameweeks)').all();

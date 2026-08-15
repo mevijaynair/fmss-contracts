@@ -53,4 +53,57 @@ export const ledgersRepo = {
     db.prepare('UPDATE ledgers SET status=? WHERE player_id=? AND contract_id=?')
       .run(status, playerId, contractId);
   },
+
+  // Get combined balance for a shared balance group (e.g., Aws & Ali)
+  getGroupBalance(contractId, balanceGroupId) {
+    const groupMembers = db.prepare(`
+      SELECT id FROM players WHERE balance_group_id = ?
+    `).all(balanceGroupId);
+
+    if (!groupMembers.length) return null;
+
+    let totalOpening = 0;
+    let totalContributed = 0;
+    let totalCharged = 0;
+    let memberDetails = [];
+
+    for (const member of groupMembers) {
+      const ledger = this.get(member.id, contractId);
+      if (ledger) {
+        totalOpening += ledger.opening_balance;
+        totalContributed += ledger.contributed;
+        totalCharged += ledger.charged;
+        memberDetails.push({
+          player_id: member.id,
+          player_name: ledger.player_name,
+          opening_balance: ledger.opening_balance,
+          contributed: ledger.contributed,
+          charged: ledger.charged,
+          individual_balance: ledger.present_balance,
+        });
+      }
+    }
+
+    return {
+      balance_group_id: balanceGroupId,
+      contract_id: contractId,
+      members: memberDetails,
+      combined_opening_balance: totalOpening,
+      combined_contributed: totalContributed,
+      combined_charged: totalCharged,
+      combined_present_balance: Math.round((totalOpening + totalContributed - totalCharged) * 100) / 100,
+    };
+  },
+
+  // Get all balance groups for a contract
+  getAllGroupBalances(contractId) {
+    const groups = db.prepare(`
+      SELECT DISTINCT balance_group_id FROM players
+      WHERE balance_group_id IS NOT NULL
+    `).all();
+
+    return groups
+      .map(g => this.getGroupBalance(contractId, g.balance_group_id))
+      .filter(g => g !== null);
+  },
 };
