@@ -1,9 +1,36 @@
 // index.js — Express entry point. Serves the API and the static frontend.
 // Two-tier app: admin (password-only) + players (email+password). JWT auth.
 // /api/login and /api/health are public; all other API endpoints require a valid Bearer token.
-import express from 'express';
+
+// Load .env file (simple approach without dotenv dependency)
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+function loadEnv() {
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const envPath = resolve(__dir, '..', '.env');
+  if (existsSync(envPath)) {
+    try {
+      const lines = readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim();
+          if (key) process.env[key] = val.replace(/^['"]|['"]$/g, '');
+        }
+      }
+      console.log('[.env] Loaded environment from .env file');
+    } catch (e) {
+      console.error('[.env] Error loading .env:', e.message);
+    }
+  }
+}
+loadEnv();
+
+import express from 'express';
 import { initSchema, seed, applyRoles, db } from './db.js';
 import { auth, authMiddleware } from './auth.js';
 import { authUsersRepo } from './repos/auth_users.js';
