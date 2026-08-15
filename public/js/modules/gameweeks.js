@@ -7,7 +7,13 @@ let contractId = 'sat';
 
 async function render() {
   const rows = await api.gameweeks(contractId);
-  $('gwTable').querySelector('tbody').innerHTML = rows.map(g => `
+  // Defensive: ensure rows is an array
+  const rowsList = Array.isArray(rows) ? rows : [];
+  const gwTable = $('gwTable');
+  if (!gwTable) return; // Container not ready yet
+  const tbody = gwTable.querySelector('tbody');
+  if (!tbody) return; // tbody not found
+  tbody.innerHTML = rowsList.map(g => `
     <tr data-gw="${g.id}" style="cursor:pointer;">
       <td class="num">${esc(fmtDate(g.date))}</td>
       <td>${g.gw_number || ''}${g.historical ? '' : ' <span class="tag tag-active">live</span>'}</td>
@@ -18,11 +24,11 @@ async function render() {
         : `<button class="link-btn" data-del="${g.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No games recorded.</td></tr>';
 
-  $('gwTable').querySelectorAll('tr[data-gw]').forEach(tr =>
+  gwTable.querySelectorAll('tr[data-gw]').forEach(tr =>
     tr.addEventListener('click', (e) => {
       if (!e.target.closest('button')) detail(tr.dataset.gw);
     }));
-  $('gwTable').querySelectorAll('[data-del]').forEach(b =>
+  gwTable.querySelectorAll('[data-del]').forEach(b =>
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!confirm('Delete this game and refund its charges?')) return;

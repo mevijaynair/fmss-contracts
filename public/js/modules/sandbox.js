@@ -26,7 +26,10 @@ async function loadSandboxPlayers() {
     const container = $('sandboxList');
     if (!container) return;
 
-    if (!players.length) {
+    // Defensive: ensure players is an array
+    const playersList = Array.isArray(players) ? players : [];
+
+    if (!playersList.length) {
       container.innerHTML = '<p class="hint">No test players yet. Create one to start testing.</p>';
       return;
     }
@@ -45,7 +48,7 @@ async function loadSandboxPlayers() {
               </tr>
             </thead>
             <tbody>
-              ${players.map(p => `
+              ${playersList.map(p => `
                 <tr style="opacity: 0.7;">
                   <td><strong style="color: var(--accent);">🧪 ${esc(p.name)}</strong></td>
                   <td style="font-family: monospace; font-size: 0.85rem; color: var(--text-muted);">${p.id.slice(0, 8)}…</td>

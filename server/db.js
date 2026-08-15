@@ -424,6 +424,59 @@ export function initSchema() {
         db.exec('ALTER TABLE ledgers ADD COLUMN opening_balanced_at TEXT');
       }
     },
+    // gameweeks: add game accounting fields (scoreline, teams, message, costs, kitty)
+    () => {
+      const cols = db.prepare('PRAGMA table_info(gameweeks)').all();
+      const hasScoreline = cols.some(c => c.name === 'scoreline');
+      if (!hasScoreline) {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN scoreline TEXT'); // e.g., "5-3"
+        db.exec('ALTER TABLE gameweeks ADD COLUMN teams_json TEXT'); // JSON: [{ player_id, team }]
+        db.exec('ALTER TABLE gameweeks ADD COLUMN whatsapp_message TEXT'); // Original message
+        db.exec('ALTER TABLE gameweeks ADD COLUMN game_cost REAL NOT NULL DEFAULT 0'); // Water, facility cost
+        db.exec('ALTER TABLE gameweeks ADD COLUMN game_cost_paid_by TEXT'); // Player ID or 'self'
+        db.exec('ALTER TABLE gameweeks ADD COLUMN kitty_earned REAL NOT NULL DEFAULT 0'); // Additional money collected
+      }
+    },
+    // game_results: team-level results (Team A vs Team B, score, goals)
+    () => {
+      try {
+        db.prepare('SELECT id FROM game_results LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE game_results (
+          id TEXT PRIMARY KEY,
+          gameweek_id TEXT NOT NULL REFERENCES gameweeks(id) ON DELETE CASCADE,
+          team_a_name TEXT NOT NULL,          -- "Team A", "Blue", etc.
+          team_b_name TEXT NOT NULL,
+          goals_team_a INTEGER NOT NULL DEFAULT 0,
+          goals_team_b INTEGER NOT NULL DEFAULT 0,
+          result TEXT NOT NULL CHECK(result IN ('draw', 'a_wins', 'b_wins')),
+          created_at TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_game_results_gw ON game_results(gameweek_id)');
+      }
+    },
+    // game_financing: track who paid water cost and provisional amounts
+    () => {
+      try {
+        db.prepare('SELECT id FROM game_financing LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE game_financing (
+          id TEXT PRIMARY KEY,
+          gameweek_id TEXT NOT NULL REFERENCES gameweeks(id) ON DELETE CASCADE,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          category TEXT NOT NULL CHECK(category IN ('water_cost', 'kitty_collection')),
+          payer_id TEXT REFERENCES players(id),             -- who paid/collected
+          amount REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'provisional' CHECK(status IN ('provisional', 'settled')),
+          settled_at TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_financing_gw ON game_financing(gameweek_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_financing_contract ON game_financing(contract_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_financing_category ON game_financing(category)');
+      }
+    },
   ];
   for (const mig of migrations) mig();
 }

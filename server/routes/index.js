@@ -15,6 +15,8 @@ import { authUsersRepo } from '../repos/auth_users.js';
 import { externalEventsRepo } from '../repos/external_events.js';
 import { openingBalancesRepo } from '../repos/opening_balances.js';
 import { sandboxPlayersRepo } from '../repos/sandbox_players.js';
+import { gameResultsRepo } from '../repos/game_results.js';
+import { gameFinancingRepo } from '../repos/game_financing.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -124,6 +126,67 @@ r.put('/gameweeks/:id', wrap((req) => {
     });
   }
   return gameweeksRepo.get(req.params.id);
+}));
+
+// ---- game accounting: scoreline, teams, result, costs ----
+r.post('/gameweeks/:id/accounting', wrap((req) => {
+  requireAdmin(req);
+  const { scoreline, teams_json, whatsapp_message, game_cost, game_cost_paid_by, kitty_earned, team_a_name, team_b_name, goals_team_a, goals_team_b } = req.body;
+
+  // Update gameweek accounting fields
+  gameweeksRepo.updateGameAccounting(req.params.id, {
+    scoreline, teams_json, whatsapp_message, game_cost, game_cost_paid_by, kitty_earned
+  });
+
+  // If result data provided, create or update game result
+  if (team_a_name && team_b_name && typeof goals_team_a === 'number' && typeof goals_team_b === 'number') {
+    const existing = db.prepare('SELECT id FROM game_results WHERE gameweek_id = ?').get(req.params.id);
+    if (existing) {
+      gameResultsRepo.update(db, req.params.id, team_a_name, team_b_name, goals_team_a, goals_team_b);
+    } else {
+      gameResultsRepo.create(db, req.params.id, team_a_name, team_b_name, goals_team_a, goals_team_b);
+    }
+  }
+
+  return gameweeksRepo.getFullGame(req.params.id);
+}));
+
+// Record water cost payment / who paid
+r.post('/gameweeks/:id/water-cost', wrap((req) => {
+  requireAdmin(req);
+  const { payer_id, amount, notes } = req.body;
+  const g = gameweeksRepo.get(req.params.id);
+  if (!g) throw new Error('Gameweek not found');
+
+  // Delete existing water cost record if any
+  db.prepare('DELETE FROM game_financing WHERE gameweek_id = ? AND category = ?').run(req.params.id, 'water_cost');
+
+  // Create new water cost record
+  return gameFinancingRepo.create(db, req.params.id, g.contract_id, 'water_cost', payer_id, amount, notes);
+}));
+
+// Record kitty collection / provisional payment
+r.post('/gameweeks/:id/kitty', wrap((req) => {
+  requireAdmin(req);
+  const { payer_id, amount, notes } = req.body;
+  const g = gameweeksRepo.get(req.params.id);
+  if (!g) throw new Error('Gameweek not found');
+
+  return gameFinancingRepo.create(db, req.params.id, g.contract_id, 'kitty_collection', payer_id, amount, notes);
+}));
+
+// Settle a provisional payment
+r.post('/gameweeks/:id/financing/:financing_id/settle', wrap((req) => {
+  requireAdmin(req);
+  gameFinancingRepo.settle(db, req.params.financing_id);
+  return gameweeksRepo.getFullGame(req.params.id);
+}));
+
+// Get full game data with results and financing
+r.get('/gameweeks/:id/full', wrap((req) => {
+  const g = gameweeksRepo.getFullGame(req.params.id);
+  if (!g) throw new Error('Gameweek not found');
+  return g;
 }));
 
 // ---- WhatsApp parse → charge preview ----

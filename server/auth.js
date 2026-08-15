@@ -7,7 +7,6 @@ import jwt from 'jsonwebtoken';
 
 const SECRET = process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
 const TOKEN_EXPIRY = '7d';
-console.log('[auth] SECRET initialized to:', SECRET, '(length:', SECRET.length, ')');
 
 export const auth = {
   // Player login: player_id + PIN (with rate-limiting and PIN change enforcement)
@@ -47,7 +46,6 @@ export const auth = {
 
   // Admin login: password-only
   loginAdmin(password) {
-    console.log('[auth.loginAdmin] Comparing password. Expected:', SECRET ? `***${SECRET.slice(-6)}` : 'undefined', 'Got:', password ? `***${password.slice(-6)}` : 'undefined');
     if (password !== SECRET) {
       throw new Error('Invalid password');
     }

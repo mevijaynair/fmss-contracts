@@ -6,8 +6,12 @@ import { toast } from '../store.js';
 import { $, esc } from '../util.js';
 
 function render(rows) {
-  const withLogin = rows.filter(r => r.has_login).length;
-  $('loginsTable').querySelector('tbody').innerHTML = rows.map(r => `
+  // Defensive: ensure rows is an array
+  const rowsList = Array.isArray(rows) ? rows : [];
+  const withLogin = rowsList.filter(r => r.has_login).length;
+  const tbody = $('loginsTable')?.querySelector('tbody');
+  if (!tbody) return; // Container not ready yet
+  tbody.innerHTML = rowsList.map(r => `
     <tr>
       <td><strong>${esc(r.name)}</strong></td>
       <td>${r.has_login
@@ -25,9 +29,11 @@ function render(rows) {
 
   // subtitle count
   const gen = $('loginsGenerate');
-  gen.textContent = withLogin === rows.length && rows.length > 0
-    ? 'All players have logins ✓'
-    : `Generate logins for all players (${rows.length - withLogin} left)`;
+  if (gen) {
+    gen.textContent = withLogin === rowsList.length && rowsList.length > 0
+      ? 'All players have logins ✓'
+      : `Generate logins for all players (${rowsList.length - withLogin} left)`;
+  }
 
   $('loginsTable').querySelectorAll('[data-reset]').forEach(b =>
     b.addEventListener('click', async () => {

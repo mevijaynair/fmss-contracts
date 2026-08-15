@@ -57,7 +57,9 @@ function updateParticipantsList(players) {
 
   // Get current selections from form
   const rows = list.querySelectorAll('.participant-row');
-  const selected = new Map(rows.map(r => [r.dataset.playerId, {
+  // Defensive: convert NodeList to array and ensure safe map
+  const rowsArray = Array.from(rows);
+  const selected = new Map(rowsArray.map(r => [r.dataset.playerId, {
     contract_id: r.querySelector('select').value,
     amount: parseFloat(r.querySelector('input').value) || 0
   }]));
@@ -104,20 +106,30 @@ function updateParticipantsList(players) {
 }
 
 function updateTotal() {
-  const total = Array.from($('participantsList').querySelectorAll('.participant-row'))
+  const participantsList = $('participantsList');
+  const totalAmount = $('totalAmount');
+  if (!participantsList || !totalAmount) return; // Elements not ready
+
+  const total = Array.from(participantsList.querySelectorAll('.participant-row'))
     .filter(r => r.querySelector('.participant-check').checked)
     .reduce((sum, r) => sum + (parseFloat(r.querySelector('.participant-amount').value) || 0), 0);
-  $('totalAmount').textContent = total.toFixed(1);
+  totalAmount.textContent = total.toFixed(1);
 }
 
 function renderEventsList(events) {
-  const list = $('eventsTable').querySelector('tbody');
-  if (!events?.length) {
+  const eventsTable = $('eventsTable');
+  if (!eventsTable) return; // Container not ready yet
+  const list = eventsTable.querySelector('tbody');
+  if (!list) return; // tbody not found
+
+  // Defensive: ensure events is an array
+  const eventsList = Array.isArray(events) ? events : [];
+  if (!eventsList.length) {
     list.innerHTML = '<tr><td colspan="7" class="hint">No events yet.</td></tr>';
     return;
   }
 
-  list.innerHTML = events.map(e => {
+  list.innerHTML = eventsList.map(e => {
     const payerName = store.players?.find(p => p.id === e.payer_id)?.name || 'Unknown';
     return `
     <tr>
@@ -168,51 +180,69 @@ export function initExternalEvents() {
         .join('');
   }
 
-  $('submitEvent').addEventListener('click', async () => {
-    const title = $('eventTitle').value;
-    const event_type = $('eventType').value;
-    const event_date = $('eventDate').value;
-    const description = $('eventDesc').value;
-    const payer_id = $('eventPayer').value;
+  const submitEvent = $('submitEvent');
+  if (submitEvent) {
+    submitEvent.addEventListener('click', async () => {
+      const title = $('eventTitle').value;
+      const event_type = $('eventType').value;
+      const event_date = $('eventDate').value;
+      const description = $('eventDesc').value;
+      const payer_id = $('eventPayer').value;
 
-    if (!title || !event_type || !event_date || !payer_id) {
-      toast('Title, type, date, and payer required', true);
-      return;
-    }
+      if (!title || !event_type || !event_date || !payer_id) {
+        toast('Title, type, date, and payer required', true);
+        return;
+      }
 
-    const participants = Array.from($('participantsList').querySelectorAll('.participant-row'))
-      .filter(r => r.querySelector('.participant-check').checked)
-      .map(r => ({
-        player_id: r.dataset.playerId,
-        contract_id: r.querySelector('.participant-contract').value || null,
-        amount: parseFloat(r.querySelector('.participant-amount').value)
-      }));
+      const participantsList = $('participantsList');
+      if (!participantsList) {
+        toast('Event form not ready', true);
+        return;
+      }
 
-    if (!participants.length) {
-      toast('Select at least one player to share the cost', true);
-      return;
-    }
+      const participants = Array.from(participantsList.querySelectorAll('.participant-row'))
+        .filter(r => r.querySelector('.participant-check').checked)
+        .map(r => ({
+          player_id: r.dataset.playerId,
+          contract_id: r.querySelector('.participant-contract').value || null,
+          amount: parseFloat(r.querySelector('.participant-amount').value)
+        }));
 
-    try {
-      const event = await api.createEvent(title, event_type, event_date, participants, description, payer_id);
-      toast(`Event created: ${event.title} (AED ${event.total_paid.toFixed(2)} credited to payer)`);
-      $('eventTitle').value = '';
-      $('eventType').value = '';
-      $('eventDate').value = new Date().toISOString().split('T')[0];
-      $('eventDesc').value = '';
-      $('eventPayer').value = '';
+      if (!participants.length) {
+        toast('Select at least one player to share the cost', true);
+        return;
+      }
+
+      try {
+        const event = await api.createEvent(title, event_type, event_date, participants, description, payer_id);
+        toast(`Event created: ${event.title} (AED ${event.total_paid.toFixed(2)} credited to payer)`);
+        $('eventTitle').value = '';
+        $('eventType').value = '';
+        $('eventDate').value = new Date().toISOString().split('T')[0];
+        $('eventDesc').value = '';
+        $('eventPayer').value = '';
+        updateParticipantsList(store.players);
+        load();
+      } catch (e) { toast(e.message, true); }
+    });
+  }
+
+  const addParticipant = $('addParticipant');
+  if (addParticipant) {
+    addParticipant.addEventListener('click', () => {
       updateParticipantsList(store.players);
-      load();
-    } catch (e) { toast(e.message, true); }
-  });
-
-  $('addParticipant').addEventListener('click', () => {
-    updateParticipantsList(store.players);
-  });
+    });
+  }
 
   // Initialize with today's date
-  $('eventDate').value = new Date().toISOString().split('T')[0];
-  updateParticipantsList(store.players);
+  const eventDate = $('eventDate');
+  if (eventDate) {
+    eventDate.value = new Date().toISOString().split('T')[0];
+  }
+  // Safely update participants list (with guard against missing elements)
+  if ($('participantsList')) {
+    updateParticipantsList(store.players);
+  }
 }
 
 export function loadExternalEvents() {

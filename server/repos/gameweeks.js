@@ -33,12 +33,15 @@ export const gameweeksRepo = {
     const now = new Date().toISOString();
     db.prepare(`INSERT INTO gameweeks
       (id,contract_id,gw_number,contract_number,date,cost_per_gw,num_players,
-       teams_raw,captains_raw,score,comments,historical,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?)`).run(
+       teams_raw,captains_raw,score,comments,historical,created_at,
+       scoreline,teams_json,whatsapp_message,game_cost,game_cost_paid_by,kitty_earned)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)`).run(
       id, gw.contract_id, gw.gw_number ?? this.nextGwNumber(gw.contract_id),
       gw.contract_number ?? 0, gw.date || now.slice(0, 10), gw.cost_per_gw || 0,
       charges.length, gw.teams_raw || '', gw.captains_raw || '', gw.score || '',
-      gw.comments || '', now);
+      gw.comments || '', now,
+      gw.scoreline || '', gw.teams_json || null, gw.whatsapp_message || '',
+      gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
 
     const insCharge = db.prepare(`INSERT INTO charges
       (id,gameweek_id,player_id,team,is_captain,rate_type,amount) VALUES (?,?,?,?,?,?,?)`);
@@ -148,5 +151,33 @@ export const gameweeksRepo = {
       }
     }
     return this.get(gameweekId);
+  },
+
+  // Update game accounting: scoreline, team assignments, result, costs
+  updateGameAccounting(id, { scoreline, teams_json, whatsapp_message, game_cost, game_cost_paid_by, kitty_earned }) {
+    db.prepare(`UPDATE gameweeks
+      SET scoreline=?, teams_json=?, whatsapp_message=?, game_cost=?, game_cost_paid_by=?, kitty_earned=?
+      WHERE id=?`).run(
+      scoreline || '', teams_json || null, whatsapp_message || '',
+      game_cost || 0, game_cost_paid_by || 'self', kitty_earned || 0, id);
+    return this.get(id);
+  },
+
+  // Get full game data including results and financing
+  getFullGame(id) {
+    const g = this.get(id);
+    if (!g) return null;
+
+    // Add game result if exists
+    const result = db.prepare('SELECT * FROM game_results WHERE gameweek_id = ?').get(id);
+    if (result) {
+      g.result = result;
+    }
+
+    // Add financing records (water cost, kitty)
+    const financing = db.prepare('SELECT * FROM game_financing WHERE gameweek_id = ? ORDER BY created_at').all(id);
+    g.financing = financing;
+
+    return g;
   },
 };
