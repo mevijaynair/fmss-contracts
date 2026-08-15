@@ -6,6 +6,7 @@ import { loadDashboard } from './dashboard.js';
 
 let contractId = 'sat';
 let rows = [];                 // current preview rows (mutable amounts)
+let parseResult = null;        // full parser result with metadata
 
 const RATE_LABEL = {
   contracted_10: 'Contract', contracted_12: 'Contract',
@@ -15,13 +16,79 @@ const RATE_LABEL = {
 function statusLabel(r) {
   if (!r.matched) return '<span class="miss-badge">new / unmatched</span>';
   if (r.is_captain) return 'Captain';
+  if (r.player_type === 'outside') return `<span class="outside-badge">outside (${r.outside_cost} AED)</span>`;
   return r.rate_type === 'noncontract' ? 'Out of contract' : 'In contract';
+}
+
+async function showUnmatchedMapping(unmatched) {
+  if (!unmatched.length) return;
+
+  const mappedPlayers = {};
+  for (const { token, suggestions } of unmatched) {
+    if (suggestions.length === 1) {
+      mappedPlayers[token] = suggestions[0].id;
+      continue;
+    }
+    if (suggestions.length === 0) {
+      const name = prompt(`"${token}" not found. Enter player name or press Cancel to skip:`);
+      if (name) {
+        const player = store.players?.find(p =>
+          p.name.toLowerCase().includes(name.toLowerCase()) ||
+          name.toLowerCase().includes(p.name.toLowerCase())
+        );
+        if (player) mappedPlayers[token] = player.id;
+      }
+      continue;
+    }
+    const choice = prompt(
+      `Map "${token}" to:\n${suggestions.map(s => s.name).join(' / ')}\n(or type a name)`,
+      suggestions[0].name
+    );
+    if (choice) {
+      const s = suggestions.find(x => x.name === choice);
+      if (s) mappedPlayers[token] = s.id;
+      else {
+        const p = store.players?.find(x => x.name === choice);
+        if (p) mappedPlayers[token] = p.id;
+      }
+    }
+  }
+
+  // Apply mappings to rows
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r.matched && mappedPlayers[r.token]) {
+      const mapped = store.players.find(p => p.id === mappedPlayers[r.token]);
+      if (mapped) {
+        r.player_id = mapped.id;
+        r.display_name = mapped.name;
+        r.matched = true;
+        r.introduced_by = mapped.introduced_by || null;
+        r.player_type = mapped.player_type || 'regular';
+        r.outside_cost = mapped.outside_cost || null;
+      }
+    }
+  }
+}
+
+async function showOutsidePlayerPrompts() {
+  const outsidePlayers = rows.filter(r => r.player_type === 'outside' && r.matched);
+  for (const r of outsidePlayers) {
+    const choice = prompt(
+      `${r.display_name} is an outside player (${r.outside_cost} AED).\n\nHow to handle?\n1 = Relationship deduction (auto-credit ${r.introduced_by})\n2 = Direct payment (no auto-credit)`,
+      '1'
+    );
+    r.outside_handling = choice === '2' ? 'direct' : 'relationship';
+  }
 }
 
 function renderPreview(meta) {
   $('gdPreviewCard').hidden = false;
-  $('gdMeta').textContent =
-    `${rows.length} players · ${meta.teams.join(' / ')} · ${meta.bucket}-player rate`;
+  const outsideCount = rows.filter(r => r.player_type === 'outside').length;
+  let metaText = `${rows.length} players · ${meta.teams.join(' / ')} · ${meta.bucket}-player rate`;
+  if (outsideCount) metaText += ` · ${outsideCount} outside player(s)`;
+  $('gdMeta').textContent = metaText;
+
   $('gdTable').querySelector('tbody').innerHTML = rows.map((r, i) => `
     <tr>
       <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}</td>
@@ -54,12 +121,25 @@ async function doParse() {
   const text = $('gdText').value.trim();
   if (!text) { toast('Paste a team message first', true); return; }
   try {
-    const res = await api.parse(contractId, text);
-    rows = res.rows;
+    parseResult = await api.parse(contractId, text);
+    rows = parseResult.rows;
     if (!rows.length) { toast('No players detected', true); $('gdPreviewCard').hidden = true; return; }
-    renderPreview(res);
-    if (res.unmatched.length)
-      toast(`${res.unmatched.length} unmatched: ${res.unmatched.join(', ')}`, true);
+
+    // Show unmatched players with mapping suggestions
+    const unmatchedTokens = parseResult.unmatched;
+    if (unmatchedTokens.length) {
+      await showUnmatchedMapping(unmatchedTokens);
+      renderPreview(parseResult);
+      toast(`Mapped ${unmatchedTokens.length} unmatched players`, false);
+    } else {
+      renderPreview(parseResult);
+    }
+
+    // Check for outside players and prompt for handling
+    if (parseResult.hasOutsidePlayers) {
+      await showOutsidePlayerPrompts();
+      renderPreview(parseResult);
+    }
   } catch (e) { toast(e.message, true); }
 }
 
@@ -84,7 +164,12 @@ async function doConfirm() {
   const charges = rows.map(r => ({
     player_id: r.player_id, team: r.team, is_captain: r.is_captain,
     rate_type: r.rate_type, amount: Number(r.amount) || 0,
+    player_type: r.player_type,
+    outside_cost: r.outside_cost,
+    introduced_by: r.introduced_by,
+    outside_handling: r.outside_handling || 'relationship',  // default to relationship
   }));
+
   // Unmatched players have no id — confirm whether to create them.
   const newOnes = rows.filter(r => !r.player_id);
   if (newOnes.length) {
@@ -92,13 +177,25 @@ async function doConfirm() {
     if (!confirm(`Create ${newOnes.length} new player(s) and charge them?\n${names}`)) return;
     for (const r of newOnes) {
       const p = await api.createPlayer({ name: r.display_name });
-      charges.find(c => c === undefined);   // no-op safety
       charges[rows.indexOf(r)].player_id = p.id;
     }
     store.players = await api.players();
   }
+
   try {
     const gwResult = await api.createGameweek(gameweek, charges);
+
+    // Handle outside player charges with introducer credits
+    const outsidePlayers = charges.filter(c => c.player_type === 'outside' && c.introduced_by);
+    for (const outside of outsidePlayers) {
+      if (outside.outside_handling === 'relationship') {
+        await api.post(`/gameweeks/${gwResult.id}/outside-player-charge`, {
+          outside_player_id: outside.player_id,
+          introducer_id: outside.introduced_by,
+          cost: outside.outside_cost,
+        });
+      }
+    }
 
     // If team scores provided, record the game result
     const teamAName = $('gdTeamAName').value.trim();

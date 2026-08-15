@@ -110,7 +110,7 @@ function splitTeams(text) {
 /**
  * Parse a WhatsApp message into a charge preview.
  * @param text     raw message
- * @param players  roster [{id,name,aliases}]
+ * @param players  roster [{id,name,aliases,introduced_by,player_type,outside_cost}]
  * @param statusOf map player_id -> ledger status string (for in/out of contract)
  * @param rates    contract rate card
  */
@@ -118,6 +118,7 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
   const index = buildIndex(players);
   const blocks = splitTeams(text);
   const rows = [];
+  const unmatchedTokens = new Set();
   let teamCount = 0;
 
   for (const block of blocks) {
@@ -137,6 +138,7 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
       if (!norm || STOP.has(norm) || /\d|@/.test(raw)) continue;   // skip junk/times/handles
 
       const player = matchToken(raw, players, index);
+
       const r = {
         token: raw,
         team,
@@ -144,7 +146,16 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
         player_id: player ? player.id : null,
         display_name: player ? player.name : raw,
         matched: !!player,
+        // Enhanced: relationship metadata
+        introduced_by: player?.introduced_by || null,
+        player_type: player?.player_type || 'regular',  // 'regular' or 'outside'
+        outside_cost: player?.outside_cost || null,
       };
+
+      if (!player) {
+        unmatchedTokens.add(raw);
+      }
+
       rows.push(r);
       pendingCaptainFor = rows.length - 1;
     }
@@ -168,11 +179,25 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
     }
   }
 
+  // Build unmatched list with similar player suggestions
+  const unmatchedWithSuggestions = Array.from(unmatchedTokens).map(token => {
+    const suggestions = [];
+    for (const player of players) {
+      if (levenshtein(normalize(token), normalize(player.name)) <= 1) {
+        suggestions.push({ id: player.id, name: player.name });
+      }
+    }
+    return { token, suggestions };
+  });
+
   return {
     num_players: numPlayers,
     bucket,
     teams: [...new Set(rows.map(r => r.team))],
     rows,
-    unmatched: rows.filter(r => !r.matched).map(r => r.token),
+    unmatched: unmatchedWithSuggestions,
+    // Flag for outside players in this game
+    hasOutsidePlayers: rows.some(r => r.player_type === 'outside'),
+    outsidePlayerCount: rows.filter(r => r.player_type === 'outside').length,
   };
 }
