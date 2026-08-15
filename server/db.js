@@ -164,6 +164,46 @@ CREATE INDEX IF NOT EXISTS idx_audit_player ON audit_log(player_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
 
+-- Unified transaction ledger: every balance change (contribution, charge, event, transfer, adjustment)
+CREATE TABLE IF NOT EXISTS transactions (
+  id            TEXT PRIMARY KEY,
+  player_id     TEXT NOT NULL REFERENCES players(id),
+  contract_id   TEXT REFERENCES contracts(id),
+  type          TEXT NOT NULL CHECK(type IN ('contribution', 'charge', 'event_deduction', 'transfer_out', 'transfer_in', 'adjustment')),
+  amount        REAL NOT NULL,              -- positive = credit, negative = debit
+  description   TEXT,
+  related_player_id TEXT REFERENCES players(id),  -- for transfers (from_player)
+  event_id      TEXT,                       -- for external events (links to external_events table)
+  game_id       TEXT REFERENCES gameweeks(id),  -- for game charges
+  status        TEXT NOT NULL DEFAULT 'approved' CHECK(status IN ('pending', 'approved', 'rejected')),
+  approved_by   TEXT REFERENCES auth_users(id),  -- admin who approved
+  created_by    TEXT,                       -- player ID or admin ID who created
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  audit_notes   TEXT                        -- admin comments on edits
+);
+CREATE INDEX IF NOT EXISTS idx_txn_player ON transactions(player_id);
+CREATE INDEX IF NOT EXISTS idx_txn_contract ON transactions(contract_id);
+CREATE INDEX IF NOT EXISTS idx_txn_type ON transactions(type);
+CREATE INDEX IF NOT EXISTS idx_txn_status ON transactions(status);
+CREATE INDEX IF NOT EXISTS idx_txn_event ON transactions(event_id);
+CREATE INDEX IF NOT EXISTS idx_txn_game ON transactions(game_id);
+CREATE INDEX IF NOT EXISTS idx_txn_created ON transactions(created_at);
+
+-- External events (restaurant bills, venue costs, etc.) — groups related transactions
+CREATE TABLE IF NOT EXISTS external_events (
+  id            TEXT PRIMARY KEY,
+  title         TEXT NOT NULL,              -- "Team lunch at XYZ", "Venue rental"
+  description   TEXT,
+  event_date    TEXT NOT NULL,
+  event_type    TEXT NOT NULL,              -- 'meal', 'venue', 'equipment', 'other'
+  created_by    TEXT NOT NULL REFERENCES auth_users(id),  -- admin who created
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_event_type ON external_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_event_date ON external_events(event_date);
+
 CREATE TABLE IF NOT EXISTS admin_config (
   id                   TEXT PRIMARY KEY,
   admin_password_hash  TEXT NOT NULL,
@@ -311,6 +351,39 @@ export function initSchema() {
         db.prepare('SELECT id FROM contributions_pending LIMIT 1').get();
       } catch {
         // Already created in SCHEMA
+      }
+    },
+    // transactions: unified ledger for all balance changes
+    () => {
+      try {
+        db.prepare('SELECT id FROM transactions LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE transactions (
+          id TEXT PRIMARY KEY, player_id TEXT NOT NULL REFERENCES players(id),
+          contract_id TEXT REFERENCES contracts(id),
+          type TEXT NOT NULL CHECK(type IN ('contribution', 'charge', 'event_deduction', 'transfer_out', 'transfer_in', 'adjustment')),
+          amount REAL NOT NULL, description TEXT, related_player_id TEXT REFERENCES players(id),
+          event_id TEXT, game_id TEXT REFERENCES gameweeks(id),
+          status TEXT NOT NULL DEFAULT 'approved' CHECK(status IN ('pending', 'approved', 'rejected')),
+          approved_by TEXT REFERENCES auth_users(id), created_by TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, audit_notes TEXT)`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_txn_player ON transactions(player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_txn_contract ON transactions(contract_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_txn_type ON transactions(type)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_txn_status ON transactions(status)');
+      }
+    },
+    // external_events: groups related transactions (restaurant bills, venue costs, etc.)
+    () => {
+      try {
+        db.prepare('SELECT id FROM external_events LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE external_events (
+          id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, event_date TEXT NOT NULL,
+          event_type TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES auth_users(id),
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_event_type ON external_events(event_type)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_event_date ON external_events(event_date)');
       }
     },
   ];
