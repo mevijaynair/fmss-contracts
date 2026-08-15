@@ -13,6 +13,7 @@ import { statsRepo } from '../repos/stats.js';
 import { auditRepo } from '../repos/audit.js';
 import { authUsersRepo } from '../repos/auth_users.js';
 import { externalEventsRepo } from '../repos/external_events.js';
+import { openingBalancesRepo } from '../repos/opening_balances.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -487,6 +488,26 @@ r.get('/admin/transfers', wrap((req) => {
      ORDER BY t.created_at DESC
      LIMIT ?`
   ).all(status, Number(req.query.limit) || 100);
+}));
+
+// ---- opening balances (1 Aug baseline per contract) ----
+
+// Admin: import opening balances for a contract (bulk from CSV or manual entry).
+r.post('/admin/opening-balances/import', wrap((req) => {
+  requireAdmin(req);
+  const { contract_id, balances } = req.body;
+  if (!contract_id || !balances?.length) {
+    throw new Error('contract_id and balances array required');
+  }
+  return openingBalancesRepo.importBalances(db, playersRepo, contract_id, balances);
+}));
+
+// Admin: get current opening balances for a contract (for verification).
+r.get('/admin/opening-balances/:contractId', wrap((req) => {
+  requireAdmin(req);
+  const balances = openingBalancesRepo.getBalances(db, playersRepo, req.params.contractId);
+  const summary = openingBalancesRepo.getSummary(db, req.params.contractId);
+  return { balances, summary };
 }));
 
 export default r;

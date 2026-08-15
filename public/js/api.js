@@ -114,4 +114,10 @@ export const api = {
   },
   approveTransfer: (txnId) => req('POST', `/admin/transfers/${txnId}/approve`, {}),
   rejectTransfer: (txnId) => req('POST', `/admin/transfers/${txnId}/reject`, {}),
+
+  // ---- opening balances (1 Aug baseline) ----
+  importOpeningBalances: (contract_id, balances) =>
+    req('POST', '/admin/opening-balances/import', { contract_id, balances }),
+  getOpeningBalances: (contractId) =>
+    req('GET', `/admin/opening-balances/${contractId}`),
 };

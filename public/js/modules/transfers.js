@@ -66,7 +66,7 @@ function renderPlayerTransfersHistory() {
   `;
 }
 
-async function loadTransfers() {
+export async function loadTransfers() {
   const user = JSON.parse(localStorage.getItem('fmss_user') || '{}');
 
   if (user.role === 'player') {
@@ -182,8 +182,4 @@ export function initTransfers() {
   window.addEventListener('fmss:view', (e) => {
     if (e.detail === 'transfers') loadTransfers();
   });
-}
-
-export function loadTransfers() {
-  return loadTransfers();
 }
