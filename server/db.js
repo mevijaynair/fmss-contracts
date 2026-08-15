@@ -452,6 +452,26 @@ export function initSchema() {
       }
     },
 
+    // kitty_opening_balance: one-time immutable kitty balance snapshot (like player opening_balances)
+    () => {
+      try {
+        db.prepare('SELECT id FROM kitty_opening_balance LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE kitty_opening_balance (
+          id TEXT PRIMARY KEY,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          snapshot_date TEXT NOT NULL,        -- as of this date
+          opening_amount REAL NOT NULL,       -- starting kitty balance
+          breakdown_json TEXT,                -- JSON details: {old_sheets: {}, expenses: {}}
+          imported_by TEXT NOT NULL REFERENCES auth_users(id),
+          locked_at TEXT NOT NULL,
+          notes TEXT
+        )`);
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_kitty_opening_contract ON kitty_opening_balance(contract_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_kitty_opening_locked ON kitty_opening_balance(locked_at)');
+      }
+    },
+
     // gameweeks: add game accounting fields (scoreline, teams, message, costs, kitty)
     () => {
       const cols = db.prepare('PRAGMA table_info(gameweeks)').all();

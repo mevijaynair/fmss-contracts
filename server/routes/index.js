@@ -19,6 +19,7 @@ import { gameResultsRepo } from '../repos/game_results.js';
 import { gameFinancingRepo } from '../repos/game_financing.js';
 import { playerRelationshipsRepo } from '../repos/player_relationships.js';
 import { outsidePlayersRepo } from '../repos/outside_players.js';
+import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { parseTeams } from '../parser.js';
 
 const r = Router();
@@ -256,6 +257,40 @@ r.post('/admin/contributions/:id/reject', wrap((req) => {
 r.get('/kitty', wrap((req) => { requireAdmin(req); return { entries: kittyRepo.all(), ...kittyRepo.balance() }; }));
 r.post('/kitty', wrap((req) => { requireAdmin(req); return kittyRepo.create(req.body); }));
 r.delete('/kitty/:id', wrap((req) => { requireAdmin(req); kittyRepo.remove(req.params.id); return { ok: true }; }));
+
+// ---- kitty opening balance (one-time immutable snapshot) ----
+r.get('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
+  requireAdmin(req);
+  return kittyOpeningBalanceRepo.get(req.params.contractId);
+}));
+
+r.post('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
+  requireAdmin(req);
+  const { opening_amount, snapshot_date, breakdown_json, notes } = req.body;
+  if (opening_amount === undefined) throw new Error('opening_amount required');
+  return kittyOpeningBalanceRepo.import(
+    req.params.contractId,
+    opening_amount,
+    snapshot_date,
+    breakdown_json,
+    req.user.id,
+    notes
+  );
+}));
+
+r.delete('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
+  requireAdmin(req);
+  return kittyOpeningBalanceRepo.delete(req.params.contractId);
+}));
+
+// ---- kitty balance summary (opening + live transactions) ----
+r.get('/admin/contracts/:contractId/kitty-balance', wrap((req) => {
+  requireAdmin(req);
+  return {
+    current: kittyOpeningBalanceRepo.getCurrentBalance(req.params.contractId),
+    detailed: kittyOpeningBalanceRepo.getDetailedBreakdown(req.params.contractId),
+  };
+}));
 
 // ---- results: match history with full context ----
 r.get('/results', wrap((req) => {
