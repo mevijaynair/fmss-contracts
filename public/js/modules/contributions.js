@@ -56,6 +56,14 @@ async function renderPendingApprovals() {
   }
 
   const pending = await api.pendingContributions();
+
+  // If no pending, hide the card entirely
+  if (pending.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+
+  card.style.display = 'block';
   card.innerHTML = `
     <div class="card-header"><h3 class="card-title">Pending Approvals</h3>
       <span class="card-sub">${pending.length} awaiting review</span></div>
@@ -73,7 +81,7 @@ async function renderPendingApprovals() {
               <button class="btn btn-sm" data-approve="${p.id}">✓ Approve</button>
               <button class="btn btn-secondary btn-sm" data-reject="${p.id}">✕ Reject</button>
             </td>
-          </tr>`).join('') || '<tr><td colspan="6" class="hint">No pending submissions.</td></tr>'}
+          </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
