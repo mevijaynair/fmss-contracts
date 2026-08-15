@@ -459,11 +459,10 @@ export function initSchema() {
       } catch {
         db.exec(`CREATE TABLE kitty_opening_balance (
           id TEXT PRIMARY KEY,
-          contract_id TEXT NOT NULL REFERENCES contracts(id),
-          snapshot_date TEXT NOT NULL,        -- as of this date
-          opening_amount REAL NOT NULL,       -- starting kitty balance
-          breakdown_json TEXT,                -- JSON details: {old_sheets: {}, expenses: {}}
-          imported_by TEXT NOT NULL REFERENCES auth_users(id),
+          contract_id TEXT NOT NULL UNIQUE REFERENCES contracts(id),
+          snapshot_date TEXT NOT NULL,
+          opening_amount REAL NOT NULL,
+          imported_by TEXT,
           locked_at TEXT NOT NULL,
           notes TEXT
         )`);
