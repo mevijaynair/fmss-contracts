@@ -121,18 +121,30 @@ export function initOpeningBalances() {
       const balances = rawData
         .split('\n')
         .filter(line => line.trim())
-        .map(line => {
-          // Handle both tab and comma/space separation
+        .map((line, idx, arr) => {
+          // Skip header row (contains "Name" or "Player" or "Balance")
+          const isHeader = line.toLowerCase().includes('name')
+            || line.toLowerCase().includes('player')
+            || line.toLowerCase().includes('balance');
+          if (isHeader) return null;
+
+          // Handle both tab and space separation
           const parts = line.includes('\t')
             ? line.split('\t')
-            : line.match(/^(.*?)\s+([-\d.]+)$/);
+            : line.split(/\s+/);
 
-          if (!parts || parts.length < 2) return null;
+          // Try to find name and number (number is the last token or second-to-last)
+          if (parts.length < 2) return null;
 
-          return {
-            name: (parts[0] || '').trim(),
-            balance: parseFloat(parts[1] || parts[parts.length - 1])
-          };
+          const lastPart = parts[parts.length - 1];
+          const balance = parseFloat(lastPart);
+          if (isNaN(balance)) return null;
+
+          // Name is everything except the last token (the balance)
+          const name = parts.slice(0, -1).join(' ').trim();
+          if (!name) return null;
+
+          return { name, balance };
         })
         .filter(b => b && b.name && !isNaN(b.balance));
 
