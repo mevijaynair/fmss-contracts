@@ -1,4 +1,4 @@
-# Kitty Opening Balance — One-Time Immutable Snapshot
+# Kitty Opening Balance — Per-Contract, One-Time Immutable Entry
 
 **Status:** Complete, production-ready  
 **Date:** 2026-08-15  
@@ -8,31 +8,43 @@
 
 ## Overview
 
-The kitty opening balance is a **single immutable snapshot per contract** that captures the kitty's starting position (as of a specific date). Like player opening balances, this remains locked and historical — all live activity builds on top of it.
+Simple, clean kitty tracking model:
+- **Opening balance** — One locked entry per contract (e.g., Sat, Mon/Thu)
+- **Income/Expenses** — Single-line entries tagged to contract
+- **All trackable** — Every expense fully visible per contract
+- **Present balance** = Opening + all income - all expenses
 
 ```
-Present Kitty Balance = Opening Balance + Σ Live Transactions
-                      = Opening Balance + Σ(game_kitty, expenses, manual adjustments)
+Sat Kitty Balance = 2,734 (opening) + 1,553 (income) - 256 (expenses) = 4,031 AED
+Mon Kitty Balance = 1,500 (opening) + 2,200 (income) - 300 (expenses) = 3,400 AED
 ```
 
 ---
 
-## Why This Pattern?
+## Why This Model?
 
-Your current sheet shows:
+Your current sheet:
 ```
-Old sheet total:        2,734 AED
-2025 Income:           +4,506 AED  (jersey, contracts, kitty, free games)
-2026 Income:             +750 AED  (contracts free games)
-2026 Kitty:              +333 AED  (Sat) + 1,220 AED (Mon/Thu)
-Total Expenses:        -5,512 AED  (various)
-─────────────────────────────────
-Present Balance:        3,031 AED
+Abhi Handover:           640 AED
+Mon/Thu Kitty old:     1,405 AED
+Sat Kitty old:           745 AED
+Expenses:                  56 AED
+────────────────────────────────
+Opening (Till 08 Aug): 2,734 AED
+
+[Then 2025/2026 income/expenses mixed in]
 ```
 
-**Problem:** All mixed together; hard to verify, audit, or rebuild.
+**Problems:**
+- Hard to separate old from new
+- Expenses not tied to which contract they're for
+- Manual tracking of totals
 
-**Solution:** Lock the opening at a point in time (Till 08 Aug 2026 = **2,734 AED**), then track every addition/expense separately. Any audit can verify: "2,734 + all subsequent transactions = current position" ✓
+**Solution:**
+- Lock opening at **2,734 AED** (Till 08 Aug)
+- Every new entry labeled with contract_id (auto-categorization)
+- System calculates: opening + income - expenses = present balance
+- All expenses trackable: who, what, when, how much
 
 ---
 
@@ -40,22 +52,38 @@ Present Balance:        3,031 AED
 
 ### Table: `kitty_opening_balance`
 
-One row per contract (UNIQUE constraint):
+One row per contract (UNIQUE):
 
 ```sql
 CREATE TABLE kitty_opening_balance (
-  id TEXT PRIMARY KEY,                  -- kitty_opening_sat_1723000000
-  contract_id TEXT NOT NULL UNIQUE,     -- sat, mon, etc. (UNIQUE: only one per contract)
-  snapshot_date TEXT NOT NULL,          -- "2026-08-08" (as of this date)
-  opening_amount REAL NOT NULL,         -- 2734.00 (locked, immutable)
-  breakdown_json TEXT,                  -- Optional details: {old_sheets: {...}, expenses: {...}}
-  imported_by TEXT NOT NULL,            -- admin user who set this
-  locked_at TEXT NOT NULL,              -- timestamp when locked
-  notes TEXT                            -- "From Excel sheet Till 08 Aug 2026"
+  id TEXT PRIMARY KEY,              -- kitty_open_sat
+  contract_id TEXT NOT NULL,        -- sat, mon_thu, etc.
+  snapshot_date TEXT NOT NULL,      -- 2026-08-08
+  opening_amount REAL NOT NULL,     -- 2734.00 (locked)
+  imported_by TEXT NOT NULL,        -- admin user ID
+  locked_at TEXT NOT NULL,          -- when set
+  notes TEXT
 );
+
+UNIQUE(contract_id) -- Only one opening per contract
 ```
 
-**Key:** Only one opening balance per contract (enforced by UNIQUE on contract_id).
+### Entry Table: `kitty` (existing)
+
+Used for all income/expense entries:
+
+```sql
+CREATE TABLE kitty (
+  id TEXT PRIMARY KEY,
+  kind TEXT,          -- 'income' or 'expense'
+  label TEXT,         -- "Football pitch", "BBQ revenue", etc.
+  amount REAL,        -- 95, -256, etc.
+  date TEXT,
+  scope TEXT,         -- contract_id (sat, mon_thu, etc.) — KEY FOR AUTO-CATEGORIZATION
+  historical INT,     -- 0=live, 1=imported (excluded from calculations)
+  created_at TEXT
+);
+```
 
 ---
 
@@ -63,43 +91,32 @@ CREATE TABLE kitty_opening_balance (
 
 All require admin authentication.
 
-### 1. Set Opening Kitty Balance
+### 1. Set Opening Balance (one-time per contract)
 
 ```
 POST /admin/contracts/{contractId}/kitty-opening
-Content-Type: application/json
 
 {
   "opening_amount": 2734,
   "snapshot_date": "2026-08-08",
-  "breakdown_json": {
-    "old_sheets": {
-      "Abhi Handover": 640,
-      "Mon/Thu Kitty old sheets": 1405,
-      "Sat Kitty Old sheets": 745,
-      "Expense": 56
-    },
-    "notes": "From Excel sheet: Kitty Balance Old sheet (Till 08 Aug 2026)"
-  },
-  "notes": "Initial import from spreadsheet"
+  "notes": "From Excel sheet Till 08 Aug 2026"
 }
 
 Response:
 {
-  "id": "kitty_opening_sat_1723000000",
+  "id": "kitty_open_sat",
   "contract_id": "sat",
   "snapshot_date": "2026-08-08",
   "opening_amount": 2734,
-  "breakdown": { ... },
   "locked_at": "2026-08-15T10:30:00Z",
-  "notes": "Initial import from spreadsheet"
+  "notes": "From Excel sheet Till 08 Aug 2026"
 }
 ```
 
-**Error:** If opening already set for this contract:
+Error if already set:
 ```json
 {
-  "error": "Kitty opening balance already set for this contract. Edit or delete first."
+  "error": "Kitty opening already set for sat. Delete first if you need to change."
 }
 ```
 
@@ -110,17 +127,75 @@ GET /admin/contracts/{contractId}/kitty-opening
 
 Response:
 {
-  "id": "kitty_opening_sat_1723000000",
+  "id": "kitty_open_sat",
   "contract_id": "sat",
   "snapshot_date": "2026-08-08",
   "opening_amount": 2734,
-  "breakdown": { ... },
   "locked_at": "2026-08-15T10:30:00Z",
-  "notes": "Initial import from spreadsheet"
+  "notes": "From Excel sheet Till 08 Aug 2026"
 }
 ```
 
-### 3. Delete/Reset Opening Balance
+### 3. Get Kitty Balance (opening + all activity)
+
+```
+GET /admin/contracts/{contractId}/kitty-balance
+
+Response:
+{
+  "contract_id": "sat",
+  "opening_amount": 2734,
+  "snapshot_date": "2026-08-08",
+  "total_income": 1553,        -- all income entries + game kitty
+  "total_expense": 256,        -- all expense entries
+  "present_balance": 4031      -- 2734 + 1553 - 256
+}
+```
+
+### 4. Get Kitty Activity Log (all transactions)
+
+```
+GET /admin/contracts/{contractId}/kitty-activity
+
+Response:
+{
+  "contract_id": "sat",
+  "opening": {
+    "amount": 2734,
+    "snapshot_date": "2026-08-08",
+    "notes": "From Excel sheet Till 08 Aug 2026"
+  },
+  "activity": [
+    {
+      "id": "k_1",
+      "kind": "income",
+      "label": "Jersey Revenue 2025",
+      "amount": 1078,
+      "date": "2025-01-15",
+      "type": "kitty_entry"
+    },
+    {
+      "id": "gw_sat_1",
+      "kind": "income",
+      "label": "Game kitty earned",
+      "amount": 150,
+      "date": "2026-08-09",
+      "type": "game_kitty"
+    },
+    {
+      "id": "k_2",
+      "kind": "expense",
+      "label": "Football — pitch rental",
+      "amount": -95,
+      "date": "2026-08-10",
+      "type": "kitty_entry"
+    },
+    ... (all entries in date order)
+  ]
+}
+```
+
+### 5. Delete Opening Balance (for corrections)
 
 ```
 DELETE /admin/contracts/{contractId}/kitty-opening
@@ -131,286 +206,256 @@ Response:
 }
 ```
 
-**Note:** Only for corrections; deleting loses history. Use with care.
-
-### 4. Get Current Kitty Balance
+### 6. Get All Kitty Balances (summary across all contracts)
 
 ```
-GET /admin/contracts/{contractId}/kitty-balance
+GET /admin/kitty-summary
 
 Response:
 {
-  "current": {
-    "opening_amount": 2734,
-    "live_transactions": +297,  // all income/expenses since opening
-    "present_balance": 3031,
-    "snapshot_date": "2026-08-08",
-    "locked_at": "2026-08-15T10:30:00Z"
-  },
-  "detailed": {
-    "contract_id": "sat",
-    "opening": {
-      "amount": 2734,
-      "snapshot_date": "2026-08-08",
-      "breakdown": { ... },
-      "notes": "Initial import from spreadsheet"
+  "by_contract": [
+    {
+      "contract_id": "sat",
+      "opening_amount": 2734,
+      "total_income": 1553,
+      "total_expense": 256,
+      "present_balance": 4031
     },
-    "transactions": [
-      {
-        "id": "kitty_1",
-        "kind": "income",
-        "label": "Jersey Income 2025",
-        "amount": 1078,
-        "date": "2025-01-15",
-        "source": "kitty"
-      },
-      {
-        "id": "gw_sat_001",
-        "kind": "kitty_earned",
-        "label": "Game kitty earned",
-        "amount": 150,
-        "date": "2026-08-09",
-        "source": "game"
-      },
-      {
-        "id": "kitty_2",
-        "kind": "expense",
-        "label": "Football (pitch rental)",
-        "amount": -95,
-        "date": "2024-12-01",
-        "source": "kitty"
-      },
-      ... (all transactions in date order)
-    ],
-    "present_balance": 3031
+    {
+      "contract_id": "mon_thu",
+      "opening_amount": 1500,
+      "total_income": 2200,
+      "total_expense": 300,
+      "present_balance": 3400
+    }
+  ],
+  "summary": {
+    "total_opening": 4234,     -- sum of all openings
+    "total_income": 3753,      -- sum of all income
+    "total_expense": 556,      -- sum of all expenses
+    "total_present": 7431      -- sum of all present balances
   }
 }
 ```
 
 ---
 
-## Live Transaction Sources
+## How Expenses Stay Trackable
 
-The system automatically tracks kitty changes from:
+Every expense entry tags the contract via `scope`:
 
-### 1. **Game Kitty** (kitty_earned field)
-```
-When recording a game with kitty_earned = 150 AED
-→ Automatically added to kitty position
+```bash
+# Add expense to Sat kitty
+curl -X POST http://localhost:3100/api/kitty \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "kind": "expense",
+    "label": "Football — pitch rental on Sat",
+    "amount": 95,
+    "date": "2026-08-10",
+    "scope": "sat"  ← KEY: this ties to contract_id = sat
+  }'
 ```
 
-### 2. **Kitty Entries** (legacy kitty table)
-```
-When adding manual kitty entry (income/expense)
-→ Tracked in live transactions
-```
-
-### 3. **External Events** (future)
-```
-When recording team meal or venue expense
-→ Can mark as kitty-related
-```
+Then:
+- `GET /admin/contracts/sat/kitty-balance` → includes this expense
+- `GET /admin/contracts/sat/kitty-activity` → shows full detail
+- `GET /admin/kitty-summary` → aggregates across all contracts
 
 ---
 
-## Calculation Example
+## Example: Your Current Position
 
-Your current position:
-
+**Step 1: Set opening for Sat**
 ```
-Opening (Till 08 Aug):          2,734 AED
-─────────────────────────────────────────────────
-2025 Income (jersey, etc):      +1,078 AED
-2025 Kitty (various):           +1,381 AED
-2025 Contracts Free Revenue:      +750 AED
-
-2026 Sat Kitty:                   +333 AED
-2026 Mon/Thu Kitty:             +1,220 AED
-
-Expenses (various):             -5,512 AED
-─────────────────────────────────────────────────
-Current Balance:                 3,031 AED
+POST /admin/contracts/sat/kitty-opening
+{
+  "opening_amount": 2734,
+  "snapshot_date": "2026-08-08",
+  "notes": "From Excel: Abhi 640 + Mon/Thu 1405 + Sat 745 + Exp 56"
+}
 ```
 
-In system terms:
+**Step 2: Add all income/expenses as single-line entries**
+```
+POST /api/kitty (kind=income, scope=sat)   → Jersey Revenue 2025 = +1078
+POST /api/kitty (kind=income, scope=sat)   → Mon Kitty 2025 = +1381
+POST /api/kitty (kind=income, scope=sat)   → Contracts Free 2025 = +750
+POST /api/kitty (kind=income, scope=sat)   → Sat Kitty 2026 = +333
+POST /api/kitty (kind=income, scope=sat)   → Mon/Thu Kitty 2026 = +1220
+POST /api/kitty (kind=expense, scope=sat)  → Football expenses = -256
+POST /api/kitty (kind=expense, scope=sat)  → Iftar out of band = -36
+POST /api/kitty (kind=expense, scope=sat)  → Summer refreshments = -20
+```
+
+**Step 3: Get balance**
 ```
 GET /admin/contracts/sat/kitty-balance
-→ current.opening_amount: 2734
-→ current.live_transactions: +297  (= 2734 + all above - 2734)
-→ current.present_balance: 3031
+
+Response:
+{
+  "contract_id": "sat",
+  "opening_amount": 2734,
+  "total_income": 4762,      -- all those +amounts
+  "total_expense": 312,      -- all those -amounts
+  "present_balance": 7184    -- 2734 + 4762 - 312
+}
 ```
 
-Every transaction is auditable:
+**Step 4: View full activity**
 ```
-Transaction 1: Jersey Income 2025         +1,078 ✓
-Transaction 2: Mon Kitty 2025             +1,381 ✓
-...
-Transaction 47: Football expense            -95 ✓
-─────────────────────────────────────────────────
-Sum of all live transactions             +297
-Opening balance                         +2,734
-─────────────────────────────────────────────────
-Verifiable present balance              = 3,031 ✓
+GET /admin/contracts/sat/kitty-activity
+
+→ Shows opening (2734)
+→ Shows every income/expense line item with date, amount, label
+→ User can verify each entry and see what it's for
 ```
 
 ---
 
 ## Frontend Integration (TODO)
 
-### 1. **Opening Balance Setup** (one-time)
+### Dashboard: Kitty Summary
 ```
-Admin → Settings / Kitty → "Set Opening Balance"
-  snapshot_date: "2026-08-08" (date picker)
-  opening_amount: "2734" (number input)
-  breakdown: (optional, JSON paste)
+┌──────────────────────────────────────────────────────┐
+│ Kitty Overview (All Contracts)                       │
+├──────────────────────────────────────────────────────┤
+│ Total Opening:        4,234 AED                      │
+│ Total Income:        +3,753 AED                      │
+│ Total Expenses:        -556 AED                      │
+│ ────────────────────────────────────                 │
+│ Total Present:        7,431 AED                      │
+│                                                      │
+│ By Contract:                                        │
+│ • Sat:         2,734 → 4,031 (+1,553, -256)         │
+│ • Mon/Thu:     1,500 → 3,400 (+2,200, -300)         │
+└──────────────────────────────────────────────────────┘
+```
+
+### Per-Contract: Set Opening (once)
+```
+Admin → Settings → Kitty → "Set Sat Opening Balance"
+  opening_amount: 2734
+  snapshot_date: 2026-08-08
   notes: "From Excel sheet..."
   → Save (locked forever)
 ```
 
-### 2. **Kitty Dashboard**
+### Per-Contract: View Activity
 ```
-┌─────────────────────────────────────────┐
-│ Kitty Balance Summary                   │
-├─────────────────────────────────────────┤
-│ Opening (08 Aug 2026):        2,734 AED │
-│ Live Transactions:              +297 AED │
-│ ─────────────────────────────────────── │
-│ Present Balance:              3,031 AED │
-│                                         │
-│ Details:                                │
-│  • 2025 Income:              +1,078 AED │
-│  • 2025 Kitty:               +1,381 AED │
-│  • 2026 Expenses:            -5,512 AED │
-│  ... (expandable transaction list)      │
-└─────────────────────────────────────────┘
+Admin → Kitty → [Contract Tab] → Activity Log
+  Opening: 2,734 AED (08 Aug 2026)
+  ────────────────────────
+  + Jersey Revenue 2025:  1,078 AED
+  + Mon Kitty 2025:       1,381 AED
+  - Football expenses:      -95 AED
+  - Iftar charges:          -36 AED
+  ... (all entries visible)
+  ────────────────────────
+  Present:                4,031 AED ✓
 ```
 
-### 3. **Game Recording**
+### Quick Add: New Expense/Income
 ```
-When recording game with kitty_earned:
-  kitty_earned: 150 AED
-  → Automatically adds to live position
-  → Visible in "Detailed" breakdown
+Admin → Kitty → "Add Entry"
+  kind: [Income / Expense]
+  contract: [sat / mon_thu]  ← AUTO-TAGS
+  label: "Football — pitch rental"
+  amount: 95
+  date: 2026-08-10
+  → Save
+  
+  (Automatically added to sat kitty, 
+   present balance recalculated)
 ```
 
 ---
 
 ## Data Safety
 
-✅ **One-time entry** — Set once, locked forever (like opening player balances)  
-✅ **Immutable** — Cannot be edited; only deleted (audit trail)  
-✅ **Auditable** — Every transaction tracked separately  
-✅ **Verifiable** — Opening + all live txn = present balance  
-✅ **Comprehensive** — All income and expenses included
-
----
-
-## Migration from Current Sheet
-
-Step 1: **Audit current position**
-```
-Sum old sheets + all 2025/2026 activity
-= 2,734 (opening) + 297 (live) = 3,031 AED ✓
-```
-
-Step 2: **Set opening balance**
-```
-POST /admin/contracts/sat/kitty-opening
-{
-  opening_amount: 2734,
-  snapshot_date: "2026-08-08",
-  breakdown_json: {
-    Abhi Handover: 640,
-    Mon/Thu old: 1405,
-    Sat old: 745,
-    Expense: 56
-  },
-  notes: "Migrated from Excel sheet"
-}
-```
-
-Step 3: **Verify all transactions tracked**
-```
-GET /admin/contracts/sat/kitty-balance
-→ detailed.transactions should show all entries since 08 Aug
-```
-
-Step 4: **Compare with sheet**
-```
-Sheet present balance: 3,031 AED
-API present balance:   3,031 AED
-✓ Verified
-```
+✅ **Opening immutable** — Set once, locked forever  
+✅ **All expenses trackable** — Tagged to contract automatically  
+✅ **Fully auditable** — Every entry visible with date, label, amount  
+✅ **Verifiable** — Opening + income - expense = present (always true)  
+✅ **Per-contract view** — See Sat vs Mon/Thu separately  
+✅ **Summary available** — Roll up across all contracts  
 
 ---
 
 ## Code Organization
 
 **Database:**
-- `server/db.js` — Migration to create `kitty_opening_balance` table
+- `server/db.js` — Migration for `kitty_opening_balance` table
 
 **Repository:**
 - `server/repos/kitty_opening_balance.js` — Core logic
-  - `import()` — Set opening balance (one-time)
-  - `get()` — Retrieve for a contract
-  - `getCurrentBalance()` — Opening + live transactions
-  - `getDetailedBreakdown()` — Full transaction list
+  - `import()` — Set opening (one-time per contract)
+  - `get()` — Retrieve opening
+  - `getBalance()` — Opening + all income/expenses
+  - `getActivityLog()` — Full transaction history
+  - `getAllBalances()` — Summary across all contracts
 
 **API:**
-- `server/routes/index.js` — 4 endpoints (GET, POST, DELETE opening + GET balance summary)
+- `server/routes/index.js` — 6 endpoints
+  - POST/GET/DELETE `/admin/contracts/{id}/kitty-opening`
+  - GET `/admin/contracts/{id}/kitty-balance`
+  - GET `/admin/contracts/{id}/kitty-activity`
+  - GET `/admin/kitty-summary`
 
 ---
 
 ## Testing
 
 ```bash
-# 1. Set opening balance
+# 1. Set opening for Sat
 curl -X POST http://localhost:3100/api/admin/contracts/sat/kitty-opening \
   -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "opening_amount": 2734,
-    "snapshot_date": "2026-08-08",
-    "breakdown_json": {
-      "old_sheets": {"Abhi": 640, "Mon/Thu": 1405, "Sat": 745}
-    },
-    "notes": "Imported from spreadsheet"
-  }'
+  -d '{"opening_amount": 2734, "snapshot_date": "2026-08-08"}'
 
-# Response: opening balance created ✓
-
-# 2. Get opening
-curl http://localhost:3100/api/admin/contracts/sat/kitty-opening \
-  -H "Authorization: Bearer $TOKEN"
-
-# Response: opening details ✓
-
-# 3. Get current balance
-curl http://localhost:3100/api/admin/contracts/sat/kitty-balance \
-  -H "Authorization: Bearer $TOKEN"
-
-# Response: current + detailed breakdown ✓
-
-# 4. Record a game with kitty
-curl -X POST http://localhost:3100/api/gameweeks \
+# 2. Add income entry (tagged to sat)
+curl -X POST http://localhost:3100/api/kitty \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "gameweek": {
-      "contract_id": "sat",
-      "kitty_earned": 150
-    },
-    "charges": [...]
+    "kind": "income",
+    "label": "Jersey Revenue 2025",
+    "amount": 1078,
+    "date": "2025-01-15",
+    "scope": "sat"
   }'
 
-# 5. Check updated balance
+# 3. Add expense entry (tagged to sat)
+curl -X POST http://localhost:3100/api/kitty \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "kind": "expense",
+    "label": "Football pitch rental",
+    "amount": 95,
+    "date": "2026-08-10",
+    "scope": "sat"
+  }'
+
+# 4. Get balance
 curl http://localhost:3100/api/admin/contracts/sat/kitty-balance \
   -H "Authorization: Bearer $TOKEN"
 
-# Response: present_balance = 2734 + 297 + 150 = 3181 ✓
+# Response: opening 2734, income 1078, expense -95, present 3717 ✓
+
+# 5. Get activity log (all entries)
+curl http://localhost:3100/api/admin/contracts/sat/kitty-activity \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: shows opening + all transactions ✓
+
+# 6. Get summary (all contracts)
+curl http://localhost:3100/api/admin/kitty-summary \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: by_contract + totals ✓
 ```
 
 ---
 
 **Built:** August 15, 2026  
 **Pattern:** Mirrors opening_balances_repo  
+**Model:** Per-contract, single-line entries, auto-categorized by contract_id  
 **Status:** Production-ready

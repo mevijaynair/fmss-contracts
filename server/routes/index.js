@@ -258,24 +258,17 @@ r.get('/kitty', wrap((req) => { requireAdmin(req); return { entries: kittyRepo.a
 r.post('/kitty', wrap((req) => { requireAdmin(req); return kittyRepo.create(req.body); }));
 r.delete('/kitty/:id', wrap((req) => { requireAdmin(req); kittyRepo.remove(req.params.id); return { ok: true }; }));
 
-// ---- kitty opening balance (one-time immutable snapshot) ----
+// ---- kitty opening balance (one-time per contract) ----
+r.post('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
+  requireAdmin(req);
+  const { opening_amount, snapshot_date, notes } = req.body;
+  if (opening_amount === undefined) throw new Error('opening_amount required');
+  return kittyOpeningBalanceRepo.import(req.params.contractId, opening_amount, snapshot_date, req.user.id, notes);
+}));
+
 r.get('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
   requireAdmin(req);
   return kittyOpeningBalanceRepo.get(req.params.contractId);
-}));
-
-r.post('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
-  requireAdmin(req);
-  const { opening_amount, snapshot_date, breakdown_json, notes } = req.body;
-  if (opening_amount === undefined) throw new Error('opening_amount required');
-  return kittyOpeningBalanceRepo.import(
-    req.params.contractId,
-    opening_amount,
-    snapshot_date,
-    breakdown_json,
-    req.user.id,
-    notes
-  );
 }));
 
 r.delete('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
@@ -283,13 +276,22 @@ r.delete('/admin/contracts/:contractId/kitty-opening', wrap((req) => {
   return kittyOpeningBalanceRepo.delete(req.params.contractId);
 }));
 
-// ---- kitty balance summary (opening + live transactions) ----
+// ---- kitty balance per contract ----
 r.get('/admin/contracts/:contractId/kitty-balance', wrap((req) => {
   requireAdmin(req);
-  return {
-    current: kittyOpeningBalanceRepo.getCurrentBalance(req.params.contractId),
-    detailed: kittyOpeningBalanceRepo.getDetailedBreakdown(req.params.contractId),
-  };
+  return kittyOpeningBalanceRepo.getBalance(req.params.contractId);
+}));
+
+// ---- kitty activity log (opening + all transactions) ----
+r.get('/admin/contracts/:contractId/kitty-activity', wrap((req) => {
+  requireAdmin(req);
+  return kittyOpeningBalanceRepo.getActivityLog(req.params.contractId);
+}));
+
+// ---- all kitty balances (summary across contracts) ----
+r.get('/admin/kitty-summary', wrap((req) => {
+  requireAdmin(req);
+  return kittyOpeningBalanceRepo.getAllBalances();
 }));
 
 // ---- results: match history with full context ----
