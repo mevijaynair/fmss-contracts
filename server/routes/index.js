@@ -314,4 +314,45 @@ r.put('/admin/logins/:playerId/active', wrap((req) => {
   return { ok: true };
 }));
 
+// ---- PIN security ----
+
+// Player: change their own PIN (requires old PIN for verification).
+r.post('/my/pin/change', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Players only');
+  const { old_pin, new_pin } = req.body;
+  if (!old_pin || !new_pin) throw new Error('old_pin and new_pin required');
+  authUsersRepo.changePinForUser(db, req.user.id, req.user.playerId, old_pin, new_pin);
+  return { ok: true };
+}));
+
+// Player: set PIN on first login (no old PIN verification, just set the new one).
+r.post('/my/pin/set-initial', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Players only');
+  const { new_pin } = req.body;
+  if (!new_pin) throw new Error('new_pin required');
+  authUsersRepo.changePinForUser(db, req.user.id, req.user.playerId, null, new_pin);
+  return { ok: true };
+}));
+
+// ---- audit trail ----
+
+// Player: view their own audit log (logins, PIN changes, balance adjustments).
+r.get('/my/audit', wrap((req) => {
+  if (req.user.role !== 'player') throw new Error('Players only');
+  const logs = authUsersRepo.auditTrailForPlayer(db, req.user.playerId, 100);
+  return logs.map(l => ({ ...l, details: l.details ? JSON.parse(l.details) : null }));
+}));
+
+// Admin: view all audit logs with optional filters.
+r.get('/admin/audit', wrap((req) => {
+  requireAdmin(req);
+  const logs = authUsersRepo.auditTrailForAdmin(db, {
+    action: req.query.action,
+    player_id: req.query.player_id,
+    user_id: req.query.user_id,
+    since: req.query.since,
+  }, Number(req.query.limit) || 100);
+  return logs.map(l => ({ ...l, details: l.details ? JSON.parse(l.details) : null }));
+}));
+
 export default r;

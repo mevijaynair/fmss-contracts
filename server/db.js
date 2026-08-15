@@ -126,7 +126,12 @@ CREATE TABLE IF NOT EXISTS auth_users (
   id            TEXT PRIMARY KEY,
   email         TEXT UNIQUE,
   password_hash TEXT NOT NULL DEFAULT '',
-  pin           TEXT,                 -- players log in with a short PIN (low-stakes: view own balance)
+  pin           TEXT,                 -- current PIN (SHA-256 hashed with salt)
+  pin_salt      TEXT,                 -- random salt for PIN hash
+  requires_pin_change INTEGER NOT NULL DEFAULT 1,  -- 1 = must change PIN on first login
+  pin_changed_at TEXT,                -- timestamp of last PIN change
+  login_attempts INTEGER NOT NULL DEFAULT 0,       -- failed login count (for rate-limiting)
+  last_failed_login TEXT,              -- timestamp of last failed attempt
   role          TEXT NOT NULL DEFAULT 'player' CHECK(role IN ('player', 'admin')),
   player_id     TEXT REFERENCES players(id),
   is_active     INTEGER NOT NULL DEFAULT 1,
@@ -135,6 +140,29 @@ CREATE TABLE IF NOT EXISTS auth_users (
 CREATE INDEX IF NOT EXISTS idx_auth_email ON auth_users(email);
 CREATE INDEX IF NOT EXISTS idx_auth_role ON auth_users(role);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_player ON auth_users(player_id);
+
+CREATE TABLE IF NOT EXISTS pin_history (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES auth_users(id),
+  old_pin_hash  TEXT NOT NULL,
+  changed_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pin_history_user ON pin_history(user_id);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT REFERENCES auth_users(id),
+  player_id     TEXT REFERENCES players(id),  -- for actions not via auth (admin entry on player behalf)
+  action        TEXT NOT NULL,                -- login, pin_change, contribution, balance_adjust, etc.
+  details       TEXT,                         -- JSON with context (e.g. {"old_pin":"hash", "reason":"forgotten"})
+  ip_address    TEXT,
+  user_agent    TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_player ON audit_log(player_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
 
 CREATE TABLE IF NOT EXISTS admin_config (
   id                   TEXT PRIMARY KEY,
@@ -230,6 +258,44 @@ export function initSchema() {
       }
       // One login per player (idempotent).
       db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_player ON auth_users(player_id)');
+    },
+    // auth_users: add PIN security columns (pin_salt, requires_pin_change, pin_changed_at, login_attempts, last_failed_login)
+    () => {
+      const cols = db.prepare('PRAGMA table_info(auth_users)').all();
+      const hasPin_salt = cols.some(c => c.name === 'pin_salt');
+      if (!hasPin_salt) {
+        db.exec(`ALTER TABLE auth_users ADD COLUMN pin_salt TEXT`);
+        db.exec(`ALTER TABLE auth_users ADD COLUMN requires_pin_change INTEGER NOT NULL DEFAULT 1`);
+        db.exec(`ALTER TABLE auth_users ADD COLUMN pin_changed_at TEXT`);
+        db.exec(`ALTER TABLE auth_users ADD COLUMN login_attempts INTEGER NOT NULL DEFAULT 0`);
+        db.exec(`ALTER TABLE auth_users ADD COLUMN last_failed_login TEXT`);
+      }
+    },
+    // pin_history: track old PINs to prevent reuse
+    () => {
+      try {
+        db.prepare('SELECT id FROM pin_history LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE pin_history (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES auth_users(id),
+          old_pin_hash TEXT NOT NULL, changed_at TEXT NOT NULL)`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_pin_history_user ON pin_history(user_id)');
+      }
+    },
+    // audit_log: track all auth, balance, and contribution changes
+    () => {
+      try {
+        db.prepare('SELECT id FROM audit_log LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE audit_log (
+          id TEXT PRIMARY KEY, user_id TEXT REFERENCES auth_users(id),
+          player_id TEXT REFERENCES players(id),
+          action TEXT NOT NULL, details TEXT, ip_address TEXT, user_agent TEXT, created_at TEXT NOT NULL)`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_audit_player ON audit_log(player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at)');
+      }
     },
     // admin_config: exists (created in SCHEMA above)
     () => {

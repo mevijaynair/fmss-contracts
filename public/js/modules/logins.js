@@ -60,6 +60,10 @@ export function initLogins() {
       render(rows);
     } catch (e) { toast(e.message, true); }
   });
+  // Load table when this view is shown
+  window.addEventListener('fmss:view', (e) => {
+    if (e.detail === 'logins') load();
+  });
 }
 
 export function loadLogins() {

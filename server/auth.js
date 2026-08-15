@@ -9,24 +9,39 @@ const SECRET = process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
 const TOKEN_EXPIRY = '7d';
 
 export const auth = {
-  // Player login: player_id + PIN
-  loginPlayer(db, playerId, pin) {
+  // Player login: player_id + PIN (with rate-limiting and PIN change enforcement)
+  loginPlayer(db, authUsersRepo, playerId, pin) {
     const user = db.prepare(
-      `SELECT id, player_id, pin FROM auth_users
+      `SELECT id, player_id, pin, pin_salt, requires_pin_change FROM auth_users
        WHERE player_id = ? AND role = 'player' AND is_active = 1`
     ).get(playerId);
 
-    if (!user || String(user.pin) !== String(pin)) {
+    if (!user) {
       throw new Error('Wrong name or PIN');
     }
+
+    // Rate-limit: too many failed attempts?
+    if (authUsersRepo.isRateLimited(db, user.id)) {
+      throw new Error('Too many failed login attempts. Try again in 15 minutes.');
+    }
+
+    // Verify PIN (hashed comparison)
+    const { valid, requires_change } = authUsersRepo.verifyPin(pin, user);
+    if (!valid) {
+      authUsersRepo.recordFailedLogin(db, user.id);
+      throw new Error('Wrong name or PIN');
+    }
+
+    authUsersRepo.recordSuccessfulLogin(db, user.id);
 
     const payload = {
       userId: user.id,
       role: 'player',
       playerId: user.player_id,
+      requiresPinChange: requires_change === 1,
     };
     const token = jwt.sign(payload, SECRET, { expiresIn: TOKEN_EXPIRY });
-    return { token, expiresIn: TOKEN_EXPIRY };
+    return { token, expiresIn: TOKEN_EXPIRY, requiresPinChange: requires_change === 1 };
   },
 
   // Admin login: password-only

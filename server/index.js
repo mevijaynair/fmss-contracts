@@ -38,9 +38,9 @@ app.post('/api/login', (req, res) => {
 
     let result;
     if (player_id) {
-      // Player login: name (player_id) + PIN
+      // Player login: name (player_id) + PIN (now with rate-limiting + PIN change enforcement)
       if (!pin) return res.status(400).json({ error: 'PIN is required' });
-      result = auth.loginPlayer(db, player_id, pin);
+      result = auth.loginPlayer(db, authUsersRepo, player_id, pin);
     } else {
       // Admin login: password only
       if (!password) return res.status(400).json({ error: 'password is required' });

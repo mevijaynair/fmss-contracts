@@ -550,8 +550,10 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 /* ===== Cashier badge ===== */
 .tag-cashier { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--border-color); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
 
-/* ===== Login view ===== */
-.login-view { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg-main); }
+/* ===== Login view — full-screen overlay, hidden by default ===== */
+#loginView { position: fixed; inset: 0; display: none !important; align-items: center; justify-content: center;
+  background: var(--bg-main); z-index: 9999; }
+#loginView[style*="display: flex"] { display: flex !important; }
 .login-card { background: var(--bg-card); border-radius: 12px; padding: 2rem; box-shadow: var(--shadow-lg); max-width: 320px; width: 100%; }
 .login-header { text-align: center; margin-bottom: 2rem; }
 .login-header h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text-main); }
