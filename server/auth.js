@@ -5,8 +5,12 @@
 
 import jwt from 'jsonwebtoken';
 
-const SECRET = process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
 const TOKEN_EXPIRY = '7d';
+
+// Get SECRET dynamically so it reads the current env (loaded by index.js)
+function getSecret() {
+  return process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
+}
 
 export const auth = {
   // Player login: player_id + PIN (with rate-limiting and PIN change enforcement)
@@ -40,20 +44,20 @@ export const auth = {
       playerId: user.player_id,
       requiresPinChange: requires_change === 1,
     };
-    const token = jwt.sign(payload, SECRET, { expiresIn: TOKEN_EXPIRY });
+    const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
     return { token, expiresIn: TOKEN_EXPIRY, requiresPinChange: requires_change === 1 };
   },
 
   // Admin login: password-only
   loginAdmin(password) {
-    if (password !== SECRET) {
+    if (password !== getSecret()) {
       throw new Error('Invalid password');
     }
     const payload = {
       role: 'admin',
       adminMode: true,
     };
-    const token = jwt.sign(payload, SECRET, { expiresIn: TOKEN_EXPIRY });
+    const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
     return { token, expiresIn: TOKEN_EXPIRY };
   },
 
@@ -64,7 +68,7 @@ export const auth = {
     }
     const token = authHeader.slice(7);
     try {
-      return jwt.verify(token, SECRET);
+      return jwt.verify(token, getSecret());
     } catch (e) {
       throw new Error('Invalid or expired token');
     }
