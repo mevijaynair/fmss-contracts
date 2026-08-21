@@ -80,7 +80,7 @@ window.showPlayerDetailFor = async (playerId, cId) => {
     const player = { id: playerId, name: store.user?.email || 'My account' };
     const prevContract = contractId;
     contractId = cId;  // so renderPlayerDetail's contract lookup resolves
-    renderPlayerDetail(player, stats);
+    await renderPlayerDetail(player, stats);
     contractId = prevContract;
   } catch (e) {
     toast(`Failed to load stats: ${e.message}`, true);
@@ -91,15 +91,24 @@ window.showPlayerDetail = async (playerId) => {
   try {
     const stats = await api.get(`/players/${playerId}/stats?contract_id=${contractId}`);
     const player = store.players.find(p => p.id === playerId);
-    renderPlayerDetail(player, stats);
+    await renderPlayerDetail(player, stats);
   } catch (e) {
     toast(`Failed to load player stats: ${e.message}`, true);
   }
 };
 
-function renderPlayerDetail(player, stats) {
+async function renderPlayerDetail(player, stats) {
   const detailCard = $('playerDetailCard');
   $('playerDetailName').textContent = `${player.name} — ${store.contracts.find(c => c.id === contractId)?.name || ''}`;
+
+  // Fetch contributions for this player
+  let contributions = [];
+  try {
+    const data = await api.get(`/contributions?player_id=${player.id}&contract_id=${contractId}`);
+    contributions = data || [];
+  } catch (e) {
+    console.error('Failed to load contributions:', e);
+  }
 
   // Timeline
   const timelineHtml = stats.timeline.events.length > 0
@@ -152,6 +161,41 @@ function renderPlayerDetail(player, stats) {
       ${costBreakdownHtml}
     </div>
   `;
+
+  // Contributions table
+  const contributionsHtml = contributions.length > 0
+    ? `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead style="background: var(--bg-subtle);">
+          <tr>
+            <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Date</th>
+            <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Amount</th>
+            <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Comments</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${contributions.map(c => `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+              <td style="padding: 0.5rem;">${c.date || '—'}</td>
+              <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${c.amount > 0 ? 'var(--success)' : 'var(--danger)'};">${c.amount > 0 ? '+' : ''}${money(c.amount)}</td>
+              <td style="padding: 0.5rem; color: var(--text-muted);">${esc(c.comments || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`
+    : '<div class="hint">No contributions yet.</div>';
+
+  const detailsContainer = document.createElement('div');
+  detailsContainer.style.cssText = 'margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);';
+  detailsContainer.innerHTML = `
+    <div style="font-weight: 600; margin-bottom: 1rem;">Contributions</div>
+    ${contributionsHtml}
+  `;
+
+  const statsContainer = $('playerStatsGrid').parentElement;
+  const existingDetails = statsContainer.querySelector('[data-contributions-table]');
+  if (existingDetails) existingDetails.remove();
+  detailsContainer.setAttribute('data-contributions-table', '');
+  statsContainer.appendChild(detailsContainer);
 
   detailCard.hidden = false;
   currentDetailPlayerId = player.id;
