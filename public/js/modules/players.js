@@ -2,6 +2,7 @@
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, balCell, contractSeg, openModal, closeModal, today } from '../util.js';
+import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 
 let contractId = 'sat';
 let currentDetailPlayerId = null;
@@ -192,8 +193,55 @@ function addPlayerModal() {
 }
 
 export function initPlayers() {
-  if (!isPlayer()) $('plAdd').addEventListener('click', addPlayerModal);
+  if (!isPlayer()) {
+    $('plAdd').addEventListener('click', addPlayerModal);
+    initSetupBanner();
+    initOpeningBalances();
+  }
   $('playerDetailClose').addEventListener('click', closePlayerDetail);
+}
+
+function initSetupBanner() {
+  const toggle = $('setupToggle');
+  const form = $('setupFormContainer');
+  if (!toggle || !form) return;
+
+  toggle.addEventListener('click', () => {
+    const isHidden = form.style.display === 'none';
+    form.style.display = isHidden ? 'block' : 'none';
+    toggle.textContent = isHidden ? 'Hide form' : 'Show form';
+    if (isHidden) renderSetupForm();
+  });
+}
+
+function renderSetupForm() {
+  const form = $('setupFormContainer');
+  // Re-render the opening balances form in the setup banner
+  const contractSelect = `
+    <div style="max-width: 400px;">
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Select Contract</label>
+        <select id="balanceContract" required style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 8px;">
+          <option value="">Choose contract…</option>
+          ${store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Opening Balances (Name, Balance)</label>
+        <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">Format: one per line, can include headers. Example: "Toby -700"</p>
+        <textarea id="balanceData" placeholder="Name&#9;Balance
+Vijay&#9;0
+Toby&#9;-700
+..." style="width: 100%; min-height: 120px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px;"></textarea>
+      </div>
+      <div style="display: flex; gap: 0.6rem;">
+        <button type="button" class="btn" id="submitBalances">Import Balances</button>
+        <button type="button" class="btn btn-secondary" id="clearBalances">Clear</button>
+      </div>
+    </div>
+  `;
+  form.innerHTML = contractSelect;
+  loadOpeningBalances();
 }
 
 export function loadPlayers() {
@@ -201,8 +249,31 @@ export function loadPlayers() {
     // Hide admin-only chrome; "My Ledger" lists all contracts as rows.
     $('plAdd').style.display = 'none';
     $('plContractSeg').innerHTML = '';
+    const banner = $('setupBanner');
+    if (banner) banner.style.display = 'none';
     return render();
   }
+
+  // Show setup banner only if no opening balances have been imported yet
+  checkAndShowSetupBanner();
   contractSeg($('plContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
   return render();
+}
+
+async function checkAndShowSetupBanner() {
+  const banner = $('setupBanner');
+  if (!banner) return;
+
+  try {
+    // Check if any contract has opening balances
+    const hasAny = await Promise.all(
+      store.contracts.map(c => api.get(`/admin/contracts/${c.id}/kitty-opening`).catch(() => null))
+    ).then(results => results.some(r => r !== null));
+
+    // Hide banner if opening balances already exist
+    banner.style.display = hasAny ? 'none' : 'block';
+  } catch (e) {
+    // Keep banner visible if there's an error checking
+    banner.style.display = 'block';
+  }
 }

@@ -7,12 +7,15 @@ const ADMIN_NAV = [
   { view: 'contributions', label: 'Contributions', title: 'Contributions' },
   { view: 'gameweeks',     label: 'Game History',  title: 'Game History' },
   { view: 'kitty',         label: 'Kitty',         title: 'Club Kitty' },
+  { view: 'settings',      label: 'Settings',      title: 'Contract Settings & Admin' },
+];
+
+// Advanced/rarely-used admin items — collapsed into Settings
+const ADMIN_ADVANCED = [
   { view: 'events',        label: 'External Events', title: 'External Events' },
-  { view: 'opening-balances', label: 'Opening Balances', title: 'Opening Balances' },
   { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment' },
   { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers' },
   { view: 'logins',        label: 'Player Logins', title: 'Player Logins' },
-  { view: 'settings',      label: 'Settings',      title: 'Contract Settings' },
 ];
 
 const PLAYER_NAV = [

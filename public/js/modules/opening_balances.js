@@ -87,84 +87,28 @@ async function loadBalances(contractId) {
 }
 
 export function initOpeningBalances() {
-  // Render the form into the container
-  const formContainer = $('balancesFormContainer');
-  if (formContainer) {
-    formContainer.innerHTML = renderImportForm();
-  }
+  attachImportHandlers();
+}
 
-  // Wire event handlers
+function attachImportHandlers() {
+  const formContainer = $('balancesFormContainer');
+  if (!formContainer) return;
+
   const contractSelect = $('balanceContract');
   if (contractSelect) {
     contractSelect.addEventListener('change', (e) => {
-      if (e.target.value) loadBalances(e.target.value);
+      if (e.target.value) {
+        loadBalances(e.target.value);
+      } else {
+        // Show form when contract is deselected
+        showImportForm();
+      }
     });
   }
 
   const submitBtn = $('submitBalances');
   if (submitBtn) {
-    submitBtn.addEventListener('click', async () => {
-      const contractId = $('balanceContract').value;
-      const rawData = $('balanceData').value;
-
-      if (!contractId) {
-        toast('Select a contract', true);
-        return;
-      }
-
-      if (!rawData.trim()) {
-        toast('Paste opening balances data', true);
-        return;
-      }
-
-      // Parse the pasted data (name + balance per line)
-      const balances = rawData
-        .split('\n')
-        .filter(line => line.trim())
-        .map((line, idx, arr) => {
-          // Skip header row (contains "Name" or "Player" or "Balance")
-          const isHeader = line.toLowerCase().includes('name')
-            || line.toLowerCase().includes('player')
-            || line.toLowerCase().includes('balance');
-          if (isHeader) return null;
-
-          // Handle both tab and space separation
-          const parts = line.includes('\t')
-            ? line.split('\t')
-            : line.split(/\s+/);
-
-          // Try to find name and number (number is the last token or second-to-last)
-          if (parts.length < 2) return null;
-
-          const lastPart = parts[parts.length - 1];
-          const balance = parseFloat(lastPart);
-          if (isNaN(balance)) return null;
-
-          // Name is everything except the last token (the balance)
-          const name = parts.slice(0, -1).join(' ').trim();
-          if (!name) return null;
-
-          return { name, balance };
-        })
-        .filter(b => b && b.name && !isNaN(b.balance));
-
-      if (!balances.length) {
-        toast('No valid data found. Format: Name Amount per line', true);
-        return;
-      }
-
-      try {
-        const result = await api.importOpeningBalances(contractId, balances);
-        toast(`Imported ${result.imported} balances${result.errors.length ? `, ${result.errors.length} errors` : ''}`);
-        if (result.errors.length) {
-          console.log('Import errors:', result.errors);
-        }
-        $('balanceData').value = '';
-        loadBalances(contractId);
-      } catch (e) {
-        toast(e.message, true);
-      }
-    });
+    submitBtn.addEventListener('click', doImport);
   }
 
   const clearBtn = $('clearBalances');
@@ -175,8 +119,70 @@ export function initOpeningBalances() {
   }
 }
 
+async function doImport() {
+  const contractId = $('balanceContract').value;
+  const rawData = $('balanceData').value;
+
+  if (!contractId) {
+    toast('Select a contract', true);
+    return;
+  }
+
+  if (!rawData.trim()) {
+    toast('Paste opening balances data', true);
+    return;
+  }
+
+  const balances = rawData
+    .split('\n')
+    .filter(line => line.trim())
+    .map((line) => {
+      const isHeader = line.toLowerCase().includes('name')
+        || line.toLowerCase().includes('player')
+        || line.toLowerCase().includes('balance');
+      if (isHeader) return null;
+
+      const parts = line.includes('\t')
+        ? line.split('\t')
+        : line.split(/\s+/);
+
+      if (parts.length < 2) return null;
+
+      const lastPart = parts[parts.length - 1];
+      const balance = parseFloat(lastPart);
+      if (isNaN(balance)) return null;
+
+      const name = parts.slice(0, -1).join(' ').trim();
+      if (!name) return null;
+
+      return { name, balance };
+    })
+    .filter(b => b && b.name && !isNaN(b.balance));
+
+  if (!balances.length) {
+    toast('No valid data found. Format: Name Amount per line', true);
+    return;
+  }
+
+  try {
+    const result = await api.importOpeningBalances(contractId, balances);
+    toast(`✓ Imported ${result.imported} balances${result.errors.length ? `, ${result.errors.length} errors` : ''}`);
+    $('balanceData').value = '';
+    loadBalances(contractId);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function showImportForm() {
+  const formContainer = $('balancesFormContainer');
+  if (formContainer) {
+    formContainer.innerHTML = renderImportForm();
+    attachImportHandlers();
+  }
+}
+
 export function loadOpeningBalances() {
-  // Load balances if contract is selected
   const contractId = $('balanceContract')?.value;
   if (contractId) loadBalances(contractId);
 }
