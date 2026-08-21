@@ -17,22 +17,27 @@ export const kittyRepo = {
         COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) AS expense
       FROM kitty WHERE historical = 0`).get();
 
-    // Contract profits: sum of net standing from contracts with games recorded
+    // Contract profits: sum of (contributed - charged) from contracts with games recorded
     const contractProfits = db.prepare(`
-      SELECT COALESCE(SUM(
-        COALESCE(l.contributed, 0) - COALESCE(l.charged, 0)
-      ), 0) as profit
-      FROM ledgers l
-      INNER JOIN (
-        SELECT player_id, contract_id, COUNT(*) as games
-        FROM gameweeks
-        WHERE contract_id IN (SELECT id FROM contracts)
-        GROUP BY player_id, contract_id
-        HAVING games > 0
-      ) gw ON l.player_id = gw.player_id AND l.contract_id = gw.contract_id
+      SELECT COALESCE(SUM(profit), 0) as total_profit
+      FROM (
+        SELECT
+          l.contract_id,
+          COALESCE(SUM(CASE WHEN con.kind='income' THEN con.amount ELSE 0 END), 0) as contributed,
+          COALESCE(SUM(CASE WHEN ch.id IS NOT NULL THEN ch.amount ELSE 0 END), 0) as charged,
+          COUNT(DISTINCT gw.id) as games,
+          (COALESCE(SUM(CASE WHEN con.kind='income' THEN con.amount ELSE 0 END), 0) -
+           COALESCE(SUM(CASE WHEN ch.id IS NOT NULL THEN ch.amount ELSE 0 END), 0)) as profit
+        FROM ledgers l
+        LEFT JOIN contributions con ON l.player_id = con.player_id AND l.contract_id = con.contract_id AND con.historical = 0
+        LEFT JOIN charges ch ON l.player_id = ch.player_id
+        LEFT JOIN gameweeks gw ON ch.gameweek_id = gw.id AND gw.contract_id = l.contract_id
+        WHERE gw.id IS NOT NULL
+        GROUP BY l.contract_id
+      ) profit_by_contract
     `).get();
 
-    const contractProfit = contractProfits?.profit || 0;
+    const contractProfit = contractProfits?.total_profit || 0;
 
     return {
       opening: opening(),
