@@ -65,6 +65,18 @@ r.put('/players/:id', wrap((req) => {
   if (req.user.role !== 'admin') throw new Error('Admin only');
   return playersRepo.update(req.params.id, req.body);
 }));
+r.delete('/admin/players/:id', wrap((req) => {
+  // Admin: completely delete a player + all ledger/contribution entries
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  playersRepo.delete(req.params.id);
+  return { success: true, message: `Player ${req.params.id} deleted` };
+}));
+r.post('/admin/players/:id/reset', wrap((req) => {
+  // Admin: reset a player's balance to 0, clear contributions, keep player
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  playersRepo.reset(req.params.id);
+  return { success: true, message: `Player ${req.params.id} reset` };
+}));
 r.get('/players/:id/ledgers', wrap((req) => {
   // Admin: see any player's ledgers; Player: see only self
   if (req.user.role === 'player' && req.params.id !== req.user.playerId) {

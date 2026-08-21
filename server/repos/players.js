@@ -49,4 +49,15 @@ export const playersRepo = {
     // Find player by exact name match (case-insensitive)
     return row(db.prepare('SELECT * FROM players WHERE LOWER(name) = LOWER(?)').get(name));
   },
+  delete(id) {
+    // Complete removal: player + all ledger rows + all contributions
+    db.prepare('DELETE FROM contributions WHERE player_id = ?').run(id);
+    db.prepare('DELETE FROM ledgers WHERE player_id = ?').run(id);
+    db.prepare('DELETE FROM players WHERE id = ?').run(id);
+  },
+  reset(id) {
+    // Keep player, clear all contributions and charges for all contracts; balance → 0
+    db.prepare('DELETE FROM contributions WHERE player_id = ?').run(id);
+    db.prepare('UPDATE ledgers SET opening_balance = 0 WHERE player_id = ?').run(id);
+  },
 };

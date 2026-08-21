@@ -34,6 +34,8 @@ async function render() {
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
+        <button class="btn btn-tertiary btn-sm" data-reset="${l.player_id}" title="Reset balance to 0, clear contributions">Reset</button>
+        <button class="btn btn-danger btn-sm" data-delete="${l.player_id}" title="Completely remove player">Delete</button>
       </td>
     </tr>`; }).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
 
@@ -44,6 +46,10 @@ async function render() {
     }));
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
+  $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
+    btn.addEventListener('click', () => resetPlayerModal(btn.dataset.reset)));
+  $('playersTable').querySelectorAll('[data-delete]').forEach(btn =>
+    btn.addEventListener('click', () => deletePlayerModal(btn.dataset.delete)));
 }
 
 // Player "My Ledger": their own balances across all contracts (read-only), and
@@ -173,6 +179,42 @@ function payModal(playerId) {
       closeModal(); toast('Contribution added ✓'); render();
     } catch (e) { toast(e.message, true); }
   });
+}
+
+function resetPlayerModal(playerId) {
+  const p = store.players.find(x => x.id === playerId);
+  openModal(`Reset ${p?.name || 'player'}?`, `
+    <p style="margin-bottom: 1rem;">This will clear all contributions and charges, resetting the balance to 0. The player remains in the system.</p>
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn" id="confirm_reset" style="flex: 1;">Yes, reset</button>
+      <button class="btn btn-secondary" id="cancel_reset" style="flex: 1;">Cancel</button>
+    </div>`);
+  $('confirm_reset').addEventListener('click', async () => {
+    try {
+      await api.post(`/admin/players/${playerId}/reset`, {});
+      store.players = await api.players();
+      closeModal(); toast('Player reset ✓'); render();
+    } catch (e) { toast(e.message, true); }
+  });
+  $('cancel_reset').addEventListener('click', closeModal);
+}
+
+function deletePlayerModal(playerId) {
+  const p = store.players.find(x => x.id === playerId);
+  openModal(`Delete ${p?.name || 'player'}?`, `
+    <p style="margin-bottom: 1rem; color: var(--danger);">⚠️ This will completely remove the player and all their transaction history. This cannot be undone.</p>
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;">Yes, delete permanently</button>
+      <button class="btn btn-secondary" id="cancel_delete" style="flex: 1;">Cancel</button>
+    </div>`);
+  $('confirm_delete').addEventListener('click', async () => {
+    try {
+      await api.delete(`/admin/players/${playerId}`);
+      store.players = await api.players();
+      closeModal(); toast('Player deleted ✓'); render();
+    } catch (e) { toast(e.message, true); }
+  });
+  $('cancel_delete').addEventListener('click', closeModal);
 }
 
 function addPlayerModal() {
