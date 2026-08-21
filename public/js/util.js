@@ -41,10 +41,27 @@ export function contractSeg(host, contracts, active, onPick) {
     }));
 }
 
-// Generic modal.
+// Generic modal with keyboard support
+let modalEscapeListener = null;
 export function openModal(title, bodyHtml) {
   $('modalTitle').textContent = title;
   $('modalBody').innerHTML = bodyHtml;
   $('modal').hidden = false;
+
+  // Add escape key support
+  if (modalEscapeListener) {
+    document.removeEventListener('keydown', modalEscapeListener);
+  }
+  modalEscapeListener = (e) => {
+    if (e.key === 'Escape') closeModal();
+  };
+  document.addEventListener('keydown', modalEscapeListener);
 }
-export function closeModal() { $('modal').hidden = true; }
+
+export function closeModal() {
+  $('modal').hidden = true;
+  if (modalEscapeListener) {
+    document.removeEventListener('keydown', modalEscapeListener);
+    modalEscapeListener = null;
+  }
+}

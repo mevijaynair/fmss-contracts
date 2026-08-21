@@ -164,6 +164,13 @@ function showLoginError(message) {
   const err = $('loginError');
   err.textContent = message;
   err.style.display = 'block';
+  // Auto-clear error on next input
+  const toggle = $('playerLoginToggle');
+  const playerSelect = $('loginPlayer');
+  const passwordInput = $('loginPassword');
+  [toggle, playerSelect, passwordInput].forEach(el => {
+    el.addEventListener('input', () => { err.style.display = 'none'; }, { once: true });
+  });
 }
 
 // Let any module refresh the shared player list after a create.
