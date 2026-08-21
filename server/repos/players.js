@@ -56,7 +56,7 @@ export const playersRepo = {
     db.prepare('DELETE FROM players WHERE id = ?').run(id);
   },
   reset(id) {
-    // Keep player, clear all contributions and charges for all contracts; balance → 0
+    // Keep player, clear contributions but KEEP charges for historical record; balance → accumulated charges
     db.prepare('DELETE FROM contributions WHERE player_id = ?').run(id);
     db.prepare('UPDATE ledgers SET opening_balance = 0 WHERE player_id = ?').run(id);
   },

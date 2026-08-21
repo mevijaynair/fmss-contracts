@@ -184,7 +184,7 @@ function payModal(playerId) {
 function resetPlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
   openModal(`Reset ${p?.name || 'player'}?`, `
-    <p style="margin-bottom: 1rem;">This will clear all contributions and charges, resetting the balance to 0. The player remains in the system.</p>
+    <p style="margin-bottom: 1rem;">This will clear contributions, but keep game charges for historical record. Opening balance → 0. Use for realignment.</p>
     <div style="display: flex; gap: 0.5rem;">
       <button class="btn" id="confirm_reset" style="flex: 1;">Yes, reset</button>
       <button class="btn btn-secondary" id="cancel_reset" style="flex: 1;">Cancel</button>
