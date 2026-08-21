@@ -320,9 +320,57 @@ function addPlayerModal() {
   });
 }
 
+function bulkImportModal() {
+  openModal('Bulk Import Players & Balances', `
+    <div style="margin-bottom: 1.5rem;">
+      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Select Contract</label>
+      <select id="bi_contract" required style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 8px;">
+        <option value="">Choose contract…</option>
+        ${store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Data (Name + Balance)</label>
+      <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">
+        Copy from Excel: Name in column 1, Opening Balance in column 2. One per line.
+      </p>
+      <textarea id="bi_data" placeholder="Toby&#9;-700
+Vijay&#9;0
+Joe&#9;223
+..." style="width: 100%; min-height: 200px; padding: 0.8rem; font-family: monospace; font-size: 0.9rem; border: 1px solid var(--border-color); border-radius: 8px;"></textarea>
+    </div>
+
+    <button class="btn full-w" id="bi_import">Import</button>`);
+
+  $('bi_import').addEventListener('click', async () => {
+    const contractId = $('bi_contract').value;
+    const data = $('bi_data').value;
+
+    if (!contractId) { toast('Select a contract', true); return; }
+    if (!data.trim()) { toast('Paste data', true); return; }
+
+    try {
+      const result = await api.bulkImportPlayersAndBalances(contractId, data);
+      store.players = await api.players();
+      closeModal();
+      toast(`✓ Imported: ${result.created} players, ${result.updated} balances`);
+      render();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 export function initPlayers() {
   if (!isPlayer()) {
     $('plAdd').addEventListener('click', addPlayerModal);
+
+    // Add bulk import button
+    const bulkImportBtn = document.createElement('button');
+    bulkImportBtn.className = 'btn btn-secondary';
+    bulkImportBtn.textContent = '📥 Bulk Import';
+    bulkImportBtn.addEventListener('click', bulkImportModal);
+    $('plAdd').parentElement.appendChild(bulkImportBtn);
+
     initSetupBanner();
     initOpeningBalances();
   }

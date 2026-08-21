@@ -128,4 +128,8 @@ export const api = {
     req('GET', '/admin/sandbox/players'),
   deleteSandboxPlayer: (playerId) =>
     req('DELETE', `/admin/sandbox/players/${playerId}`),
+
+  // ---- bulk import ----
+  bulkImportPlayersAndBalances: (contract_id, data) =>
+    req('POST', '/admin/bulk-import/players-and-balances', { contract_id, data }),
 };

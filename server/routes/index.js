@@ -77,6 +77,49 @@ r.post('/admin/players/:id/reset', wrap((req) => {
   playersRepo.reset(req.params.id);
   return { success: true, message: `Player ${req.params.id} reset` };
 }));
+r.post('/admin/bulk-import/players-and-balances', wrap((req) => {
+  // Admin: bulk create players and set opening balances for a contract
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  const { contract_id, data } = req.body;
+  if (!contract_id || !data) throw new Error('contract_id and data required');
+
+  const lines = data.trim().split('\n').filter(l => l.trim());
+  let created = 0, updated = 0;
+
+  for (const line of lines) {
+    const parts = line.split(/\t|,/).map(p => p.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+
+    const name = parts[0];
+    const balance = parseFloat(parts[1]);
+    if (!name || isNaN(balance)) continue;
+
+    // Create player if not exists
+    let player = db.prepare('SELECT id FROM players WHERE LOWER(name) = LOWER(?)').get(name);
+    if (!player) {
+      const playerId = playersRepo.create({ name, aliases: [] }).id;
+      created++;
+    } else {
+      created++; // count as created for new entries
+    }
+
+    // Get player id
+    player = db.prepare('SELECT id FROM players WHERE LOWER(name) = LOWER(?)').get(name);
+
+    // Update or create ledger
+    const existing = db.prepare('SELECT 1 FROM ledgers WHERE player_id = ? AND contract_id = ?').get(player.id, contract_id);
+    if (existing) {
+      db.prepare('UPDATE ledgers SET opening_balance = ? WHERE player_id = ? AND contract_id = ?')
+        .run(balance, player.id, contract_id);
+    } else {
+      db.prepare('INSERT INTO ledgers (player_id, contract_id, opening_balance, status) VALUES (?, ?, ?, ?)')
+        .run(player.id, contract_id, balance, '');
+    }
+    updated++;
+  }
+
+  return { success: true, created, updated, message: `Imported ${created} players, updated ${updated} balances` };
+}));
 r.get('/players/:id/ledgers', wrap((req) => {
   // Admin: see any player's ledgers; Player: see only self
   if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
