@@ -34,8 +34,8 @@ async function render() {
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
-        <button class="btn btn-tertiary btn-sm" data-reset="${l.player_id}" title="Reset balance to 0, clear contributions">Reset</button>
-        <button class="btn btn-danger btn-sm" data-delete="${l.player_id}" title="Completely remove player">Delete</button>
+        <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem;">↺ Reset</button>
+        <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
     </tr>`; }).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
 
@@ -227,13 +227,33 @@ function payModal(playerId) {
 
 function resetPlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
-  openModal(`Reset ${p?.name || 'player'}?`, `
-    <p style="margin-bottom: 1rem;">This will clear contributions, but keep game charges for historical record. Opening balance → 0. Use for realignment.</p>
+  const checkboxId = `reset_confirm_${Date.now()}`;
+  openModal(`⚠️ Reset ${p?.name || 'player'}?`, `
+    <div style="background: var(--warning-bg, #fff3cd); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid var(--warning, #ffc107);">
+      <p style="margin: 0 0 0.5rem; font-weight: 500;">This will:</p>
+      <ul style="margin: 0; padding-left: 1.5rem;">
+        <li>Clear all contributions</li>
+        <li>Reset opening balance to 0</li>
+        <li>Keep game charges (for history)</li>
+      </ul>
+    </div>
+    <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;">
+      <input type="checkbox" id="${checkboxId}" style="cursor: pointer;">
+      <span>Yes, I want to reset ${p?.name || 'this player'}</span>
+    </label>
     <div style="display: flex; gap: 0.5rem;">
-      <button class="btn" id="confirm_reset" style="flex: 1;">Yes, reset</button>
+      <button class="btn" id="confirm_reset" style="flex: 1;" disabled>Reset</button>
       <button class="btn btn-secondary" id="cancel_reset" style="flex: 1;">Cancel</button>
     </div>`);
-  $('confirm_reset').addEventListener('click', async () => {
+
+  const checkbox = $(`${checkboxId}`);
+  const confirmBtn = $('confirm_reset');
+
+  checkbox.addEventListener('change', () => {
+    confirmBtn.disabled = !checkbox.checked;
+  });
+
+  confirmBtn.addEventListener('click', async () => {
     try {
       await api.post(`/admin/players/${playerId}/reset`, {});
       store.players = await api.players();
@@ -245,13 +265,35 @@ function resetPlayerModal(playerId) {
 
 function deletePlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
-  openModal(`Delete ${p?.name || 'player'}?`, `
-    <p style="margin-bottom: 1rem; color: var(--danger);">⚠️ This will completely remove the player and all their transaction history. This cannot be undone.</p>
+  const playerName = p?.name || 'this player';
+  const checkboxId = `delete_confirm_${Date.now()}`;
+  openModal(`🚨 PERMANENTLY DELETE ${playerName.toUpperCase()}?`, `
+    <div style="background: #fee; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid var(--danger, #dc3545);">
+      <p style="margin: 0 0 0.5rem; font-weight: 600; color: var(--danger);">⚠️ This action CANNOT be undone:</p>
+      <ul style="margin: 0; padding-left: 1.5rem; color: var(--danger);">
+        <li>Player will be completely removed</li>
+        <li>ALL transaction history will be deleted</li>
+        <li>No recovery possible</li>
+      </ul>
+    </div>
+    <p style="margin-bottom: 1rem; font-weight: 500;">To confirm, check the box below:</p>
+    <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;">
+      <input type="checkbox" id="${checkboxId}" style="cursor: pointer;">
+      <span>Yes, permanently delete ${playerName} and all data</span>
+    </label>
     <div style="display: flex; gap: 0.5rem;">
-      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;">Yes, delete permanently</button>
+      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;" disabled>DELETE PERMANENTLY</button>
       <button class="btn btn-secondary" id="cancel_delete" style="flex: 1;">Cancel</button>
     </div>`);
-  $('confirm_delete').addEventListener('click', async () => {
+
+  const checkbox = $(`${checkboxId}`);
+  const confirmBtn = $('confirm_delete');
+
+  checkbox.addEventListener('change', () => {
+    confirmBtn.disabled = !checkbox.checked;
+  });
+
+  confirmBtn.addEventListener('click', async () => {
     try {
       await api.delete(`/admin/players/${playerId}`);
       store.players = await api.players();
