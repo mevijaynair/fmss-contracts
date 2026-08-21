@@ -22,6 +22,15 @@ export const playersRepo = {
     const id = slug(name);
     db.prepare('INSERT INTO players (id,name,aliases,created_at) VALUES (?,?,?,?)')
       .run(id, name.trim(), JSON.stringify(aliases), new Date().toISOString());
+
+    // Create ledger rows for all existing contracts so player appears everywhere
+    const contracts = db.prepare('SELECT id FROM contracts ORDER BY sort, name').all();
+    for (const c of contracts) {
+      db.prepare(`INSERT OR IGNORE INTO ledgers (player_id, contract_id, opening_balance, status)
+                  VALUES (?, ?, 0, '')`)
+        .run(id, c.id);
+    }
+
     return this.get(id);
   },
   update(id, { name, aliases, special_role }) {
