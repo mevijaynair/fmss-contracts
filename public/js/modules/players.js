@@ -6,6 +6,10 @@ import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js'
 
 let contractId = 'sat';
 let currentDetailPlayerId = null;
+let searchQuery = '';
+let sortBy = 'name';
+let filterStatus = 'all';
+let filterBalance = 'all';
 
 const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
@@ -16,7 +20,68 @@ async function render() {
 
   const ledgers = await api.ledgers(contractId);
   const roleOf = Object.fromEntries(store.players.map(p => [p.id, p.special_role]));
-  $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => {
+
+  // Filter
+  let filtered = ledgers.filter(l => {
+    // Search by name
+    if (searchQuery && !l.player_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    // Filter by status
+    if (filterStatus !== 'all' && l.status?.toLowerCase() !== filterStatus.toLowerCase()) return false;
+    // Filter by balance
+    if (filterBalance === 'positive' && l.present_balance <= 0) return false;
+    if (filterBalance === 'negative' && l.present_balance >= 0) return false;
+    return true;
+  });
+
+  // Sort
+  filtered.sort((a, b) => {
+    if (sortBy === 'name') return a.player_name.localeCompare(b.player_name);
+    if (sortBy === 'balance') return b.present_balance - a.present_balance;
+    if (sortBy === 'status') return (a.status || '').localeCompare(b.status || '');
+    if (sortBy === 'games') return b.games - a.games;
+    return 0;
+  });
+
+  // Render controls
+  const controlsPanel = document.querySelector('[data-player-controls]') || document.createElement('div');
+  controlsPanel.setAttribute('data-player-controls', '');
+  controlsPanel.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color);';
+  controlsPanel.innerHTML = `
+    <input type="text" id="pl_search" placeholder="🔍 Search by name..." style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;" value="${searchQuery}">
+    <select id="pl_sort" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+      <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Sort: Name</option>
+      <option value="balance" ${sortBy === 'balance' ? 'selected' : ''}>Sort: Balance</option>
+      <option value="status" ${sortBy === 'status' ? 'selected' : ''}>Sort: Status</option>
+      <option value="games" ${sortBy === 'games' ? 'selected' : ''}>Sort: Games</option>
+    </select>
+    <select id="pl_filter_status" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+      <option value="all" ${filterStatus === 'all' ? 'selected' : ''}>Status: All</option>
+      <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>Status: In Contract</option>
+      <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Status: Out</option>
+    </select>
+    <select id="pl_filter_balance" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+      <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Balance: All</option>
+      <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>Balance: Positive</option>
+      <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>Balance: Negative</option>
+    </select>
+  `;
+
+  const tableContainer = $('playersTable').parentElement;
+  if (!tableContainer.querySelector('[data-player-controls]')) {
+    tableContainer.insertBefore(controlsPanel, $('playersTable'));
+  } else {
+    Object.assign(tableContainer.querySelector('[data-player-controls]'), controlsPanel);
+    tableContainer.querySelector('[data-player-controls]').innerHTML = controlsPanel.innerHTML;
+  }
+
+  // Add event listeners
+  const updateRender = () => render();
+  $('pl_search').addEventListener('input', (e) => { searchQuery = e.target.value; updateRender(); });
+  $('pl_sort').addEventListener('change', (e) => { sortBy = e.target.value; updateRender(); });
+  $('pl_filter_status').addEventListener('change', (e) => { filterStatus = e.target.value; updateRender(); });
+  $('pl_filter_balance').addEventListener('change', (e) => { filterBalance = e.target.value; updateRender(); });
+
+  $('playersTable').querySelector('tbody').innerHTML = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
     return `
     <tr>
