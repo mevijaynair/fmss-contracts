@@ -28,10 +28,61 @@ async function render() {
       try { await api.deleteKitty(b.dataset.del); toast('Removed'); render(); }
       catch (e) { toast(e.message, true); }
     }));
+
+  // Summary breakdown by category
+  if (k.entries && k.entries.length > 0) {
+    const breakdown = {};
+    k.entries.forEach(e => {
+      const cat = e.label.toLowerCase().includes('old') ? 'Old Sheet' :
+                  e.label.toLowerCase().includes('2025') ? '2025' :
+                  e.label.toLowerCase().includes('2026') ? '2026' :
+                  e.kind === 'expense' ? 'Expenses' : 'Other';
+      if (!breakdown[cat]) breakdown[cat] = 0;
+      breakdown[cat] += e.kind === 'income' ? e.amount : -e.amount;
+    });
+
+    const summaryHtml = `
+      <div style="margin-top: 2rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+        <div style="font-weight: 600; margin-bottom: 1rem;">Breakdown by Category</div>
+        <table style="width: 100%; font-size: 0.9rem;">
+          <tbody>
+            ${Object.entries(breakdown).sort().map(([cat, amt]) => `
+              <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="padding: 0.5rem;">${esc(cat)}</td>
+                <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${amt > 0 ? 'var(--success)' : 'var(--danger)'};">
+                  ${amt > 0 ? '+' : ''}${money(amt)}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const summaryContainer = document.querySelector('[data-kitty-summary]') || document.createElement('div');
+    summaryContainer.setAttribute('data-kitty-summary', '');
+    summaryContainer.innerHTML = summaryHtml;
+
+    const tableParent = $('kittyTable').parentElement;
+    if (!tableParent.querySelector('[data-kitty-summary]')) {
+      tableParent.appendChild(summaryContainer);
+    } else {
+      tableParent.querySelector('[data-kitty-summary]').innerHTML = summaryHtml;
+    }
+  }
 }
 
 export function initKitty() {
   $('kf_date').value = today();
+
+  // Add bulk import button next to form
+  const bulkBtn = document.createElement('button');
+  bulkBtn.type = 'button';
+  bulkBtn.className = 'btn btn-secondary';
+  bulkBtn.textContent = '📥 Bulk Import';
+  bulkBtn.addEventListener('click', bulkImportModal);
+  $('kittyForm').parentElement.appendChild(bulkBtn);
+
   $('kittyForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -43,6 +94,34 @@ export function initKitty() {
       $('kf_amount').value = ''; $('kf_label').value = '';
       render();
     } catch (err) { toast(err.message, true); }
+  });
+}
+
+function bulkImportModal() {
+  const { openModal, closeModal } = window;
+  openModal('Bulk Import Kitty Entries', `
+    <div style="margin-bottom: 1.5rem;">
+      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Data (Label + Amount)</label>
+      <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">
+        Positive = Income, Negative = Expense. One per line.
+      </p>
+      <textarea id="ki_data" placeholder="Abhi Handover&#9;640
+Mon/Thu Kitty 2025&#9;1381
+Expenses&#9;-5512
+..." style="width: 100%; min-height: 200px; padding: 0.8rem; font-family: monospace; font-size: 0.9rem; border: 1px solid var(--border-color); border-radius: 8px;"></textarea>
+    </div>
+    <button class="btn full-w" id="ki_import">Import</button>`);
+
+  $('ki_import').addEventListener('click', async () => {
+    const data = $('ki_data').value;
+    if (!data.trim()) { toast('Paste data', true); return; }
+
+    try {
+      const result = await api.bulkImportKittyEntries(data);
+      closeModal();
+      toast(`✓ Imported ${result.imported} Kitty entries`);
+      render();
+    } catch (e) { toast(e.message, true); }
   });
 }
 

@@ -132,4 +132,6 @@ export const api = {
   // ---- bulk import ----
   bulkImportPlayersAndBalances: (contract_id, data) =>
     req('POST', '/admin/bulk-import/players-and-balances', { contract_id, data }),
+  bulkImportKittyEntries: (data) =>
+    req('POST', '/admin/bulk-import/kitty-entries', { data }),
 };

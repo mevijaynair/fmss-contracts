@@ -77,6 +77,42 @@ r.post('/admin/players/:id/reset', wrap((req) => {
   playersRepo.reset(req.params.id);
   return { success: true, message: `Player ${req.params.id} reset` };
 }));
+r.post('/admin/bulk-import/kitty-entries', wrap((req) => {
+  // Admin: bulk import Kitty entries
+  if (req.user.role !== 'admin') throw new Error('Admin only');
+  const { data } = req.body;
+  if (!data) throw new Error('data required');
+
+  const lines = data.trim().split('\n').filter(l => l.trim());
+  let imported = 0;
+
+  for (const line of lines) {
+    const parts = line.split(/\t|,/).map(p => p.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+
+    const label = parts[0];
+    const amount = parseFloat(parts[1]);
+    if (!label || isNaN(amount)) continue;
+
+    // Determine kind based on amount (positive = income, negative = expense)
+    const kind = amount > 0 ? 'income' : 'expense';
+    const absAmount = Math.abs(amount);
+
+    db.prepare(`INSERT INTO kitty (id,kind,label,amount,date,historical,created_at)
+                VALUES (?,?,?,?,?,1,?)`)
+      .run(
+        `k_imp_${Date.now()}_${imported}`,
+        kind,
+        label,
+        absAmount,
+        new Date().toISOString().slice(0, 10),
+        new Date().toISOString()
+      );
+    imported++;
+  }
+
+  return { success: true, imported, message: `Imported ${imported} Kitty entries` };
+}));
 r.post('/admin/bulk-import/players-and-balances', wrap((req) => {
   // Admin: bulk create players and set opening balances for a contract
   if (req.user.role !== 'admin') throw new Error('Admin only');
