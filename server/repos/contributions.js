@@ -22,8 +22,8 @@ export const contributionsRepo = {
       }
     }
     const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt < 0) {
-      throw new Error(`Invalid contribution amount: ${amount} (must be a number ≥ 0)`);
+    if (!Number.isFinite(amt)) {
+      throw new Error(`Invalid contribution amount: ${amount} (must be a number)`);
     }
     const id = `q_live_${Date.now()}`;
     const name = player_id
