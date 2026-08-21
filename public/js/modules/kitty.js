@@ -1,7 +1,7 @@
 // kitty.js — club pot: income/expense ledger + running balance.
 import { api } from '../api.js';
 import { toast } from '../store.js';
-import { $, esc, money, balCell, fmtDate, today } from '../util.js';
+import { $, esc, money, balCell, fmtDate, today, openModal, closeModal } from '../util.js';
 
 async function render() {
   const k = await api.kitty();
@@ -98,7 +98,6 @@ export function initKitty() {
 }
 
 function bulkImportModal() {
-  const { openModal, closeModal } = window;
   openModal('Bulk Import Kitty Entries', `
     <div style="margin-bottom: 1.5rem;">
       <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Data (Label + Amount)</label>
