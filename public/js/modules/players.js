@@ -228,18 +228,18 @@ function payModal(playerId) {
 function resetPlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
   const checkboxId = `reset_confirm_${Date.now()}`;
-  openModal(`⚠️ Reset ${p?.name || 'player'}?`, `
-    <div style="background: var(--warning-bg, #fff3cd); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid var(--warning, #ffc107);">
-      <p style="margin: 0 0 0.5rem; font-weight: 500;">This will:</p>
-      <ul style="margin: 0; padding-left: 1.5rem;">
-        <li>Clear all contributions</li>
-        <li>Reset opening balance to 0</li>
-        <li>Keep game charges (for history)</li>
-      </ul>
+  openModal(`Reset ${p?.name || 'player'}?`, `
+    <div style="background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #ddd;">
+      <div style="font-weight: 600; margin-bottom: 0.5rem; color: #333;">What will happen:</div>
+      <div style="color: #555; line-height: 1.6;">
+        ✓ Clear all money (contributions)<br>
+        ✓ Reset balance to 0<br>
+        ✓ Keep game records (history stays)
+      </div>
     </div>
-    <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;">
-      <input type="checkbox" id="${checkboxId}" style="cursor: pointer;">
-      <span>Yes, I want to reset ${p?.name || 'this player'}</span>
+    <label style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.5rem; cursor: pointer; padding: 0.75rem; background: #fafafa; border-radius: 6px; border: 1px solid #e0e0e0;">
+      <input type="checkbox" id="${checkboxId}" style="cursor: pointer; width: 20px; height: 20px;">
+      <span style="font-weight: 500; color: #333;">Yes, reset ${p?.name || 'this player'}</span>
     </label>
     <div style="display: flex; gap: 0.5rem;">
       <button class="btn" id="confirm_reset" style="flex: 1;" disabled>Reset</button>
@@ -267,22 +267,22 @@ function deletePlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
   const playerName = p?.name || 'this player';
   const checkboxId = `delete_confirm_${Date.now()}`;
-  openModal(`🚨 PERMANENTLY DELETE ${playerName.toUpperCase()}?`, `
-    <div style="background: #fee; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid var(--danger, #dc3545);">
-      <p style="margin: 0 0 0.5rem; font-weight: 600; color: var(--danger);">⚠️ This action CANNOT be undone:</p>
-      <ul style="margin: 0; padding-left: 1.5rem; color: var(--danger);">
-        <li>Player will be completely removed</li>
-        <li>ALL transaction history will be deleted</li>
-        <li>No recovery possible</li>
-      </ul>
+  openModal(`⚠️ Delete ${playerName}?`, `
+    <div style="background: #fff3f3; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 2px solid #dc3545;">
+      <div style="font-weight: 600; margin-bottom: 0.5rem; color: #dc3545;">⚠️ WARNING - Cannot undo!</div>
+      <div style="color: #333; line-height: 1.6;">
+        ✗ Player will be deleted<br>
+        ✗ All payments/money records gone<br>
+        ✗ All game history gone<br>
+        ✗ No way to get it back
+      </div>
     </div>
-    <p style="margin-bottom: 1rem; font-weight: 500;">To confirm, check the box below:</p>
-    <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; cursor: pointer;">
-      <input type="checkbox" id="${checkboxId}" style="cursor: pointer;">
-      <span>Yes, permanently delete ${playerName} and all data</span>
+    <label style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.5rem; cursor: pointer; padding: 0.75rem; background: #fafafa; border-radius: 6px; border: 1px solid #e0e0e0;">
+      <input type="checkbox" id="${checkboxId}" style="cursor: pointer; width: 20px; height: 20px;">
+      <span style="font-weight: 500; color: #333;">Yes, delete ${playerName} forever</span>
     </label>
     <div style="display: flex; gap: 0.5rem;">
-      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;" disabled>DELETE PERMANENTLY</button>
+      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;" disabled>DELETE</button>
       <button class="btn btn-secondary" id="cancel_delete" style="flex: 1;">Cancel</button>
     </div>`);
 
