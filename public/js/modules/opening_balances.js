@@ -91,7 +91,7 @@ export function initOpeningBalances() {
 }
 
 function attachImportHandlers() {
-  const formContainer = $('balancesFormContainer');
+  const formContainer = $('setupFormContainer');
   if (!formContainer) return;
 
   const contractSelect = $('balanceContract');
