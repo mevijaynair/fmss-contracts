@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "import_date": "2026-08-22",
+    "kitty_opening_balance": 0
+  },
+  "contracts": [
+    {
+      "id": "mon_thu",
+      "name": "Mon/Thu",
+      "venue": "O365",
+      "cost_per_gw": 0,
+      "rates": {},
+      "tournament_rates": {},
+      "sort": 1
+    },
+    {
+      "id": "sat",
+      "name": "Saturdays",
+      "venue": "Wasl Koora Dome",
+      "cost_per_gw": 0,
+      "rates": {},
+      "tournament_rates": {},
+      "sort": 2
+    }
+  ],
+  "players": [],
+  "ledgers": [],
+  "gameweeks": [],
+  "charges": [],
+  "contributions": [],
+  "kitty": []
+}
