@@ -102,21 +102,151 @@ function refreshAdmin() { renderPendingApprovals(); renderLog(); }
 
 function initAdmin() {
   $('cf_date').value = today();
+
+  // Add split allocation UI
+  const splitBtn = document.createElement('button');
+  splitBtn.type = 'button';
+  splitBtn.className = 'btn btn-secondary btn-sm';
+  splitBtn.textContent = '🔀 Split across contracts';
+  splitBtn.style.marginTop = '1rem';
+
+  const contribForm = $('contribForm');
+  contribForm.appendChild(splitBtn);
+
+  let showingSplit = false;
+  splitBtn.addEventListener('click', () => {
+    showingSplit = !showingSplit;
+    let splitDiv = document.getElementById('splitAllocationDiv');
+    if (showingSplit && !splitDiv) {
+      splitDiv = document.createElement('div');
+      splitDiv.id = 'splitAllocationDiv';
+      splitDiv.innerHTML = `
+        <div style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px; border-left: 4px solid var(--accent);">
+          <div style="font-weight: 600; margin-bottom: 1rem; color: var(--accent);">Split this payment across contracts</div>
+          <div id="splitRows" style="display: grid; gap: 0.8rem;"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="addSplitBtn" style="margin-top: 0.8rem;">+ Add contract</button>
+          <div style="margin-top: 1rem; padding: 0.8rem; background: var(--bg-alt); border-radius: 6px; font-size: 0.9rem;">
+            <div>Total amount: <strong id="splitTotal">0</strong> AED</div>
+            <div>Form amount: <strong id="splitFormAmount">0</strong> AED</div>
+            <div id="splitMatch" style="color: var(--danger); display: none;">⚠️ Split totals must equal form amount</div>
+          </div>
+        </div>`;
+      contribForm.appendChild(splitDiv);
+      renderSplitRows();
+    } else if (splitDiv) {
+      splitDiv.style.display = showingSplit ? 'block' : 'none';
+    }
+    splitBtn.textContent = showingSplit ? '✕ Close split' : '🔀 Split across contracts';
+  });
+
   $('contribForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try {
-      await api.createContribution({
-        player_id: $('cf_player').value || null,
-        contract_id: $('cf_contract').value,
-        amount: Number($('cf_amount').value) || 0,
-        date: $('cf_date').value, comments: $('cf_comments').value,
-      });
-      toast('Contribution added ✓');
-      $('cf_amount').value = ''; $('cf_comments').value = '';
-      renderLog();
-    } catch (err) { toast(err.message, true); }
+    const playerId = $('cf_player').value || null;
+    const totalAmount = Number($('cf_amount').value) || 0;
+    const date = $('cf_date').value;
+    const comments = $('cf_comments').value;
+
+    // Check if split is active
+    const splitDiv = document.getElementById('splitAllocationDiv');
+    const usingSplit = splitDiv && splitDiv.style.display !== 'none';
+
+    if (usingSplit) {
+      const splits = Array.from(document.querySelectorAll('[data-split-contract]')).map(row => ({
+        contract_id: row.querySelector('[data-split-contract]').value,
+        amount: Number(row.querySelector('[data-split-amount]').value) || 0,
+      }));
+
+      const splitTotal = splits.reduce((s, x) => s + x.amount, 0);
+      if (Math.abs(splitTotal - totalAmount) > 0.01) {
+        toast('Split amounts must equal total', true);
+        return;
+      }
+
+      try {
+        for (const split of splits) {
+          await api.createContribution({
+            player_id: playerId,
+            contract_id: split.contract_id,
+            amount: split.amount,
+            date, comments: comments ? `${comments} (split from total)` : 'Split contribution',
+          });
+        }
+        toast('Split contribution added ✓');
+        $('cf_amount').value = ''; $('cf_comments').value = '';
+        renderLog();
+      } catch (err) { toast(err.message, true); }
+    } else {
+      try {
+        await api.createContribution({
+          player_id: playerId,
+          contract_id: $('cf_contract').value,
+          amount: totalAmount,
+          date, comments,
+        });
+        toast('Contribution added ✓');
+        $('cf_amount').value = ''; $('cf_comments').value = '';
+        renderLog();
+      } catch (err) { toast(err.message, true); }
+    }
   });
   $('contribFilter').addEventListener('change', renderLog);
+}
+
+function renderSplitRows() {
+  const rows = document.getElementById('splitRows');
+  const addBtn = document.getElementById('addSplitBtn');
+  if (!rows || !addBtn) return;
+
+  const currentSplits = Array.from(document.querySelectorAll('[data-split-contract]')).length;
+  if (currentSplits === 0) {
+    store.contracts.forEach(c => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '0.5rem';
+      row.style.alignItems = 'flex-end';
+      row.innerHTML = `
+        <select data-split-contract style="flex: 2; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+          ${store.contracts.map(x => `<option value="${x.id}" ${x.id === c.id ? 'selected' : ''}>${x.name}</option>`).join('')}
+        </select>
+        <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+        <button type="button" class="btn btn-secondary btn-sm" style="padding: 0.5rem 0.8rem;" onclick="this.parentElement.remove(); updateSplitTotal();">✕</button>`;
+      rows.appendChild(row);
+
+      row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
+      row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
+    });
+  }
+
+  addBtn.onclick = () => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '0.5rem';
+    row.style.alignItems = 'flex-end';
+    row.innerHTML = `
+      <select data-split-contract style="flex: 2; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+        ${store.contracts.map(x => `<option value="${x.id}">${x.name}</option>`).join('')}
+      </select>
+      <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+      <button type="button" class="btn btn-secondary btn-sm" style="padding: 0.5rem 0.8rem;" onclick="this.parentElement.remove(); updateSplitTotal();">✕</button>`;
+    rows.appendChild(row);
+
+    row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
+    row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
+  };
+}
+
+function updateSplitTotal() {
+  const splits = Array.from(document.querySelectorAll('[data-split-amount]')).map(x => Number(x.value) || 0);
+  const splitTotal = splits.reduce((s, x) => s + x, 0);
+  const formAmount = Number($('cf_amount').value) || 0;
+
+  const totalEl = document.getElementById('splitTotal');
+  const formEl = document.getElementById('splitFormAmount');
+  const matchEl = document.getElementById('splitMatch');
+
+  if (totalEl) totalEl.textContent = splitTotal.toFixed(2);
+  if (formEl) formEl.textContent = formAmount.toFixed(2);
+  if (matchEl) matchEl.style.display = Math.abs(splitTotal - formAmount) > 0.01 ? 'block' : 'none';
 }
 
 // --------------------------------------------------------------- PLAYER view
