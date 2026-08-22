@@ -243,7 +243,7 @@ async function renderPlayerDetail(player, stats) {
               `).join('')}
             </tbody>
           </table>`
-        : '<div class="hint">No contributions yet.</div>
+        : '<div class="hint">No contributions yet.</div>'
       }
     </div>
 
