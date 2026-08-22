@@ -68,6 +68,10 @@ async function render() {
     return 0;
   });
 
+  // View context header
+  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const contextHtml = `<div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-subtle); border-radius: 6px; font-size: 0.9rem; color: var(--text-muted);">📅 View as of <strong>${today}</strong> • Last incoming & Last played shown in detail view</div>`;
+
   // Render controls
   const controlsPanel = document.querySelector('[data-player-controls]') || document.createElement('div');
   controlsPanel.setAttribute('data-player-controls', '');
@@ -93,6 +97,16 @@ async function render() {
   `;
 
   const tableContainer = $('playersTable').parentElement;
+  const contextPanel = document.querySelector('[data-player-context]') || document.createElement('div');
+  contextPanel.setAttribute('data-player-context', '');
+  contextPanel.innerHTML = contextHtml;
+
+  if (!tableContainer.querySelector('[data-player-context]')) {
+    tableContainer.insertBefore(contextPanel, $('playersTable'));
+  } else {
+    tableContainer.querySelector('[data-player-context]').innerHTML = contextHtml;
+  }
+
   if (!tableContainer.querySelector('[data-player-controls]')) {
     tableContainer.insertBefore(controlsPanel, $('playersTable'));
   } else {
@@ -137,21 +151,14 @@ async function render() {
     }
 
     const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.08);' : '';
-    const lastIncomingHint = l.last_incoming_date
-      ? new Date(l.last_incoming_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      : '—';
-    const lastGameHint = l.last_game_date
-      ? new Date(l.last_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-      : '—';
     return `
     <tr style="border-left: 4px solid ${l.present_balance < 0 ? '#d32f2f' : 'transparent'}; ${rowBg}">
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
       <td><span class="tag ${status.cls}" ${status.style ? 'style="' + status.style + '"' : ''}>${status.text}</span></td>
-      <td class="num" title="${new Date(l.opening_balance >= 0 ? Date.now() : Date.now()).toLocaleDateString()}">${money(l.opening_balance)}</td>
+      <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
-      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;" title="Total charged">-${money(l.charged)}</span></td>
+      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;">-${money(l.charged)}</span></td>
       <td class="num">${balCell(l.present_balance)}</td>
-      <td style="text-align: center; font-size: 0.85rem; color: var(--text-muted);" title="Last money received"><span style="display: block;">💰 ${lastIncomingHint}</span><span style="display: block; margin-top: 0.2rem;">⚽ ${lastGameHint}</span></td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
