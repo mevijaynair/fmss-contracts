@@ -15,22 +15,42 @@ const RATE_LABEL = {
 
 // Parse team emojis from WhatsApp message
 function parseTeamEmojis(text) {
-  const red = ['🔴', '❤️', '🍎', '🌹'];
-  const blue = ['🔵', '💙', '🌊', '🫐'];
+  const red = ['🔴', '❤️', '❤', '🍎', '🌹'];
+  const blue = ['🔵', '💙', '💎', '🌊', '🫐'];
   const redTeam = { emoji: '🔴', name: 'Red', color: '#d32f2f' };
   const blueTeam = { emoji: '🔵', name: 'Blue', color: '#1976d2' };
 
-  const hasRed = red.some(e => text.includes(e));
-  const hasBlue = blue.some(e => text.includes(e));
+  // Check for emojis - be more permissive with emoji matching
+  let hasRed = false, hasBlue = false;
+  for (const e of red) {
+    if (text.includes(e)) { hasRed = true; break; }
+  }
+  for (const e of blue) {
+    if (text.includes(e)) { hasBlue = true; break; }
+  }
+
+  // Also check text indicators
+  const textLower = text.toLowerCase();
+  if (textLower.includes('red')) hasRed = true;
+  if (textLower.includes('blue')) hasBlue = true;
 
   return { hasRed, hasBlue, redTeam, blueTeam };
 }
 
-// Parse score from message (looks for "X-Y" pattern)
+// Parse score from message - handle various formats
 function parseScore(text) {
-  const scoreMatch = text.match(/(\d+)\s*[-–]\s*(\d+)/);
-  if (scoreMatch) {
-    return { goalsA: parseInt(scoreMatch[1]), goalsB: parseInt(scoreMatch[2]) };
+  // Try multiple patterns: "13-9", "win 13-9", "13 - 9", etc.
+  const patterns = [
+    /(\d+)\s*[-–—]\s*(\d+)/,           // 13-9 or 13 - 9
+    /\bwin[s]?\s+(\d+)[–-](\d+)/i,     // "win 13-9" or "wins 13-9"
+    /(\d+)[–-](\d+)\b/,                // ends with score
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return { goalsA: parseInt(match[1]), goalsB: parseInt(match[2]) };
+    }
   }
   return null;
 }
