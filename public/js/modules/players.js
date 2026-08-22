@@ -493,26 +493,6 @@ export function loadPlayers() {
     return render();
   }
 
-  // Show setup banner only if no opening balances have been imported yet
-  checkAndShowSetupBanner();
   contractSeg($('plContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
   return render();
-}
-
-async function checkAndShowSetupBanner() {
-  const banner = $('setupBanner');
-  if (!banner) return;
-
-  try {
-    // Check if any contract has opening balances
-    const hasAny = await Promise.all(
-      store.contracts.map(c => api.get(`/admin/contracts/${c.id}/kitty-opening`).catch(() => null))
-    ).then(results => results.some(r => r !== null));
-
-    // Hide banner if opening balances already exist
-    banner.style.display = hasAny ? 'none' : 'block';
-  } catch (e) {
-    // Keep banner visible if there's an error checking
-    banner.style.display = 'block';
-  }
 }
