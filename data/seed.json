@@ -1,7 +1,7 @@
 {
   "meta": {
     "import_date": "2026-08-22",
-    "kitty_opening_balance": 0
+    "kitty_opening_balance": 2031
   },
   "contracts": [
     {
@@ -99,5 +99,32 @@
   "gameweeks": [],
   "charges": [],
   "contributions": [],
-  "kitty": []
+  "kitty": [
+    { "id": "k_1", "kind": "income", "label": "Abhi Handover", "amount": 640, "date": "2026-08-22", "scope": "", "historical": 1 },
+    { "id": "k_2", "kind": "income", "label": "Mon/Thu Kitty old sheets", "amount": 1405, "date": "2026-08-22", "scope": "", "historical": 1 },
+    { "id": "k_3", "kind": "income", "label": "Sat Kitty Old sheets", "amount": 745, "date": "2026-08-22", "scope": "", "historical": 1 },
+    { "id": "k_4", "kind": "expense", "label": "Expense", "amount": 56, "date": "2026-08-22", "scope": "", "historical": 1 },
+    { "id": "k_5", "kind": "expense", "label": "Iftar Out of band charges", "amount": 36, "date": "2024-06-15", "scope": "", "historical": 1 },
+    { "id": "k_6", "kind": "expense", "label": "Refreshments for Summer", "amount": 20, "date": "2024-06-15", "scope": "", "historical": 1 },
+    { "id": "k_7", "kind": "income", "label": "Jersey Income 2025", "amount": 1078, "date": "2025-01-01", "scope": "", "historical": 1 },
+    { "id": "k_8", "kind": "income", "label": "Mon Thu Kitty 2025", "amount": 1381, "date": "2025-01-01", "scope": "", "historical": 1 },
+    { "id": "k_9", "kind": "income", "label": "Sat Kitty 2025", "amount": 1048, "date": "2025-01-01", "scope": "", "historical": 1 },
+    { "id": "k_10", "kind": "expense", "label": "Football", "amount": 95, "date": "2024-12-01", "scope": "", "historical": 1 },
+    { "id": "k_11", "kind": "expense", "label": "Football", "amount": 95, "date": "2025-01-01", "scope": "", "historical": 1 },
+    { "id": "k_12", "kind": "expense", "label": "BBQ", "amount": 150, "date": "2025-01-01", "scope": "", "historical": 1 },
+    { "id": "k_13", "kind": "expense", "label": "Iftar", "amount": 520, "date": "2025-03-01", "scope": "", "historical": 1 },
+    { "id": "k_14", "kind": "income", "label": "Contracts Free games revenue 2026", "amount": 750, "date": "2026-01-01", "scope": "", "historical": 1 },
+    { "id": "k_15", "kind": "expense", "label": "Annual Day 2025", "amount": 3259, "date": "2025-05-11", "scope": "", "historical": 1 },
+    { "id": "k_16", "kind": "expense", "label": "Football", "amount": 114, "date": "2025-09-04", "scope": "", "historical": 1 },
+    { "id": "k_17", "kind": "expense", "label": "Onam", "amount": 219, "date": "2025-09-15", "scope": "", "historical": 1 },
+    { "id": "k_18", "kind": "income", "label": "Sat Kitty 2026", "amount": 333, "date": "2026-01-01", "scope": "", "historical": 1 },
+    { "id": "k_19", "kind": "income", "label": "Mon Thu Kitty 2026", "amount": 1220, "date": "2026-01-01", "scope": "", "historical": 1 },
+    { "id": "k_20", "kind": "expense", "label": "Football", "amount": 109, "date": "2025-12-15", "scope": "", "historical": 1 },
+    { "id": "k_21", "kind": "expense", "label": "Football", "amount": 109, "date": "2026-01-15", "scope": "", "historical": 1 },
+    { "id": "k_22", "kind": "expense", "label": "BBQ Jan", "amount": 221, "date": "2026-01-15", "scope": "", "historical": 1 },
+    { "id": "k_23", "kind": "expense", "label": "Football", "amount": 85, "date": "2026-02-15", "scope": "", "historical": 1 },
+    { "id": "k_24", "kind": "expense", "label": "Shawarma April", "amount": 130, "date": "2026-04-15", "scope": "", "historical": 1 },
+    { "id": "k_25", "kind": "expense", "label": "Football", "amount": 240, "date": "2026-05-15", "scope": "", "historical": 1 },
+    { "id": "k_26", "kind": "expense", "label": "Football", "amount": 110, "date": "2026-07-15", "scope": "", "historical": 1 }
+  ]
 }
