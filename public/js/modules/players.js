@@ -15,11 +15,11 @@ const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
 function isPlayer() { return store.user?.role === 'player'; }
 
-// Auto-calculate status based on balance
+// Auto-calculate status based on balance + color
 function statusFromBalance(balance) {
-  if (balance < 0) return 'Out of contract';
-  if (balance < 150) return 'Refill needed';
-  return 'In Contract';
+  if (balance < 0) return { text: 'Out of contract', cls: 'tag-danger' };
+  if (balance < 150) return { text: 'Refill needed', cls: 'tag-overdue' };
+  return { text: 'In Contract', cls: 'tag-paid' };
 }
 
 async function render() {
@@ -90,15 +90,11 @@ async function render() {
 
   $('playersTable').querySelector('tbody').innerHTML = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
-    const autoStatus = statusFromBalance(l.present_balance);
+    const status = statusFromBalance(l.present_balance);
     return `
     <tr>
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
-      <td>
-        <select data-status="${l.player_id}" class="btn-sm" style="padding:0.25rem 0.4rem;">
-          ${STATUSES.map(s => `<option ${s.toLowerCase() === autoStatus.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
-        </select>
-      </td>
+      <td><span class="tag ${status.cls}">${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
       <td class="num">${money(l.charged)}</td>
@@ -112,11 +108,6 @@ async function render() {
       </td>
     </tr>`; }).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
 
-  $('playersTable').querySelectorAll('[data-status]').forEach(sel =>
-    sel.addEventListener('change', async () => {
-      try { await api.setStatus(sel.dataset.status, contractId, sel.value); toast('Status updated'); }
-      catch (e) { toast(e.message, true); }
-    }));
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
   $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
