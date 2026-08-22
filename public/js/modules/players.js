@@ -17,9 +17,21 @@ function isPlayer() { return store.user?.role === 'player'; }
 
 // Auto-calculate status based on balance + color
 function statusFromBalance(balance) {
-  if (balance < 0) return { text: '🚨 Out of contract', cls: 'tag-danger', style: 'font-weight: 600; background: var(--danger); color: white;' };
-  if (balance < 150) return { text: '⚠️ Refill needed', cls: 'tag-overdue', style: 'font-weight: 600;' };
-  return { text: '✓ In Contract', cls: 'tag-paid', style: 'font-weight: 600;' };
+  if (balance < 0) return {
+    text: '🚨 Out of contract',
+    cls: 'tag-danger',
+    style: 'font-weight: 700; background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%); color: white; padding: 0.5rem 0.75rem; border-radius: 4px;'
+  };
+  if (balance < 150) return {
+    text: '⚠️ Refill needed',
+    cls: 'tag-overdue',
+    style: 'font-weight: 600; background: #ff9800; color: white; padding: 0.4rem 0.6rem; border-radius: 4px;'
+  };
+  return {
+    text: '✓ In Contract',
+    cls: 'tag-paid',
+    style: 'font-weight: 600; background: #4caf50; color: white; padding: 0.4rem 0.6rem; border-radius: 4px;'
+  };
 }
 
 async function render() {
@@ -30,9 +42,13 @@ async function render() {
 
   // Filter
   let filtered = ledgers.filter(l => {
-    // Exclude test players
-    const testPlayerIds = ['fixtestplayer', 'newtestplayer', 'testplayer999'];
-    if (testPlayerIds.includes(l.player_id.toLowerCase())) return false;
+    // Exclude test players by ID or name pattern
+    const testPatterns = ['test', 'fixtestplayer', 'newtestplayer', 'testplayer999'];
+    const isTestPlayer = testPatterns.some(p =>
+      l.player_id.toLowerCase().includes(p.toLowerCase()) ||
+      l.player_name.toLowerCase().includes(p.toLowerCase())
+    );
+    if (isTestPlayer) return false;
     // Search by name
     if (searchQuery && !l.player_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     // Filter by status
@@ -119,16 +135,22 @@ async function render() {
       lastTxnHtml = `<span style="white-space: nowrap;">${emoji} ${sign}${money(Math.abs(lastTxn.amount))} • ${formattedDate}</span>`;
     }
 
-    const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.05);' : '';
+    const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.08);' : '';
+    const gameRangeHint = l.first_game_date && l.last_game_date
+      ? `${new Date(l.first_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} → ${new Date(l.last_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : '—';
+    const chargedTillHint = l.last_charged_date
+      ? `Till ${new Date(l.last_charged_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : '—';
     return `
-    <tr style="border-left: 3px solid ${l.present_balance < 0 ? 'var(--danger)' : 'transparent'}; ${rowBg}">
+    <tr style="border-left: 4px solid ${l.present_balance < 0 ? '#d32f2f' : 'transparent'}; ${rowBg}">
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
       <td><span class="tag ${status.cls}" ${status.style ? `style="${status.style}"` : ''}>${status.text}</span></td>
-      <td class="num">${money(l.opening_balance)}</td>
+      <td class="num" title="${new Date(l.opening_balance >= 0 ? Date.now() : Date.now()).toLocaleDateString()}">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
-      <td class="num"><span style="color: ${l.charged > 0 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 500;">-${money(l.charged)}</span></td>
+      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;" title="${chargedTillHint}">-${money(l.charged)}</span></td>
       <td class="num">${balCell(l.present_balance)}</td>
-      <td style="text-align: center; font-weight: 600;">${l.games}</td>
+      <td style="text-align: center; font-weight: 600; font-size: 0.9rem;" title="Game date range: ${gameRangeHint}">${l.games}<br><span style="font-size: 0.75rem; color: var(--text-muted);">📅${gameRangeHint}</span></td>
       <td class="num">${lastTxnHtml}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'

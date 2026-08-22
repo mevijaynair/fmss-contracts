@@ -18,6 +18,18 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
+const LAST_CHARGED_DATE = `(SELECT g.date FROM charges ch
+  JOIN gameweeks g ON g.id = ch.gameweek_id
+  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
+  ORDER BY g.date DESC LIMIT 1)`;
+const FIRST_GAME_DATE = `(SELECT g.date FROM charges ch
+  JOIN gameweeks g ON g.id = ch.gameweek_id
+  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
+  ORDER BY g.date ASC LIMIT 1)`;
+const LAST_GAME_DATE = `(SELECT g.date FROM charges ch
+  JOIN gameweeks g ON g.id = ch.gameweek_id
+  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
+  ORDER BY g.date DESC LIMIT 1)`;
 
 const SELECT = `
   SELECT l.player_id, l.contract_id, p.name AS player_name,
@@ -25,6 +37,9 @@ const SELECT = `
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,
          ${LIFETIME_GAMES} AS games,
+         ${LAST_CHARGED_DATE} AS last_charged_date,
+         ${FIRST_GAME_DATE} AS first_game_date,
+         ${LAST_GAME_DATE} AS last_game_date,
          ROUND(l.opening_balance + ${CONTRIB} - ${CHARGED}, 2) AS present_balance
   FROM ledgers l JOIN players p ON p.id = l.player_id`;
 
