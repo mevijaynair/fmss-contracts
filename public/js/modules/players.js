@@ -145,7 +145,7 @@ async function render() {
     return `
     <tr style="border-left: 4px solid ${l.present_balance < 0 ? '#d32f2f' : 'transparent'}; ${rowBg}">
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
-      <td><span class="tag ${status.cls}" ${status.style ? `style="${status.style}"` : ''}>${status.text}</span></td>
+      <td><span class="tag ${status.cls}" ${status.style ? 'style="' + status.style + '"' : ''}>${status.text}</span></td>
       <td class="num" title="${new Date(l.opening_balance >= 0 ? Date.now() : Date.now()).toLocaleDateString()}">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
       <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;" title="${chargedTillHint}">-${money(l.charged)}</span></td>
@@ -155,13 +155,35 @@ async function render() {
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
-        <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem;">↺ Reset</button>
+        <button class="btn btn-sm" data-menu="${l.player_id}" title="More options" style="font-size: 1rem; padding: 0.3rem 0.4rem; min-width: auto;">⋮</button>
+      </td>
+      <td style="display: none;" data-actions="${l.player_id}">
+        <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
     </tr>`; }).join('') || '<tr><td colspan="9" class="hint">No players in this contract yet.</td></tr>';
 
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
+
+  // Menu button (⋮) toggles Reset/Delete visibility
+  $('playersTable').querySelectorAll('[data-menu]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const playerId = btn.dataset.menu;
+      const actionsCell = $('playersTable').querySelector(`[data-actions="${playerId}"]`);
+      const isVisible = actionsCell.style.display !== 'none';
+      actionsCell.style.display = isVisible ? 'none' : 'table-cell';
+    });
+  });
+
+  // Close menu when clicking elsewhere
+  document.addEventListener('click', () => {
+    $('playersTable').querySelectorAll('[data-actions]').forEach(cell => {
+      cell.style.display = 'none';
+    });
+  });
+
   $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
     btn.addEventListener('click', () => resetPlayerModal(btn.dataset.reset)));
   $('playersTable').querySelectorAll('[data-delete]').forEach(btn =>
