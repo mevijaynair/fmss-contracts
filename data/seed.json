@@ -1,7 +1,7 @@
 {
   "meta": {
     "import_date": "2026-08-22",
-    "kitty_opening_balance": 0
+    "kitty_opening_balance": 3031
   },
   "contracts": [
     {
@@ -103,14 +103,5 @@
   "gameweeks": [],
   "charges": [],
   "contributions": [],
-  "kitty": [
-    { "id": "k_1", "kind": "income", "label": "Total Old sheet", "amount": 2734, "date": "2026-01-01", "scope": "", "historical": 1 },
-    { "id": "k_2", "kind": "income", "label": "Jersey Income 2025", "amount": 1078, "date": "2025-06-01", "scope": "", "historical": 1 },
-    { "id": "k_3", "kind": "income", "label": "Mon Thu Kitty 2025", "amount": 1381, "date": "2025-07-01", "scope": "", "historical": 1 },
-    { "id": "k_4", "kind": "income", "label": "Sat Kitty 2025", "amount": 1048, "date": "2025-08-01", "scope": "", "historical": 1 },
-    { "id": "k_5", "kind": "income", "label": "Contracts Free games revenue 2026", "amount": 750, "date": "2026-02-01", "scope": "", "historical": 1 },
-    { "id": "k_6", "kind": "income", "label": "Sat Kitty 2026", "amount": 333, "date": "2026-03-01", "scope": "", "historical": 1 },
-    { "id": "k_7", "kind": "income", "label": "Mon Thu Kitty 2026", "amount": 1220, "date": "2026-04-01", "scope": "", "historical": 1 },
-    { "id": "k_8", "kind": "expense", "label": "Expense", "amount": 5512, "date": "2026-08-22", "scope": "", "historical": 1 }
-  ]
+  "kitty": []
 }
