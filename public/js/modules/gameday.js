@@ -55,14 +55,35 @@ function parseScore(text) {
   return null;
 }
 
+// Detect captain from "(C)" or "C)" marker
+function detectCaptains(text, playerNames) {
+  const captains = new Set();
+  // Look for "Name (C)" or "Name C)" patterns
+  const captainPattern = /(\w+)\s*\(?C\)?/gi;
+  let match;
+  while ((match = captainPattern.exec(text)) !== null) {
+    const name = match[1].trim();
+    // Try to match with player names
+    const found = playerNames.find(p => p.toLowerCase() === name.toLowerCase());
+    if (found) captains.add(found);
+  }
+  return captains;
+}
+
 // Get preset rate for player type
 function getPresetRate(rateType, contractId) {
   const c = store.contracts?.find(x => x.id === contractId);
   if (!c) return 0;
-  if (rateType === 'captain_10' || rateType === 'captain_12') return c.captain_rate || c.cost_per_gw || 0;
-  if (rateType === 'contracted_10' || rateType === 'contracted_12') return c.cost_per_gw || 0;
-  if (rateType === 'noncontract') return c.noncontract_rate || 0;
-  return 0;
+
+  // Use cost_per_gw as the base rate (set from contract)
+  const baseRate = Number(c.cost_per_gw) || 0;
+  const captainRate = Number(c.captain_rate) || baseRate;
+  const noncontractRate = Number(c.noncontract_rate) || baseRate;
+
+  if (rateType === 'captain_10' || rateType === 'captain_12') return captainRate;
+  if (rateType === 'contracted_10' || rateType === 'contracted_12') return baseRate;
+  if (rateType === 'noncontract') return noncontractRate;
+  return baseRate;
 }
 
 // Match player including nicknames and cashier/admin
@@ -179,6 +200,13 @@ function renderPreview(meta) {
         <option value="outside" ${r.player_type === 'outside' ? 'selected' : ''}>Outside</option>
       </select>` : statusLabel(r);
 
+    // Allow reassigning charge to another player (for transfers)
+    const playerOptions = rows.map(p => `<option value="${p.player_id}" ${p.player_id === r.player_id ? 'selected' : ''}>${esc(p.display_name)}</option>`).join('');
+    const chargedToControl = r.matched ? `
+      <select class="charged-to-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:140px;">
+        ${playerOptions}
+      </select>` : '<span class="hint">—</span>';
+
     return `
     <tr>
       <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}</td>
@@ -186,6 +214,9 @@ function renderPreview(meta) {
       <td>${typeControl}</td>
       <td><span class="tag">${RATE_LABEL[r.rate_type] || r.rate_type}</span></td>
       <td style="text-align:right;"><input class="amt-input" type="number" step="1" data-i="${i}" value="${r.amount}"></td>
+      <td style="text-align:center; font-size:0.85rem;">
+        <span class="hint">Charged to:</span><br>${chargedToControl}
+      </td>
       <td style="text-align:center; font-size:0.9rem;"><span class="pending-badge" data-i="${i}">pending</span></td>
       <td class="row-actions"><button class="link-btn" data-del="${i}" title="Remove">✕</button></td>
     </tr>`;
@@ -198,6 +229,18 @@ function renderPreview(meta) {
         rows[sel.dataset.i].outside_handling = 'relationship';
       }
       renderPreview(meta);
+    }));
+
+  // Handle charge reassignment to different player
+  $('gdTable').querySelectorAll('.charged-to-select').forEach(sel =>
+    sel.addEventListener('change', () => {
+      const newPlayerId = sel.value;
+      if (newPlayerId && newPlayerId !== rows[sel.dataset.i].player_id) {
+        const origPlayer = rows[sel.dataset.i].display_name;
+        rows[sel.dataset.i].player_id = newPlayerId;
+        const newPlayer = rows.find(r => r.player_id === newPlayerId)?.display_name || newPlayerId;
+        toast(`${origPlayer}'s charge reassigned to ${newPlayer}`, false);
+      }
     }));
 
   $('gdTable').querySelectorAll('.amt-input').forEach(inp =>
@@ -225,6 +268,18 @@ async function doParse() {
     parseResult = await api.parse(contractId, text);
     rows = parseResult.rows;
     if (!rows.length) { toast('No players detected', true); $('gdPreviewCard').hidden = true; return; }
+
+    // Detect captains from "(C)" marker
+    const playerNames = rows.map(r => r.display_name);
+    const captains = detectCaptains(text, playerNames);
+    rows.forEach(r => {
+      if (captains.has(r.display_name)) {
+        r.is_captain = true;
+        // Update rate_type to captain variant if contracted
+        if (r.rate_type === 'contracted_10') r.rate_type = 'captain_10';
+        if (r.rate_type === 'contracted_12') r.rate_type = 'captain_12';
+      }
+    });
 
     // Auto-parse score from message
     const scoreData = parseScore(text);
