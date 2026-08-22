@@ -381,9 +381,69 @@ async function doConfirm() {
     }
 
     toast('Game recorded — balances deducted ✓');
+
+    // Offer to commit gameweek result to kitty
+    const contractedCharges = charges.filter(c => c.player_type !== 'outside');
+    const contractedTotal = contractedCharges.reduce((s, c) => s + c.amount, 0);
+    const pitchCost = gameweek.cost_per_gw || 0;
+    const gwProfit = contractedTotal - pitchCost;
+
+    if (contractedTotal > 0) {
+      const commitMsg = gwProfit >= 0
+        ? `Commit profit ${money(gwProfit)} to kitty? (Collected ${money(contractedTotal)} - Pitch cost ${money(pitchCost)})`
+        : `Commit loss ${money(gwProfit)} to kitty? (Collected ${money(contractedTotal)} - Pitch cost ${money(pitchCost)})`;
+
+      if (confirm(commitMsg)) {
+        try {
+          await api.createKitty({
+            kind: gwProfit >= 0 ? 'income' : 'expense',
+            amount: Math.abs(gwProfit),
+            label: `GW Result (${gameweek.date}) - Pending outside players`,
+            date: gameweek.date,
+          });
+          toast(`✓ Committed ${money(Math.abs(gwProfit))} to kitty (pending adjustments)`, false);
+        } catch (e) {
+          toast(`Could not commit to kitty: ${e.message}`, true);
+        }
+      }
+    }
+
     clearForm();
     await loadDashboard();
   } catch (e) { toast(e.message, true); }
+}
+
+// === GAMEWEEK P/L MANAGEMENT ===
+
+// Calculate P/L for a gameweek (contracted players only, before outside players pay)
+function calculateContractedPL(charges, pitchCost) {
+  const contracted = charges.filter(c => c.player_type !== 'outside');
+  const total = contracted.reduce((s, c) => s + c.amount, 0);
+  return total - pitchCost;
+}
+
+// Adjust gameweek commit when outside players pay
+async function adjustGameweekCommit(gameweekDate, actualOutsideIncome, kittyEntryId) {
+  try {
+    // First, delete the provisional entry
+    if (kittyEntryId) {
+      await api.deleteKitty(kittyEntryId);
+    }
+
+    // Then add the adjusted entry
+    await api.createKitty({
+      kind: 'income',
+      amount: actualOutsideIncome,
+      label: `GW Result Adjusted (${gameweekDate}) - Outside players paid`,
+      date: gameweekDate,
+    });
+
+    toast(`✓ Updated gameweek commit with actual outside income ${money(actualOutsideIncome)}`, false);
+    return true;
+  } catch (e) {
+    toast(`Failed to adjust commit: ${e.message}`, true);
+    return false;
+  }
 }
 
 function clearForm() {
