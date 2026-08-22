@@ -163,6 +163,14 @@ r.get('/players/:id/ledgers', wrap((req) => {
   }
   return ledgersRepo.forPlayer(req.params.id);
 }));
+
+r.get('/players/:id/ledgers/combined', wrap((req) => {
+  // Combined view: all contracts aggregated into one row
+  if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
+    throw new Error('Forbidden');
+  }
+  return ledgersRepo.forPlayerCombined(req.params.id);
+}));
 r.get('/my/ledgers', wrap((req) => {
   // Player view: their ledgers across all contracts
   if (req.user.role !== 'player') throw new Error('Player only');

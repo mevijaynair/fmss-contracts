@@ -71,6 +71,7 @@ export const api = {
   results: (contract) => req('GET', `/results${contract ? `?contract=${contract}` : ''}`),
   playerStats: (playerId, contractId) => req('GET', `/players/${playerId}/stats?contract_id=${contractId}`),
   playerTransactions: (playerId, limit = 200) => req('GET', `/players/${playerId}/transactions?limit=${limit}`),
+  playerCombinedLedger: (playerId) => req('GET', `/players/${playerId}/ledgers/combined`),
   auditTrail: (q = {}) => {
     const p = new URLSearchParams(q).toString();
     return req('GET', `/audit/charges${p ? `?${p}` : ''}`);

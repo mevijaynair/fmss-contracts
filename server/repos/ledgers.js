@@ -54,6 +54,56 @@ export const ledgersRepo = {
   forPlayer(playerId) {
     return db.prepare(`${SELECT} WHERE l.player_id = ?`).all(playerId);
   },
+
+  // Combined view: aggregate all contracts for a player into single row
+  forPlayerCombined(playerId) {
+    const player = db.prepare('SELECT id, name FROM players WHERE id = ?').get(playerId);
+    if (!player) return null;
+
+    const ledgers = db.prepare(`${SELECT} WHERE l.player_id = ?`).all(playerId);
+    if (ledgers.length === 0) return null;
+
+    // Aggregate across all contracts
+    const combined = {
+      player_id: playerId,
+      player_name: player.name,
+      opening_balance: ledgers.reduce((s, l) => s + l.opening_balance, 0),
+      contributed: ledgers.reduce((s, l) => s + l.contributed, 0),
+      charged: ledgers.reduce((s, l) => s + l.charged, 0),
+      games: ledgers.reduce((s, l) => s + l.games, 0),
+      present_balance: Math.round(ledgers.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
+      first_game_date: null,
+      last_game_date: null,
+      last_charged_date: null,
+      contracts: ledgers.map(l => ({
+        contract_id: l.contract_id,
+        opening_balance: l.opening_balance,
+        contributed: l.contributed,
+        charged: l.charged,
+        present_balance: l.present_balance,
+        games: l.games
+      }))
+    };
+
+    // Get date ranges across all contracts
+    const dates = db.prepare(`
+      SELECT MIN(g.date) as first_date, MAX(g.date) as last_date
+      FROM charges ch JOIN gameweeks g ON g.id = ch.gameweek_id
+      WHERE ch.player_id = ?
+    `).get(playerId);
+    if (dates.first_date) combined.first_game_date = dates.first_date;
+    if (dates.last_date) combined.last_game_date = dates.last_date;
+
+    const lastCharged = db.prepare(`
+      SELECT g.date FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      WHERE ch.player_id = ?
+      ORDER BY g.date DESC LIMIT 1
+    `).get(playerId);
+    if (lastCharged) combined.last_charged_date = lastCharged.date;
+
+    return combined;
+  },
   get(playerId, contractId) {
     return db.prepare(`${SELECT} WHERE l.player_id = ? AND l.contract_id = ?`)
       .get(playerId, contractId);
