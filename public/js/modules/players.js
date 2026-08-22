@@ -68,10 +68,6 @@ async function render() {
     return 0;
   });
 
-  // View context header
-  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const contextHtml = `<div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-subtle); border-radius: 6px; font-size: 0.9rem; color: var(--text-muted);">📅 View as of <strong>${today}</strong> • Last incoming & Last played shown in detail view</div>`;
-
   // Render controls
   const controlsPanel = document.querySelector('[data-player-controls]') || document.createElement('div');
   controlsPanel.setAttribute('data-player-controls', '');
@@ -97,20 +93,10 @@ async function render() {
   `;
 
   const tableContainer = $('playersTable').parentElement;
-  const contextPanel = document.querySelector('[data-player-context]') || document.createElement('div');
-  contextPanel.setAttribute('data-player-context', '');
-  contextPanel.innerHTML = contextHtml;
-
-  if (!tableContainer.querySelector('[data-player-context]')) {
-    tableContainer.insertBefore(contextPanel, $('playersTable'));
-  } else {
-    tableContainer.querySelector('[data-player-context]').innerHTML = contextHtml;
-  }
 
   if (!tableContainer.querySelector('[data-player-controls]')) {
     tableContainer.insertBefore(controlsPanel, $('playersTable'));
   } else {
-    Object.assign(tableContainer.querySelector('[data-player-controls]'), controlsPanel);
     tableContainer.querySelector('[data-player-controls]').innerHTML = controlsPanel.innerHTML;
   }
 
@@ -168,7 +154,10 @@ async function render() {
         <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
-    </tr>`; }).join('') || '<tr><td colspan="9" class="hint">No players in this contract yet.</td></tr>';
+    </tr>`
+  }).join('') || '<tr><td colspan="9" class="hint">No players in this contract yet.</td></tr>';
+
+  $('playersTable').querySelector('tbody').innerHTML = cardsHtml;
 
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
