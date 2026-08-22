@@ -44,8 +44,16 @@ full guide; for this app alone, just the Node + Caddy + `/data` parts are requir
 
 ## Step 2 — Create the app user & clone
 
+`better-sqlite3` is a native module. If no prebuilt binary matches the server's
+Node version, npm compiles it with node-gyp, which needs a C toolchain. Without
+it the install dies with `gyp ERR! stack Error: not found: make` — and because
+`npm ci` **deletes `node_modules` before installing**, a failure here leaves the
+app with no dependencies at all. Install the toolchain first:
+
 ```bash
 # as root
+apt-get update && apt-get install -y build-essential python3
+
 useradd -m -s /bin/bash fmss 2>/dev/null || true
 mkdir -p /opt/fmss-contracts /data
 chown fmss:fmss /opt/fmss-contracts /data
@@ -54,7 +62,7 @@ chmod 750 /data
 su - fmss
 git clone https://github.com/mevijaynair/fmss-contracts.git /opt/fmss-contracts
 cd /opt/fmss-contracts
-npm ci --only=production
+npm ci --omit=dev
 ```
 
 ---
@@ -183,11 +191,39 @@ dig +short contracts.fmss.ae     # -> <your-server-ip>
 ```bash
 su - fmss
 cd /opt/fmss-contracts
+git status -sb          # confirm you are on main, not a feature branch
 git pull
-npm ci --only=production
+npm ci --omit=dev
 exit
 systemctl restart fmss-contracts
 ```
+
+Then confirm it actually came back up:
+
+```bash
+systemctl status fmss-contracts --no-pager
+curl -fsS localhost:3002/api/health && echo
+```
+
+**If `git pull` says "Already up to date" but you expected changes**, the work is
+almost certainly still on an unmerged branch — a `git pull` on `main` fetches the
+branch ref but does not move `main`. Merge the PR first, then pull again.
+
+**If `npm ci` fails on `better-sqlite3`** (`Error: not found: make`), the build
+toolchain is missing. `npm ci` has already emptied `node_modules` at that point,
+so the service will not start until you finish the install:
+
+```bash
+apt-get update && apt-get install -y build-essential python3
+```
+
+Then re-run the `npm ci --omit=dev` and restart above.
+
+> **Note on paths.** This guide assumes the documented layout: the repo cloned to
+> `/opt/fmss-contracts`, owned by the `fmss` user. At least one server was set up
+> with the repo at `/root/fmss-contracts` running as `root` instead. Check with
+> `systemctl cat fmss-contracts | grep -E 'WorkingDirectory|User'` and use whatever
+> path that reports.
 
 ---
 
