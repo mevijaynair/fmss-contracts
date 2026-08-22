@@ -7,10 +7,9 @@ async function render() {
   const k = await api.kitty();
   $('kittyKpi').innerHTML = [
     { v: money(k.balance), l: 'Current balance (AED)', cls: k.balance >= 0 ? 'good' : 'bad' },
-    { v: money(k.opening), l: 'Imported opening' },
-    { v: money(k.contractProfit || 0), l: 'Contract profits (auto)', cls: (k.contractProfit || 0) > 0 ? 'good' : '' },
-    { v: money(k.income), l: 'New income' },
-    { v: money(k.expense), l: 'New expense', cls: 'warn' },
+    { v: money(k.opening), l: 'Opening balance' },
+    { v: money(k.income), l: 'Income (manual)' },
+    { v: money(k.expense), l: 'Expense (manual)', cls: 'warn' },
   ].map(x => `<div class="kpi ${x.cls || ''}"><div class="v">${x.v}</div><div class="l">${esc(x.l)}</div></div>`).join('');
 
   $('kittyTable').querySelector('tbody').innerHTML = k.entries.map(e => `
