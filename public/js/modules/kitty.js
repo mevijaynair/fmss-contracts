@@ -123,4 +123,155 @@ Expenses&#9;-5512
   });
 }
 
-export function loadKitty() { return render(); }
+// === MODULAR KITTY ACTIONS ===
+
+// Get pending collections (players with negative balances)
+async function getPendingCollections() {
+  try {
+    const ledgers = await api.ledgers();
+    const negative = ledgers.filter(l => l.present_balance < 0);
+    return negative.sort((a, b) => a.present_balance - b.present_balance); // most owed first
+  } catch (e) {
+    console.error('Failed to get pending collections:', e);
+    return [];
+  }
+}
+
+// Quick commit: Move collected amount from player to kitty
+async function quickCommitToKitty(playerId, amount, label) {
+  try {
+    const finalLabel = label || `Collected from ${playerId}`;
+    await api.createKitty({
+      kind: 'income',
+      amount: amount,
+      label: finalLabel,
+      date: today(),
+    });
+    toast(`✓ Committed ${money(amount)} to kitty`, false);
+    render();
+    return true;
+  } catch (e) {
+    toast(`Failed to commit: ${e.message}`, true);
+    return false;
+  }
+}
+
+// Quick withdraw: Take from kitty for immediate expense
+async function quickWithdrawFromKitty(amount, label, reason) {
+  try {
+    const finalLabel = label || `Expense: ${reason || 'Withdrawal'}`;
+    await api.createKitty({
+      kind: 'expense',
+      amount: amount,
+      label: finalLabel,
+      date: today(),
+    });
+    toast(`✓ Withdrawn ${money(amount)} from kitty`, false);
+    render();
+    return true;
+  } catch (e) {
+    toast(`Failed to withdraw: ${e.message}`, true);
+    return false;
+  }
+}
+
+// Render pending collections panel
+async function renderPendingCollections() {
+  const pending = await getPendingCollections();
+  if (!pending.length) return;
+
+  const totalOwed = pending.reduce((s, l) => s + Math.abs(l.present_balance), 0);
+
+  const html = `
+    <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #ffe0b2 0%, #ffe8c9 100%); border-radius: 8px; border-left: 4px solid #ff9800;">
+      <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 1rem;">💰 Pending Collections</div>
+      <div style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--text-muted);">
+        <strong>${pending.length}</strong> players owe <strong>${money(totalOwed)}</strong> total
+      </div>
+      <div style="font-size: 0.85rem; line-height: 1.6; max-height: 200px; overflow-y: auto;">
+        ${pending.map(p => `
+          <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: rgba(255,255,255,0.5); border-radius: 4px; margin-bottom: 0.4rem;">
+            <span><strong>${esc(p.player_name)}</strong></span>
+            <span style="color: #d32f2f; font-weight: 600;">${money(Math.abs(p.present_balance))}</span>
+            <button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${Math.abs(p.present_balance)}" title="Quick commit this amount to kitty" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;">✓ Commit</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  const container = document.querySelector('[data-pending-collections]') || document.createElement('div');
+  container.setAttribute('data-pending-collections', '');
+  container.innerHTML = html;
+
+  const tableParent = $('kittyTable').parentElement;
+  if (!tableParent.querySelector('[data-pending-collections]')) {
+    tableParent.insertBefore(container, $('kittyTable'));
+  } else {
+    tableParent.querySelector('[data-pending-collections]').innerHTML = html;
+  }
+
+  // Attach event listeners for quick commit buttons
+  document.querySelectorAll('[data-quick-commit]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const playerId = btn.dataset.quickCommit;
+      const amount = Number(btn.dataset.amount);
+      await quickCommitToKitty(playerId, amount);
+    });
+  });
+}
+
+// Render quick withdraw panel
+function renderQuickWithdraw() {
+  const html = `
+    <div style="margin-top: 1rem; padding: 1.5rem; background: linear-gradient(135deg, #ffcccc 0%, #ffe0e0 100%); border-radius: 8px; border-left: 4px solid #d32f2f;">
+      <div style="font-weight: 700; margin-bottom: 1rem;">⚡ Quick Withdraw</div>
+      <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+        ${[50, 100, 200, 500].map(amt => `
+          <button class="btn" data-quick-withdraw="${amt}" style="flex: 0 0 auto; font-size: 0.85rem;">
+            - ${money(amt)}
+          </button>
+        `).join('')}
+        <input type="number" id="qw_custom" placeholder="Custom..." style="flex: 0 1 120px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+        <input type="text" id="qw_reason" placeholder="Reason..." style="flex: 1 1 200px; min-width: 150px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+        <button class="btn btn-secondary" id="qw_submit" style="flex: 0 0 auto;">Go</button>
+      </div>
+    </div>
+  `;
+
+  const container = document.querySelector('[data-quick-withdraw]') || document.createElement('div');
+  container.setAttribute('data-quick-withdraw', '');
+  container.innerHTML = html;
+
+  const tableParent = $('kittyTable').parentElement;
+  if (!tableParent.querySelector('[data-quick-withdraw]')) {
+    tableParent.insertBefore(container, $('kittyTable'));
+  } else {
+    tableParent.querySelector('[data-quick-withdraw]').innerHTML = html;
+  }
+
+  // Quick withdraw button handlers
+  document.querySelectorAll('[data-quick-withdraw]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const amount = Number(btn.dataset.quickWithdraw);
+      const reason = $('qw_reason')?.value || 'Quick expense';
+      await quickWithdrawFromKitty(amount, reason, reason);
+    });
+  });
+
+  // Custom amount + reason
+  $('qw_submit').addEventListener('click', async () => {
+    const amount = Number($('qw_custom').value || 0);
+    const reason = $('qw_reason')?.value || 'Withdrawal';
+    if (amount <= 0) { toast('Enter amount', true); return; }
+    await quickWithdrawFromKitty(amount, reason, reason);
+    $('qw_custom').value = '';
+    $('qw_reason').value = '';
+  });
+}
+
+export function loadKitty() {
+  render();
+  renderPendingCollections();
+  renderQuickWithdraw();
+}
