@@ -18,17 +18,13 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
-const LAST_CHARGED_DATE = `(SELECT g.date FROM charges ch
-  JOIN gameweeks g ON g.id = ch.gameweek_id
-  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
-  ORDER BY g.date DESC LIMIT 1)`;
-const FIRST_GAME_DATE = `(SELECT g.date FROM charges ch
-  JOIN gameweeks g ON g.id = ch.gameweek_id
-  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
-  ORDER BY g.date ASC LIMIT 1)`;
+// Last incoming transaction (contribution or positive adjustment)
+const LAST_INCOMING = `(SELECT MAX(CASE WHEN c.amount > 0 THEN c.date END) FROM contributions c
+  WHERE c.player_id = l.player_id AND c.contract_id = l.contract_id AND c.historical = 0)`;
+// Last game played (most recent gameweek with charges)
 const LAST_GAME_DATE = `(SELECT g.date FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
-  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id
+  WHERE ch.player_id = l.player_id
   ORDER BY g.date DESC LIMIT 1)`;
 
 const SELECT = `
@@ -37,8 +33,7 @@ const SELECT = `
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,
          ${LIFETIME_GAMES} AS games,
-         ${LAST_CHARGED_DATE} AS last_charged_date,
-         ${FIRST_GAME_DATE} AS first_game_date,
+         ${LAST_INCOMING} AS last_incoming_date,
          ${LAST_GAME_DATE} AS last_game_date,
          ROUND(l.opening_balance + ${CONTRIB} - ${CHARGED}, 2) AS present_balance
   FROM ledgers l JOIN players p ON p.id = l.player_id`;
@@ -85,22 +80,20 @@ export const ledgersRepo = {
       }))
     };
 
-    // Get date ranges across all contracts
-    const dates = db.prepare(`
-      SELECT MIN(g.date) as first_date, MAX(g.date) as last_date
-      FROM charges ch JOIN gameweeks g ON g.id = ch.gameweek_id
-      WHERE ch.player_id = ?
+    // Get last incoming and last game date across all contracts
+    const lastIncoming = db.prepare(`
+      SELECT MAX(CASE WHEN amount > 0 THEN date END) as date FROM contributions
+      WHERE player_id = ? AND historical = 0
     `).get(playerId);
-    if (dates.first_date) combined.first_game_date = dates.first_date;
-    if (dates.last_date) combined.last_game_date = dates.last_date;
+    if (lastIncoming?.date) combined.last_incoming_date = lastIncoming.date;
 
-    const lastCharged = db.prepare(`
+    const lastGame = db.prepare(`
       SELECT g.date FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
       WHERE ch.player_id = ?
       ORDER BY g.date DESC LIMIT 1
     `).get(playerId);
-    if (lastCharged) combined.last_charged_date = lastCharged.date;
+    if (lastGame?.date) combined.last_game_date = lastGame.date;
 
     return combined;
   },

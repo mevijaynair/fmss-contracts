@@ -120,7 +120,8 @@ async function render() {
     }
   }));
 
-  $('playersTable').querySelector('tbody').innerHTML = filtered.map(l => {
+  // Render as clean card grid instead of cluttered table
+  const cardsHtml = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
     const status = statusFromBalance(l.present_balance);
     const lastTxn = lastTransactionMap[l.player_id];
@@ -136,11 +137,11 @@ async function render() {
     }
 
     const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.08);' : '';
-    const gameRangeHint = l.first_game_date && l.last_game_date
-      ? `${new Date(l.first_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} → ${new Date(l.last_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    const lastIncomingHint = l.last_incoming_date
+      ? new Date(l.last_incoming_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       : '—';
-    const chargedTillHint = l.last_charged_date
-      ? `Till ${new Date(l.last_charged_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    const lastGameHint = l.last_game_date
+      ? new Date(l.last_game_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       : '—';
     return `
     <tr style="border-left: 4px solid ${l.present_balance < 0 ? '#d32f2f' : 'transparent'}; ${rowBg}">
@@ -148,10 +149,9 @@ async function render() {
       <td><span class="tag ${status.cls}" ${status.style ? 'style="' + status.style + '"' : ''}>${status.text}</span></td>
       <td class="num" title="${new Date(l.opening_balance >= 0 ? Date.now() : Date.now()).toLocaleDateString()}">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
-      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;" title="${chargedTillHint}">-${money(l.charged)}</span></td>
+      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;" title="Total charged">-${money(l.charged)}</span></td>
       <td class="num">${balCell(l.present_balance)}</td>
-      <td style="text-align: center; font-weight: 600; font-size: 0.9rem;" title="Game date range: ${gameRangeHint}">${l.games}<br><span style="font-size: 0.75rem; color: var(--text-muted);">📅${gameRangeHint}</span></td>
-      <td class="num">${lastTxnHtml}</td>
+      <td style="text-align: center; font-size: 0.85rem; color: var(--text-muted);" title="Last money received"><span style="display: block;">💰 ${lastIncomingHint}</span><span style="display: block; margin-top: 0.2rem;">⚽ ${lastGameHint}</span></td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
