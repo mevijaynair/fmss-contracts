@@ -36,13 +36,13 @@
     { "id": "hasan", "name": "Hasan", "aliases": [] },
     { "id": "saleel", "name": "Saleel", "aliases": [] },
     { "id": "rony", "name": "Rony", "aliases": [] },
-    { "id": "aws_ali", "name": "AWS + Ali", "aliases": [] },
+    { "id": "aws_ali", "name": "AWS + Ali", "aliases": [], "balance_group_id": "aws_group" },
     { "id": "nimesh", "name": "Nimesh", "aliases": [] },
     { "id": "joe", "name": "Joe", "aliases": [] },
     { "id": "abhi", "name": "Abhi", "aliases": [] },
     { "id": "saheer", "name": "Saheer", "aliases": [] },
     { "id": "hari", "name": "Hari", "aliases": [] },
-    { "id": "aws", "name": "AWS", "aliases": [] },
+    { "id": "aws", "name": "AWS", "aliases": [], "balance_group_id": "aws_group" },
     { "id": "praveen", "name": "Praveen", "aliases": [] },
     { "id": "jaison", "name": "Jaison", "aliases": [] },
     { "id": "arjun", "name": "Arjun", "aliases": [] },
@@ -102,6 +102,24 @@
   ],
   "gameweeks": [],
   "charges": [],
-  "contributions": [],
-  "kitty": []
+  "contributions": [
+    { "player_id": "rakesh", "contract_id": "sat", "amount": 200, "date": "2026-01-15", "comments": "cash", "historical": 1 },
+    { "player_id": "praveen", "contract_id": "sat", "amount": -114, "date": "2026-01-20", "comments": "refund", "historical": 1 },
+    { "player_id": "jeetu", "contract_id": "mon_thu", "amount": 300, "date": "2026-02-01", "comments": "transfer", "historical": 1 },
+    { "player_id": "aws_ali", "contract_id": "sat", "amount": 350, "date": "2026-02-05", "comments": "split: 250 sat, 100 mon_thu", "historical": 1 },
+    { "player_id": "aws_ali", "contract_id": "mon_thu", "amount": 100, "date": "2026-02-05", "comments": "split: 250 sat, 100 mon_thu", "historical": 1 },
+    { "player_id": "toby", "contract_id": "sat", "amount": 150, "date": "2026-02-10", "comments": "cash", "historical": 1 },
+    { "player_id": "shone", "contract_id": "sat", "amount": 200, "date": "2026-02-15", "comments": "transfer", "historical": 1 },
+    { "player_id": "joe", "contract_id": "mon_thu", "amount": 250, "date": "2026-02-20", "comments": "cash", "historical": 1 },
+    { "player_id": "rony", "contract_id": "sat", "amount": -50, "date": "2026-03-01", "comments": "refund", "historical": 1 },
+    { "player_id": "nimesh", "contract_id": "mon_thu", "amount": 300, "date": "2026-03-05", "comments": "cash", "historical": 1 }
+  ],
+  "kitty": [
+    { "kind": "income", "label": "Old sheet", "amount": 2734, "date": "2026-01-01", "historical": 1 },
+    { "kind": "income", "label": "Jersey Income 2025", "amount": 1078, "date": "2026-01-15", "historical": 1 },
+    { "kind": "income", "label": "Membership 2026", "amount": 456, "date": "2026-02-01", "historical": 1 },
+    { "kind": "expense", "label": "Pitch rental", "amount": -800, "date": "2026-01-10", "historical": 1 },
+    { "kind": "expense", "label": "Equipment", "amount": -250, "date": "2026-02-15", "historical": 1 },
+    { "kind": "expense", "label": "Other", "amount": -387, "date": "2026-03-01", "historical": 1 }
+  ]
 }
