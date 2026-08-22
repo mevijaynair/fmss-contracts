@@ -45,6 +45,46 @@ function getPresetRate(rateType, contractId) {
   return 0;
 }
 
+// Match player including nicknames and cashier/admin
+function findPlayerByToken(token) {
+  const t = token.toLowerCase().trim();
+
+  // Common nickname map
+  const nicknames = {
+    'vj': 'vijay',
+    'v': 'vijay',
+    'aj': 'arjun',
+    'rj': 'raj',
+    'sam': 'sameer',
+    'ash': 'ashish',
+  };
+
+  // Check direct match first
+  let p = store.players?.find(p =>
+    p.name.toLowerCase() === t ||
+    p.id === t
+  );
+  if (p) return p;
+
+  // Check partial match (contains)
+  p = store.players?.find(p =>
+    p.name.toLowerCase().includes(t) ||
+    t.includes(p.name.toLowerCase())
+  );
+  if (p) return p;
+
+  // Check aliases and nicknames
+  const expanded = nicknames[t] || t;
+  p = store.players?.find(p =>
+    p.name.toLowerCase().includes(expanded) ||
+    expanded.includes(p.name.toLowerCase()) ||
+    (p.aliases && p.aliases.some(a => a.toLowerCase() === t))
+  );
+  if (p) return p;
+
+  return null;
+}
+
 function statusLabel(r) {
   if (!r.matched) return '<span class="miss-badge">new / unmatched</span>';
   if (r.is_captain) return 'Captain';
@@ -57,33 +97,25 @@ async function showUnmatchedMapping(unmatched) {
 
   const mappedPlayers = {};
   for (const { token, suggestions } of unmatched) {
+    // Try enhanced nickname/alias matching first
+    const foundPlayer = findPlayerByToken(token);
+    if (foundPlayer) {
+      mappedPlayers[token] = foundPlayer.id;
+      continue;
+    }
+
     if (suggestions.length === 1) {
       mappedPlayers[token] = suggestions[0].id;
       continue;
     }
+
     if (suggestions.length === 0) {
-      const name = prompt(`"${token}" not found. Enter player name or press Cancel to skip:`);
-      if (name) {
-        const player = store.players?.find(p =>
-          p.name.toLowerCase().includes(name.toLowerCase()) ||
-          name.toLowerCase().includes(p.name.toLowerCase())
-        );
-        if (player) mappedPlayers[token] = player.id;
-      }
+      // No suggestion - skip (no dialogs, user can manually fix via dropdown if needed)
       continue;
     }
-    const choice = prompt(
-      `Map "${token}" to:\n${suggestions.map(s => s.name).join(' / ')}\n(or type a name)`,
-      suggestions[0].name
-    );
-    if (choice) {
-      const s = suggestions.find(x => x.name === choice);
-      if (s) mappedPlayers[token] = s.id;
-      else {
-        const p = store.players?.find(x => x.name === choice);
-        if (p) mappedPlayers[token] = p.id;
-      }
-    }
+
+    // Multiple suggestions - auto-pick first (user can fix via dropdown if wrong)
+    mappedPlayers[token] = suggestions[0].id;
   }
 
   // Apply mappings to rows
