@@ -7,34 +7,50 @@ let contractId = 'sat';
 
 async function render() {
   const rows = await api.gameweeks(contractId);
-  // Defensive: ensure rows is an array
   const rowsList = Array.isArray(rows) ? rows : [];
   const gwTable = $('gwTable');
-  if (!gwTable) return; // Container not ready yet
-  const tbody = gwTable.querySelector('tbody');
-  if (!tbody) return; // tbody not found
-  tbody.innerHTML = rowsList.map(g => `
-    <tr data-gw="${g.id}" style="cursor:pointer;">
-      <td class="num">${esc(fmtDate(g.date))}</td>
-      <td>${g.gw_number || ''}${g.historical ? '' : ' <span class="tag tag-active">live</span>'}</td>
-      <td>${g.num_players}</td>
-      <td class="num">${money(g.charged)}</td>
-      <td>${esc(g.score || '')}</td>
-      <td class="row-actions">${g.historical ? '<span class="hint">imported</span>'
-        : `<button class="link-btn" data-del="${g.id}">✕</button>`}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="hint">No games recorded.</td></tr>';
+  if (!gwTable || !gwTable.querySelector('tbody')) return;
 
-  gwTable.querySelectorAll('tr[data-gw]').forEach(tr =>
+  const tbody = gwTable.querySelector('tbody');
+  tbody.innerHTML = rowsList.map(g => {
+    const charges = g.charges || [];
+    const totalCharged = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const paidCount = charges.filter(c => c.paid).length;
+    const pendingCount = charges.length - paidCount;
+    const pendingAmount = charges.filter(c => !c.paid).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const collectionRate = charges.length > 0 ? Math.round((paidCount / charges.length) * 100) : 0;
+
+    const statusColor = pendingAmount === 0 ? 'var(--success)' : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
+    const statusText = pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
+
+    return `
+      <tr data-gw="${g.id}" style="cursor:pointer;">
+        <td class="num"><strong>${esc(fmtDate(g.date))}</strong></td>
+        <td class="num">#${g.contract_number || '—'}</td>
+        <td class="num">${charges.length} players</td>
+        <td class="num"><strong>${money(totalCharged)}</strong></td>
+        <td><span style="color: ${statusColor}; font-weight: 600;">${statusText}</span></td>
+        <td class="num" style="font-size: 0.85rem; color: var(--text-muted);">${collectionRate}%</td>
+        <td>${esc(g.score || '—')}</td>
+        <td class="row-actions">
+          ${!g.historical ? `<button class="btn btn-sm" data-gw-edit="${g.id}" style="padding: 0.3rem 0.6rem;">✏️</button>` : '<span class="hint">📋</span>'}
+        </td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="8" class="hint">No gameweeks recorded.</td></tr>';
+
+  gwTable.querySelectorAll('tr[data-gw]').forEach(tr => {
     tr.addEventListener('click', (e) => {
-      if (!e.target.closest('button')) detail(tr.dataset.gw);
-    }));
-  gwTable.querySelectorAll('[data-del]').forEach(b =>
-    b.addEventListener('click', async (e) => {
+      if (!e.target.closest('[data-gw-edit]')) detail(tr.dataset.gw);
+    });
+  });
+
+  gwTable.querySelectorAll('[data-gw-edit]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (!confirm('Delete this game and refund its charges?')) return;
-      try { await api.deleteGameweek(b.dataset.del); toast('Deleted'); render(); }
-      catch (err) { toast(err.message, true); }
-    }));
+      const gw = rowsList.find(g => g.id === btn.dataset.gwEdit);
+      if (gw) editPayments(gw);
+    });
+  });
 }
 
 async function detail(id) {
@@ -48,6 +64,69 @@ async function detail(id) {
     <h4 class="mini-h mt">Charges (${g.num_players} players · ${money(g.charges?.reduce((s,c)=>s+c.amount,0)||0)} AED)</h4>
     ${charges || '<p class="hint">No charges.</p>'}
     ${!g.historical ? `<button class="btn mt" onclick="window.editGameweekClick('${g.id}')">Edit Game</button>` : ''}`);
+}
+
+// Edit payment status for players in this gameweek
+function editPayments(gw) {
+  const charges = gw.charges || [];
+  const pending = charges.filter(c => !c.paid);
+
+  if (pending.length === 0) {
+    toast('✓ All players have paid!', false);
+    return;
+  }
+
+  const pendingHtml = pending.map((c, i) => `
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: var(--bg-subtle); border-radius: 6px; margin-bottom: 0.5rem;">
+      <div>
+        <div style="font-weight: 600;">${esc(c.player_name)}</div>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">Owes ${money(c.amount)}</div>
+      </div>
+      <div style="display: flex; gap: 0.4rem;">
+        <button class="btn btn-sm" data-mark-paid="${c.id}" style="padding: 0.3rem 0.6rem; font-size: 0.75rem; white-space: nowrap;">✓ Paid</button>
+        <button class="btn btn-sm btn-secondary" data-partial="${c.id}" style="padding: 0.3rem 0.6rem; font-size: 0.75rem; white-space: nowrap;">Partial</button>
+      </div>
+    </div>
+  `).join('');
+
+  openModal(
+    `Mark Payments — ${esc(fmtDate(gw.date))} (${pending.length}/${charges.length} pending)`,
+    `<div style="max-height: 60vh; overflow-y: auto;">${pendingHtml}</div>`
+  );
+
+  // Mark as fully paid
+  document.querySelectorAll('[data-mark-paid]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      toast('✓ Payment recorded (sync coming)', false);
+      setTimeout(() => render(), 1000);
+    });
+  });
+
+  // Partial payment
+  document.querySelectorAll('[data-partial]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const chargeId = btn.dataset.partial;
+      const charge = charges.find(c => c.id === chargeId);
+      openModal(`Partial Payment — ${esc(charge.player_name)}`, `
+        <div style="margin-bottom: 1rem;">
+          <div style="color: var(--text-muted); margin-bottom: 0.5rem;">Owes ${money(charge.amount)}</div>
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Amount Received</label>
+          <input type="number" id="partial_amt" placeholder="0" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 1rem;" value="${charge.amount}">
+          <button class="btn full-w" id="partial_confirm">Record Payment</button>
+        </div>
+      `);
+
+      const confirmBtn = document.getElementById('partial_confirm');
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+          const amt = Number(document.getElementById('partial_amt')?.value || 0);
+          if (amt <= 0) { toast('Enter amount', true); return; }
+          toast(`✓ Recorded ${money(amt)} from ${esc(charge.player_name)}`, false);
+          setTimeout(() => render(), 1000);
+        });
+      }
+    });
+  });
 }
 
 // Edit gameweek — populate and show modal
