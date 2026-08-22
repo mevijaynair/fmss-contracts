@@ -126,14 +126,69 @@ function showTrends(stats) {
 export function initResults() {
   const seg = $('resContractSeg');
   if (seg) {
-    seg.innerHTML = '<button class="seg-btn active" data-c="sat">Saturdays</button><button class="seg-btn" data-c="mon_thu">Mon/Thu</button>';
+    seg.innerHTML = '<button class="seg-btn active" data-c="sat">Saturdays</button><button class="seg-btn" data-c="mon_thu">Mon/Thu</button><button class="btn btn-sm" style="margin-left:auto;" id="importResultsBtn">📥 Import</button>';
     seg.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
       contractId = b.dataset.c;
       seg.querySelectorAll('.seg-btn').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       render();
     }));
+    $('importResultsBtn')?.addEventListener('click', showImportResultsModal);
   }
+}
+
+function showImportResultsModal() {
+  const { openModal, closeModal } = window;
+  if (!window.openModal) {
+    const modal = document.querySelector('#modal');
+    openModal = (title, html) => {
+      document.querySelector('#modalTitle').textContent = title;
+      document.querySelector('#modalContent').innerHTML = html;
+      modal.hidden = false;
+    };
+    closeModal = () => { modal.hidden = true; };
+  }
+
+  openModal('Import Match Results', `
+    <div style="margin-bottom: 1.5rem;">
+      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Results (Tab-Separated)</label>
+      <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">
+        Format: Date | Players (comma-sep) | Score/Result | Team A | Team B<br>
+        Example: 2026-08-22 | Vijay, Toby, Rojy | Reds win 7-5 | Reds | Blues
+      </p>
+      <textarea id="ir_data" placeholder="2026-08-22	Vijay, Toby, Rojy	Reds win 7-5	Reds	Blues
+2026-08-29	Jithin, Kartik, Rakesh	Blues 9-6	Blues	Reds" style="width: 100%; min-height: 200px; padding: 0.8rem; font-family: monospace; font-size: 0.9rem; border: 1px solid var(--border-color); border-radius: 8px;"></textarea>
+    </div>
+    <button class="btn full-w" id="ir_import">Import Results</button>
+  `);
+
+  $('ir_import').addEventListener('click', async () => {
+    const data = $('ir_data').value.trim();
+    if (!data) { toast('Paste data', true); return; }
+
+    try {
+      const lines = data.split('\n').filter(l => l.trim());
+      let imported = 0;
+
+      for (const line of lines) {
+        const parts = line.split('\t').map(p => p.trim());
+        if (parts.length < 3) continue;
+
+        const [dateStr, playersStr, resultStr] = parts;
+        const result = parseResult(resultStr, '');
+
+        // Log: would store to backend
+        // For now, just count successful parses
+        if (dateStr && playersStr && result) imported++;
+      }
+
+      toast(`✓ Parsed ${imported} results (backend integration needed for persistence)`, false);
+      closeModal?.();
+      render();
+    } catch (e) {
+      toast(`Error: ${e.message}`, true);
+    }
+  });
 }
 
 export function loadResults() { return render(); }
