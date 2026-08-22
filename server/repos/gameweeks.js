@@ -9,7 +9,18 @@ export const gameweeksRepo = {
       ? 'SELECT * FROM gameweeks WHERE contract_id = ? ORDER BY date DESC, gw_number DESC'
       : 'SELECT * FROM gameweeks ORDER BY date DESC';
     const rows = contractId ? db.prepare(sql).all(contractId) : db.prepare(sql).all();
-    return rows.map(g => ({ ...g, charged: this.chargeTotal(g.id) }));
+    // charges_count alongside the charged total: the stored num_players counts
+    // everyone named in the message, including people who were never matched to
+    // an account, so it runs 1–3 ahead of the players actually charged. Lists
+    // should show what was billed.
+    return rows.map(g => ({
+      ...g,
+      charged: this.chargeTotal(g.id),
+      charges_count: this.chargeCount(g.id),
+    }));
+  },
+  chargeCount(id) {
+    return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ?').get(id).n;
   },
   get(id) {
     const g = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(id);
@@ -29,6 +40,25 @@ export const gameweeksRepo = {
   },
   // Create a live gameweek and its charges; ensures every charged player has a ledger.
   create(gw, charges) {
+    // Validate everything BEFORE the first INSERT. There is no transaction here,
+    // so throwing partway through the charge loop would leave a gameweek row with
+    // only some of its charges written — worse than rejecting outright.
+    const seen = new Set();
+    for (const ch of charges) {
+      const amt = Number(ch.amount);
+      if (!Number.isFinite(amt) || amt < 0) {
+        throw new Error(`Invalid charge amount for ${ch.player_id}: ${ch.amount} (must be ≥ 0)`);
+      }
+      // A player can only be charged once per gameweek. A name pasted under both
+      // teams (an edited WhatsApp message, or someone who swapped sides) would
+      // otherwise be silently debited twice for a single game.
+      if (seen.has(ch.player_id)) {
+        throw new Error(
+          `${ch.player_id} appears more than once in this game — a player can only be charged once per gameweek.`);
+      }
+      seen.add(ch.player_id);
+    }
+
     const id = `${gw.contract_id}_live_${Date.now()}`;
     const now = new Date().toISOString();
     db.prepare(`INSERT INTO gameweeks
@@ -46,13 +76,9 @@ export const gameweeksRepo = {
     const insCharge = db.prepare(`INSERT INTO charges
       (id,gameweek_id,player_id,team,is_captain,rate_type,amount) VALUES (?,?,?,?,?,?,?)`);
     charges.forEach((ch, i) => {
-      const amt = Number(ch.amount);
-      if (!Number.isFinite(amt) || amt < 0) {
-        throw new Error(`Invalid charge amount for ${ch.player_id}: ${ch.amount} (must be ≥ 0)`);
-      }
       ledgersRepo.ensure(ch.player_id, gw.contract_id);
       insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
-        ch.is_captain ? 1 : 0, ch.rate_type || '', amt);
+        ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount));
     });
     return this.get(id);
   },

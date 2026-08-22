@@ -413,7 +413,7 @@ net club credit 5083.10.
 | B2 | **PASS** | | `(C)` detected, captain rate applied |
 | B3 | not run | | |
 | B4 | **PASS** | | Unknown names returned `matched:false`, no silent player creation |
-| B5 | **FAIL** | **S1** | **Player on both teams is charged twice for one game** — see findings |
+| B5 | **FIXED** | **S1** | Was: double-charged. Now rejected at parse + commit; retested, no debit, no partial write |
 | B6 | not run | | |
 | B7 | not run | | |
 | B8 | **PASS** | | Committed charges matched the preview amounts exactly |
@@ -423,10 +423,10 @@ net club credit 5083.10.
 | C2 | not run | | |
 | C3 | not run | | |
 | C4 | not run | | |
-| C5 | **PARTIAL** | **S2** | Contract id fix confirmed (`monthu`=20 gw, `mon_thu`=0), but Results UI still shows nothing — blocked by finding 2 |
-| C6 | **FAIL** | **S2** | Empty state renders *when data exists* — 19/20 gameweeks present |
-| C7 | blocked | | Blocked by finding 2 |
-| C8 | blocked | | Blocked by finding 2 |
+| C5 | **FIXED** | **S2** | Results now shows real data; sat and monthu return different leaderboards |
+| C6 | **FIXED** | **S2** | Empty state now only when genuinely empty |
+| C7 | **PASS** | | Leaderboards populate: Toby 19 games (sat), Praveen 17 (monthu) |
+| C8 | **PASS** | | Games without a score counted in games, excluded from wins; no NaN |
 | C9 | not run | | |
 | C10 | not run | | |
 | D1 | blocked | | Needs a real player PIN |

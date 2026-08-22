@@ -6,7 +6,10 @@ let contractId = 'sat';
 
 async function render() {
   try {
-    const gws = await api.gameweeks(contractId);
+    // /results, not /gameweeks — the gameweeks LIST returns num_players and a
+    // `charged` total but no `charges` array (only /gameweeks/:id has that), so
+    // aggregating off it always produced an empty leaderboard.
+    const gws = await api.results(contractId);
     const stats = aggregate(Array.isArray(gws) ? gws : []);
     if (!Object.keys(stats).length) { showEmpty(); return; }
     showLeaderboards(stats);
