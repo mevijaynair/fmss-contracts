@@ -27,13 +27,13 @@ async function renderLog() {
   const rows = await api.contributions(
     $('contribFilter').value ? { player: $('contribFilter').value } : {});
   $('contribTable').querySelector('tbody').innerHTML = rows.slice(0, 400).map(c => `
-    <tr>
+    <tr style="${c.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(c.date))}</td>
       <td>${esc(c.player_name || c.name_raw || '—')}</td>
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
       <td>${esc(c.comments || '')}</td>
-      <td class="row-actions">${c.historical ? '<span class="hint">imported</span>'
+      <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-muted); color: var(--text-muted);">📋 Seed</span>'
         : `<button class="link-btn" data-del="${c.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
 

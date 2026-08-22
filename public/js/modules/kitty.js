@@ -13,12 +13,12 @@ async function render() {
   ].map(x => `<div class="kpi ${x.cls || ''}"><div class="v">${x.v}</div><div class="l">${esc(x.l)}</div></div>`).join('');
 
   $('kittyTable').querySelector('tbody').innerHTML = k.entries.map(e => `
-    <tr>
+    <tr style="${e.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(e.date))}</td>
       <td><span class="tag ${e.kind === 'income' ? 'tag-paid' : 'tag-overdue'}">${e.kind}</span></td>
       <td>${esc(e.label)}</td>
       <td class="num">${e.kind === 'income' ? balCell(e.amount) : `<span class="bal neg">-${money(e.amount)}</span>`}</td>
-      <td class="row-actions">${e.historical ? '<span class="hint">imported</span>'
+      <td class="row-actions">${e.historical ? '<span class="tag" style="background: var(--bg-muted); color: var(--text-muted);">📋 Seed</span>'
         : `<button class="link-btn" data-del="${e.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="hint">No entries.</td></tr>';
 
