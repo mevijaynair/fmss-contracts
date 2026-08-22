@@ -61,28 +61,28 @@ function showLeaderboards(stats) {
   const byWins = [...all].sort((a, b) => b.wins - a.wins);
   const byCaptain = [...all].filter(p => p.captainGames > 0).sort((a, b) => b.captainWins - a.captainWins);
 
-  const leaderboardHTML = (title, icon, color, data, field) => `
-    <div style="flex:1;min-width:300px;padding:1.5rem;background:var(--bg-subtle);border-radius:8px;border-left:4px solid ${color};">
-      <h3 style="margin:0 0 1rem;display:flex;align-items:center;gap:0.5rem;font-size:1.1rem;color:${color};">${icon} ${title}</h3>
-      ${data.slice(0, 8).map((p, i) => `
-        <div style="padding:0.6rem;background:white;border-radius:4px;margin-bottom:0.5rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;hover:opacity:0.8;" data-player="${p.name}">
-          <span style="font-weight:600;font-size:0.9rem;">${i+1}. ${esc(p.name)}</span>
-          <span style="color:${color};font-weight:700;font-size:1rem;">${p[field]}</span>
-        </div>
-      `).join('')}
+  const leaderboardHTML = (title, color, data, field) => `
+    <div class="sams-card" style="flex:1;min-width:280px;">
+      <div class="card-header"><h3 class="card-title" style="color:${color};">${title}</h3></div>
+      <div style="padding:1rem;">
+        ${data.slice(0, 8).map((p, i) => `
+          <div style="padding:0.7rem;background:#f9f9f9;border-radius:4px;margin-bottom:0.5rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${color};transition:all 0.2s;" data-player="${p.name}">
+            <span style="font-weight:600;flex:1;">${i+1}. ${esc(p.name)}</span>
+            <span style="color:${color};font-weight:700;min-width:40px;text-align:right;">${p[field]}</span>
+          </div>
+        `).join('')}
+      </div>
     </div>
   `;
 
-  const html = `
-    <div style="display:flex;gap:1.5rem;margin-bottom:2rem;flex-wrap:wrap;">
-      ${leaderboardHTML('🎮 Most Games', '', 'var(--sport)', byGames, 'games')}
-      ${leaderboardHTML('🏆 Most Wins', '', '#4caf50', byWins, 'wins')}
-      ${leaderboardHTML('👑 Best Captains', '', '#ff9800', byCaptain, 'captainWins')}
-    </div>
-  `;
+  const html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:2rem;">
+    ${leaderboardHTML('🎮 Most Games', 'var(--sport)', byGames, 'games')}
+    ${leaderboardHTML('🏆 Most Wins', '#4caf50', byWins, 'wins')}
+    ${leaderboardHTML('👑 Best Captains', '#ff9800', byCaptain, 'captainWins')}
+  </div>`;
 
   let c = document.querySelector('[data-results-lb]');
-  if (!c) { c = document.createElement('div'); c.setAttribute('data-results-lb', ''); const v = document.querySelector('[data-view="results"]'); if (v) v.appendChild(c); }
+  if (!c) { c = document.createElement('div'); c.setAttribute('data-results-lb', ''); c.style.padding='1rem'; const v = document.querySelector('[data-view="results"]'); if (v) v.appendChild(c); }
   c.innerHTML = html;
 
   c.querySelectorAll('[data-player]').forEach(d => {
@@ -105,35 +105,37 @@ function showTrends(stats) {
     });
   });
 
-  const html = `<div style="margin-top:2rem;padding:1.5rem;background:var(--bg-subtle);border-radius:8px;">
-    <h3 style="margin-bottom:1.5rem;font-size:1.2rem;">📊 Seasonal Comparison (Q1-Q4)</h3>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.2rem;">
-      ${['Q1', 'Q2', 'Q3', 'Q4'].map(s => {
-        const wr = q[s].games > 0 ? Math.round((q[s].wins / q[s].games) * 100) : 0;
-        const noData = q[s].games === 0;
-        return `<div style="padding:1.2rem;background:white;border-radius:8px;border-left:6px solid ${noData ? '#ccc' : 'var(--sport)'};box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-          <div style="font-weight:700;font-size:1.3rem;color:${noData ? '#999' : 'var(--sport)'};margin-bottom:1rem;">${s}</div>
-          <div style="display:grid;gap:0.6rem;font-size:0.95rem;">
-            <div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid #eee;">
-              <span>🎮 Games</span>
-              <strong>${q[s].games}</strong>
+  const html = `<div class="sams-card">
+    <div class="card-header"><h3 class="card-title">📊 Seasonal Comparison (Q1-Q4)</h3></div>
+    <div style="padding:1.5rem;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+        ${['Q1', 'Q2', 'Q3', 'Q4'].map(s => {
+          const wr = q[s].games > 0 ? Math.round((q[s].wins / q[s].games) * 100) : 0;
+          const noData = q[s].games === 0;
+          return `<div style="padding:1rem;background:${noData ? '#f5f5f5' : 'white'};border-radius:6px;border-left:4px solid ${noData ? '#ddd' : 'var(--sport)'};border-top:1px solid #eee;">
+            <div style="font-weight:700;font-size:1.1rem;color:${noData ? '#999' : 'var(--sport)'};margin-bottom:0.8rem;">${s}</div>
+            <div style="display:grid;gap:0.5rem;font-size:0.9rem;">
+              <div style="display:flex;justify-content:space-between;">
+                <span style="color:#666;">🎮</span>
+                <strong>${q[s].games} games</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;">
+                <span style="color:#4caf50;">🏆</span>
+                <strong style="color:#4caf50;">${q[s].wins}W (${wr}%)</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;border-top:1px solid #eee;padding-top:0.5rem;margin-top:0.5rem;">
+                <span style="color:var(--sport);">💰</span>
+                <strong style="color:var(--sport);">${money(q[s].rev)}</strong>
+              </div>
             </div>
-            <div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid #eee;">
-              <span>🏆 Wins</span>
-              <strong style="color:#4caf50;">${q[s].wins}W (${wr}%)</strong>
-            </div>
-            <div style="display:flex;justify-content:space-between;padding:0.4rem 0;">
-              <span>💰 Revenue</span>
-              <strong style="color:var(--sport);">${money(q[s].rev)}</strong>
-            </div>
-          </div>
-        </div>`;
-      }).join('')}
+          </div>`;
+        }).join('')}
+      </div>
     </div>
   </div>`;
 
   let c = document.querySelector('[data-results-trends]');
-  if (!c) { c = document.createElement('div'); c.setAttribute('data-results-trends', ''); const v = document.querySelector('[data-view="results"]'); if (v) v.appendChild(c); }
+  if (!c) { c = document.createElement('div'); c.setAttribute('data-results-trends', ''); c.style.marginTop='1rem'; const v = document.querySelector('[data-view="results"]'); if (v) v.appendChild(c); }
   c.innerHTML = html;
 }
 
