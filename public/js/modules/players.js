@@ -15,6 +15,13 @@ const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
 function isPlayer() { return store.user?.role === 'player'; }
 
+// Auto-calculate status based on balance
+function statusFromBalance(balance) {
+  if (balance < 0) return 'Out of contract';
+  if (balance < 150) return 'Refill needed';
+  return 'In Contract';
+}
+
 async function render() {
   if (isPlayer()) return renderPlayerLedger();
 
@@ -83,12 +90,13 @@ async function render() {
 
   $('playersTable').querySelector('tbody').innerHTML = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
+    const autoStatus = statusFromBalance(l.present_balance);
     return `
     <tr>
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
       <td>
         <select data-status="${l.player_id}" class="btn-sm" style="padding:0.25rem 0.4rem;">
-          ${STATUSES.map(s => `<option ${s.toLowerCase() === (l.status || '').toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
+          ${STATUSES.map(s => `<option ${s.toLowerCase() === autoStatus.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
       <td class="num">${money(l.opening_balance)}</td>
