@@ -164,103 +164,146 @@ window.showPlayerDetail = async (playerId) => {
 
 async function renderPlayerDetail(player, stats) {
   const detailCard = $('playerDetailCard');
-  $('playerDetailName').textContent = `${player.name} — ${store.contracts.find(c => c.id === contractId)?.name || ''}`;
+  $('playerDetailName').textContent = `${player.name}`;
 
-  // Fetch contributions for this player
-  let contributions = [];
+  // Fetch ALL contributions for this player (across all contracts)
+  let allContributions = [];
   try {
-    const data = await api.get(`/contributions?player_id=${player.id}&contract_id=${contractId}`);
-    contributions = data || [];
+    const data = await api.get(`/contributions?player_id=${player.id}`);
+    allContributions = data || [];
   } catch (e) {
     console.error('Failed to load contributions:', e);
   }
 
-  // Timeline
-  const timelineHtml = stats.timeline.events.length > 0
-    ? stats.timeline.events.map(e => {
-        const type = e.type === 'contribution' ? 'contribution' : 'charge';
-        return `
-          <div class="timeline-event ${type}">
-            <div class="timeline-marker"></div>
-            <div class="timeline-content">
-              <div class="timeline-date">${e.date}</div>
-              <div class="timeline-type">${type === 'contribution' ? '📥 Contribution' : '⚽ Game charge'}</div>
-              <div class="timeline-detail">${type === 'contribution' ? `+${e.amount} AED` : `${e.team || '—'} · ${e.rate_type || '—'} · -${e.amount} AED`}</div>
-              <div class="timeline-balance">Balance: ${e.runningBalance} AED</div>
-            </div>
-          </div>
-        `;
-      }).join('')
-    : '<div class="hint">No transactions yet.</div>';
+  // Fetch ledgers for all contracts
+  let allLedgers = [];
+  try {
+    const data = await api.get(`/players/${player.id}/ledgers`);
+    allLedgers = data || [];
+  } catch (e) {
+    console.error('Failed to load ledgers:', e);
+  }
 
-  $('playerTimeline').innerHTML = `
-    <div style="margin-bottom: 1rem;">
-      <span class="muted">Opening</span> ${money(stats.timeline.opening)} AED
-      &nbsp;·&nbsp;
-      <span class="muted">Present</span> <strong>${money(stats.timeline.presentBalance)}</strong> AED
+  // Calculate cross-contract stats
+  const totalGames = allLedgers.reduce((sum, l) => sum + (l.games || 0), 0);
+  const totalContributions = allContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
+  const totalBalance = allLedgers.reduce((sum, l) => sum + (l.present_balance || 0), 0);
+
+  // Build modular tabs
+  let tabsHtml = `
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+      <button class="tab-btn active" data-tab="overview" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; border-bottom: 2px solid var(--sport); color: var(--sport);">Overview</button>
+      <button class="tab-btn" data-tab="contributions" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">Contributions</button>
+      <button class="tab-btn" data-tab="charges" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">Charges</button>
+      <button class="tab-btn" data-tab="contracts" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">By Contract</button>
     </div>
-    ${timelineHtml}
-  `;
 
-  // Stats grid
-  const statsGrid = [
-    { label: 'Games played', value: stats.games, detail: stats.games === 1 ? '1 game' : `${stats.games} games` },
-    { label: 'Teams', value: stats.teams?.length || 0, detail: stats.teams?.map(t => t.team).join(', ') || 'None' },
-    { label: 'Attendance', value: `${stats.streaks.current}`, detail: `${stats.streaks.longest} longest` },
-    { label: 'Current balance', value: money(stats.timeline.presentBalance), detail: stats.timeline.presentBalance >= 0 ? 'Positive' : 'Refill needed' },
-  ];
-
-  const costBreakdownHtml = stats.costs?.length > 0
-    ? stats.costs.map(c => `<div class="stat-detail">${c.rate_type}: ${c.gameCount}g @ ${money(c.totalAmount)}</div>`).join('')
-    : '<div class="stat-detail">No cost breakdown</div>';
-
-  $('playerStatsGrid').innerHTML = statsGrid.map(s => `
-    <div class="stat-card">
-      <div class="stat-label">${s.label}</div>
-      <div class="stat-value">${s.value}</div>
-      <div class="stat-detail">${s.detail}</div>
+    <!-- OVERVIEW TAB -->
+    <div class="tab-content" data-tab="overview" style="display: block;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Games Played</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: var(--sport);">${totalGames}</div>
+        </div>
+        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Total Balance</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: ${totalBalance > 0 ? 'var(--success)' : 'var(--danger)'};">${money(totalBalance)}</div>
+        </div>
+        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Total Contributions</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: var(--success);">+${money(totalContributions)}</div>
+        </div>
+        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Contracts</div>
+          <div style="font-size: 1.8rem; font-weight: 700;">${allLedgers.length}</div>
+        </div>
+      </div>
     </div>
-  `).join('') + `
-    <div class="stat-card" style="grid-column: span 2;">
-      <div class="stat-label">Cost breakdown</div>
-      ${costBreakdownHtml}
-    </div>
-  `;
 
-  // Contributions table
-  const contributionsHtml = contributions.length > 0
-    ? `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+    <!-- CONTRIBUTIONS TAB -->
+    <div class="tab-content" data-tab="contributions" style="display: none;">
+      ${allContributions.length > 0
+        ? `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead style="background: var(--bg-subtle);">
+              <tr>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Date</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Contract</th>
+                <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Amount</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Comments</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allContributions.map(c => `
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                  <td style="padding: 0.5rem;">${c.date || '—'}</td>
+                  <td style="padding: 0.5rem; color: var(--text-muted);">${esc(store.contracts.find(x => x.id === c.contract_id)?.name || c.contract_id)}</td>
+                  <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${c.amount > 0 ? 'var(--success)' : 'var(--danger)'};">${c.amount > 0 ? '+' : ''}${money(c.amount)}</td>
+                  <td style="padding: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">${esc(c.comments || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`
+        : '<div class="hint">No contributions yet.</div>
+      }
+    </div>
+
+    <!-- CHARGES TAB -->
+    <div class="tab-content" data-tab="charges" style="display: none;">
+      <div class="hint">Game charges from current contract (${store.contracts.find(c => c.id === contractId)?.name || ''}):</div>
+      ${stats.timeline?.events?.filter(e => e.type !== 'contribution').length > 0
+        ? stats.timeline.events
+            .filter(e => e.type !== 'contribution')
+            .map(e => `
+              <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-subtle); border-radius: 6px; font-size: 0.9rem;">
+                <div style="font-weight: 500;">${e.date} · ${e.team || '—'}</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">${e.rate_type || '—'}</div>
+                <div style="margin-top: 0.25rem; color: var(--danger); font-weight: 600;">-${money(e.amount)}</div>
+              </div>
+            `).join('')
+        : '<div class="hint">No charges in this contract yet.</div>'
+      }
+    </div>
+
+    <!-- BY CONTRACT TAB -->
+    <div class="tab-content" data-tab="contracts" style="display: none;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead style="background: var(--bg-subtle);">
           <tr>
-            <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Date</th>
-            <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Amount</th>
-            <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Comments</th>
+            <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color);">Contract</th>
+            <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Balance</th>
+            <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Games</th>
+            <th style="padding: 0.5rem; text-align: right; border-bottom: 1px solid var(--border-color);">Status</th>
           </tr>
         </thead>
         <tbody>
-          ${contributions.map(c => `
+          ${allLedgers.map(l => `
             <tr style="border-bottom: 1px solid var(--border-color);">
-              <td style="padding: 0.5rem;">${c.date || '—'}</td>
-              <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${c.amount > 0 ? 'var(--success)' : 'var(--danger)'};">${c.amount > 0 ? '+' : ''}${money(c.amount)}</td>
-              <td style="padding: 0.5rem; color: var(--text-muted);">${esc(c.comments || '—')}</td>
+              <td style="padding: 0.5rem;">${esc(store.contracts.find(c => c.id === l.contract_id)?.name || l.contract_id)}</td>
+              <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${l.present_balance > 0 ? 'var(--success)' : 'var(--danger)'};">${money(l.present_balance)}</td>
+              <td style="padding: 0.5rem; text-align: right;">${l.games || 0}</td>
+              <td style="padding: 0.5rem; text-align: right; font-size: 0.85rem; color: var(--text-muted);">${l.status || 'In Contract'}</td>
             </tr>
           `).join('')}
         </tbody>
-      </table>`
-    : '<div class="hint">No contributions yet.</div>';
-
-  const detailsContainer = document.createElement('div');
-  detailsContainer.style.cssText = 'margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);';
-  detailsContainer.innerHTML = `
-    <div style="font-weight: 600; margin-bottom: 1rem;">Contributions</div>
-    ${contributionsHtml}
+      </table>
+    </div>
   `;
 
-  const statsContainer = $('playerStatsGrid').parentElement;
-  const existingDetails = statsContainer.querySelector('[data-contributions-table]');
-  if (existingDetails) existingDetails.remove();
-  detailsContainer.setAttribute('data-contributions-table', '');
-  statsContainer.appendChild(detailsContainer);
+  $('playerStatsGrid').innerHTML = tabsHtml;
+
+  // Tab switching
+  $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(b => {
+        b.style.color = b.dataset.tab === tab ? 'var(--sport)' : 'var(--text-muted)';
+        b.style.borderBottomColor = b.dataset.tab === tab ? 'var(--sport)' : 'transparent';
+      });
+      $('playerStatsGrid').querySelectorAll('.tab-content').forEach(tc => {
+        tc.style.display = tc.dataset.tab === tab ? 'block' : 'none';
+      });
+    });
+  });
 
   detailCard.hidden = false;
   currentDetailPlayerId = player.id;
@@ -435,55 +478,10 @@ export function initPlayers() {
     bulkImportBtn.textContent = '📥 Bulk Import';
     bulkImportBtn.addEventListener('click', bulkImportModal);
     $('plAdd').parentElement.appendChild(bulkImportBtn);
-
-    initSetupBanner();
-    initOpeningBalances();
   }
   $('playerDetailClose').addEventListener('click', closePlayerDetail);
 }
 
-function initSetupBanner() {
-  const toggle = $('setupToggle');
-  const form = $('setupFormContainer');
-  if (!toggle || !form) return;
-
-  toggle.addEventListener('click', () => {
-    const isHidden = form.style.display === 'none';
-    form.style.display = isHidden ? 'block' : 'none';
-    toggle.textContent = isHidden ? 'Hide form' : 'Show form';
-    if (isHidden) renderSetupForm();
-  });
-}
-
-function renderSetupForm() {
-  const form = $('setupFormContainer');
-  // Re-render the opening balances form in the setup banner
-  const contractSelect = `
-    <div style="max-width: 400px;">
-      <div style="margin-bottom: 1rem;">
-        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Select Contract</label>
-        <select id="balanceContract" required style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color); border-radius: 8px;">
-          <option value="">Choose contract…</option>
-          ${store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div style="margin-bottom: 1rem;">
-        <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Opening Balances (Name, Balance)</label>
-        <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">Format: one per line, can include headers. Example: "Toby -700"</p>
-        <textarea id="balanceData" placeholder="Name&#9;Balance
-Vijay&#9;0
-Toby&#9;-700
-..." style="width: 100%; min-height: 120px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 8px;"></textarea>
-      </div>
-      <div style="display: flex; gap: 0.6rem;">
-        <button type="button" class="btn" id="submitBalances">Import Balances</button>
-        <button type="button" class="btn btn-secondary" id="clearBalances">Clear</button>
-      </div>
-    </div>
-  `;
-  form.innerHTML = contractSelect;
-  loadOpeningBalances();
-}
 
 export function loadPlayers() {
   if (isPlayer()) {
