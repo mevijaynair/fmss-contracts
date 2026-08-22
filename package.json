@@ -8,7 +8,9 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "seed": "node server/db.js --seed",
-    "reseed": "node server/db.js --reseed"
+    "reseed": "node server/db.js --reseed",
+    "check:ui": "node scripts/check-ui-tokens.js",
+    "test": "npm run check:ui"
   },
   "engines": {
     "node": ">=22.5.0"

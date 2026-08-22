@@ -7,10 +7,15 @@
   --border-strong: #d6d9e4;
   --text-main: #161a26;
   --text-muted: #5b6275;
-  --text-faint: #98a0b3;
+  /* Was #98a0b3 — only 2.6:1 on --bg-card, below WCAG AA. This token carries
+     table headers (th), .hint and .card-sub, so it must stay readable. */
+  --text-faint: #6b7280;
   --accent: #161a26;
   --accent-hover: #000000;
   --danger: #dc2626;
+  /* Foreground for text sitting ON a solid --danger fill. Danger red is dark in
+     every theme, so this stays near-white and is NOT redefined per theme. */
+  --on-danger: #fff7f7;
   --warning: #d97706;
   --success: #16a34a;
   --focus: rgba(99, 102, 241, 0.16);
@@ -422,8 +427,12 @@ body, .sidebar, .topbar, .sams-card, .kpi, input, select, textarea, .btn, .att-r
   .sidebar { position: static; height: auto; width: 100%; flex-direction: column;
     gap: 0.6rem; padding: 0.9rem 1rem; border-right: none; border-bottom: 1px solid var(--border-color); }
   .brand { padding: 0 0.25rem; }
+  /* min-width:0 is required: as a flex item .nav defaults to min-width:auto, so the
+     nowrap buttons force it to min-content width (~950px) instead of scrolling. */
   .nav { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 0.25rem;
-    -webkit-overflow-scrolling: touch; padding-bottom: 0.25rem; }
+    -webkit-overflow-scrolling: touch; padding-bottom: 0.25rem;
+    min-width: 0; width: 100%; flex: 0 1 auto; }
+  .shell, .sidebar, .main, .content { min-width: 0; max-width: 100%; }
   .nav button { width: auto; white-space: nowrap; padding: 0.5rem 0.8rem; }
   .nav button.active::before { display: none; }
   .sidebar-foot { display: none; }
@@ -647,6 +656,14 @@ body.sport-football {
   --sport-grad: linear-gradient(135deg, #FFD700 0%, #FFC700 100%);
 }
 
+/* --sport-on-soft is the readable *text* variant of the accent. The generic rule
+   (body { --sport-on-soft: var(--sport-deep) }) assumes a mid-dark accent, but gold
+   is near-white — #FFC700 on a light surface measures ~1.5:1, far below WCAG AA.
+   Mixing toward --text-main keeps it gold-tinted but legible in both themes. */
+body.sport-football { --sport-on-soft: color-mix(in srgb, var(--sport) 32%, var(--text-main)); }
+:root[data-theme="dark"] body.sport-football {
+  --sport-on-soft: color-mix(in srgb, var(--sport) 72%, white); }
+
 /* Dark theme retuned to the marketing-site palette (this is the default). */
 :root[data-theme="dark"] {
   --bg-main: #0A0A0A;
@@ -701,6 +718,12 @@ body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-dee
 .dev-tag { color: var(--sport);
   background: rgba(255, 215, 0, 0.1); border-color: rgba(255, 215, 0, 0.3); }
 
+/* Full-screen login overlay. main.js toggles display between none/flex; these
+   rules supply the centring and backdrop that were previously missing entirely. */
+.login-view { position: fixed; inset: 0; z-index: 60; display: flex;
+  align-items: center; justify-content: center; padding: 2rem;
+  background: var(--bg-main); overflow-y: auto; }
+
 /* Login player-toggle row — inline checkbox + label. */
 .login-toggle { display: flex; align-items: center; gap: 0.55rem; cursor: pointer;
   font-size: 0.88rem; color: var(--text-muted); }
@@ -711,3 +734,130 @@ body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-dee
   letter-spacing: 0.14em; font-size: 1rem; color: var(--sport);
   background: rgba(255, 215, 0, 0.1); border: 1px solid rgba(255, 215, 0, 0.3);
   padding: 0.1rem 0.6rem; border-radius: 7px; }
+
+/* ============================================================
+   UI REMEDIATION — shared primitives (see UI_REMEDIATION_PLAN.md)
+   Every rule below uses theme tokens so it follows light/dark.
+   Never hardcode a hex here; use var(--bg-*) / var(--text-*).
+   ============================================================ */
+
+/* --- Strongest balance state: solid danger fill (players "Out of contract"). --- */
+.tag-critical { font-weight: 700; color: var(--on-danger); background: var(--danger);
+  border: 1px solid var(--danger); }
+
+/* --- Player ledger row emphasis --- */
+tr.row-alert { background: color-mix(in srgb, var(--danger) 7%, transparent); }
+tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.link-name { cursor: pointer; color: var(--sport-on-soft); }
+.charged-cell { font-weight: 500; font-size: 0.9rem; color: var(--text-muted); }
+.charged-cell.is-charged { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); }
+
+/* --- Search + filter bar (players ledger). Wraps instead of forcing 4 fixed
+       columns, which overflowed a 375px viewport. --- */
+.filter-bar { display: grid; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.filter-bar > input, .filter-bar > select { min-width: 0; padding: 0.5rem;
+  border: 1px solid var(--border-color); border-radius: 6px;
+  background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 0.88rem; }
+.filter-bar > input:focus, .filter-bar > select:focus { outline: none;
+  border-color: var(--sport); box-shadow: 0 0 0 3px var(--focus); }
+@media (min-width: 900px) { .filter-bar { grid-template-columns: 2fr 1fr 1fr 1fr; } }
+
+/* --- Layout utilities --- */
+.header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.btn-row { display: flex; gap: 0.5rem; }
+.btn-row > .btn { flex: 1; }
+.stack-sm { display: flex; flex-direction: column; gap: 0.6rem; }
+.auto-grid { display: grid; gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(var(--col-min, 280px), 1fr)); }
+
+/* --- Tabs (were phantom classes: .tab-btn / .tab-content) --- */
+.tab-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; overflow-x: auto;
+  border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; }
+.tab-btn { background: none; border: none; cursor: pointer; padding: 0.5rem 1rem;
+  font: inherit; font-weight: 600; font-size: 0.86rem; color: var(--text-muted);
+  border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+.tab-btn:hover { color: var(--text-main); }
+.tab-btn.active { color: var(--sport-on-soft); border-bottom-color: var(--sport); }
+.tab-content[hidden] { display: none; }
+
+/* --- Outside-contract badge (was a phantom class in gameday) --- */
+.outside-badge { display: inline-flex; padding: 0.12rem 0.55rem; border-radius: 9999px;
+  font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+  color: color-mix(in srgb, var(--warning) 72%, var(--text-main));
+  background: color-mix(in srgb, var(--warning) 16%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--bg-card)); }
+
+/* --- Callout panels: replace hardcoded pastel/gray boxes --- */
+.panel { border-radius: var(--radius); padding: 1.15rem 1.25rem;
+  background: var(--bg-inset); border: 1px solid var(--border-color);
+  border-left: 4px solid var(--border-strong); }
+.panel + .panel { margin-top: 1rem; }
+.panel-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.6rem;
+  display: flex; align-items: center; gap: 0.45rem; color: var(--text-main); }
+.panel-body { font-size: 0.87rem; line-height: 1.6; color: var(--text-muted); }
+.panel-warn { border-left-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--bg-card)); }
+.panel-warn .panel-title { color: color-mix(in srgb, var(--warning) 74%, var(--text-main)); }
+.panel-danger { border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--bg-card)); }
+.panel-danger .panel-title { color: color-mix(in srgb, var(--danger) 74%, var(--text-main)); }
+.panel-row { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.65rem; border-radius: 8px; background: var(--bg-card);
+  border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem; }
+.panel-scroll { max-height: 220px; overflow-y: auto; margin-top: 0.7rem; }
+
+/* Quick-action row: preset buttons + free-text inputs (kitty Quick Withdraw). */
+.quick-row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-top: 0.8rem; }
+.quick-row .qw-amount { flex: 0 1 120px; }
+.quick-row .qw-reason { flex: 1 1 200px; min-width: 150px; }
+
+/* --- Confirm-modal affirmation row (Reset / Delete player) --- */
+.confirm-check { display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
+  padding: 0.75rem; border-radius: 8px; background: var(--bg-inset);
+  border: 1px solid var(--border-color); margin-top: 0.9rem; }
+.confirm-check input { width: 16px; height: 16px; flex: none; cursor: pointer;
+  accent-color: var(--danger); }
+.confirm-check span { font-weight: 600; font-size: 0.88rem; color: var(--text-main); }
+
+/* --- Bulk-import textarea (kitty / results / players) --- */
+.import-area { width: 100%; min-height: 200px; padding: 0.8rem; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem;
+  color: var(--text-main); background: var(--bg-inset);
+  border: 1px solid var(--border-color); border-radius: 10px; }
+.import-area:focus { outline: none; border-color: var(--sport); box-shadow: 0 0 0 3px var(--focus); }
+
+/* --- Results view primitives --- */
+.res-board { display: flex; flex-direction: column; gap: 0.15rem; }
+.res-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+  padding: 0.6rem 0.7rem; border-radius: 8px; cursor: pointer;
+  border-bottom: 1px solid var(--border-color); transition: background 0.15s; }
+.res-row:last-child { border-bottom: none; }
+.res-row:hover { background: var(--bg-inset); }
+.res-name { font-weight: 600; font-size: 0.88rem; color: var(--text-main);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-val { font-weight: 800; font-size: 1rem; min-width: 2.5rem; text-align: right; flex: none;
+  color: var(--sport-on-soft); }
+.res-val.is-win { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
+.res-val.is-capt { color: color-mix(in srgb, var(--warning) 72%, var(--text-main)); }
+.res-quarter { padding: 1.1rem; border-radius: var(--radius); background: var(--bg-inset);
+  border: 1px solid var(--border-color); border-top: 3px solid var(--sport); }
+.res-quarter.is-empty { border-top-color: var(--border-strong); opacity: 0.6; }
+.res-q-label { font-weight: 800; font-size: 1.05rem; color: var(--text-main);
+  margin-bottom: 0.85rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-color); }
+.res-q-row { display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.85rem; padding: 0.3rem 0; }
+.res-q-row .k { color: var(--text-muted); }
+.res-q-row .v { font-weight: 700; color: var(--text-main); }
+.res-q-row .v.is-win { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
+.res-q-row .v.is-money { color: var(--sport-on-soft); }
+.res-q-row.is-total { border-top: 1px solid var(--border-color); margin-top: 0.45rem;
+  padding-top: 0.6rem; }
+
+/* --- Empty state --- */
+.empty-state { text-align: center; padding: 2.5rem 1.25rem; color: var(--text-faint); }
+.empty-state .es-icon { font-size: 2rem; margin-bottom: 0.6rem; }
+.empty-state .es-title { font-weight: 700; font-size: 0.98rem; color: var(--text-muted);
+  margin-bottom: 0.35rem; }
+.empty-state .es-sub { font-size: 0.83rem; margin-bottom: 1rem; color: var(--text-muted); }

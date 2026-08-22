@@ -17,6 +17,7 @@ const RATE_LABEL = {
 function parseTeamEmojis(text) {
   const red = ['🔴', '❤️', '❤', '🍎', '🌹'];
   const blue = ['🔵', '💙', '💎', '🌊', '🫐'];
+  // ui-tokens-allow: kit colours are domain data (shirt colours), not UI theme tones.
   const redTeam = { emoji: '🔴', name: 'Red', color: '#d32f2f' };
   const blueTeam = { emoji: '🔵', name: 'Blue', color: '#1976d2' };
 

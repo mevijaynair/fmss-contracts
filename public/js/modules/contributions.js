@@ -33,7 +33,7 @@ async function renderLog() {
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
       <td>${esc(c.comments || '')}</td>
-      <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-muted); color: var(--text-muted);">📋 Seed</span>'
+      <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);">📋 Seed</span>'
         : `<button class="link-btn" data-del="${c.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
 
@@ -125,7 +125,7 @@ function initAdmin() {
           <div style="font-weight: 600; margin-bottom: 1rem; color: var(--accent);">Split this payment across contracts</div>
           <div id="splitRows" style="display: grid; gap: 0.8rem;"></div>
           <button type="button" class="btn btn-secondary btn-sm" id="addSplitBtn" style="margin-top: 0.8rem;">+ Add contract</button>
-          <div style="margin-top: 1rem; padding: 0.8rem; background: var(--bg-alt); border-radius: 6px; font-size: 0.9rem;">
+          <div style="margin-top: 1rem; padding: 0.8rem; background: var(--bg-inset); border-radius: 6px; font-size: 0.9rem;">
             <div>Total amount: <strong id="splitTotal">0</strong> AED</div>
             <div>Form amount: <strong id="splitFormAmount">0</strong> AED</div>
             <div id="splitMatch" style="color: var(--danger); display: none;">⚠️ Split totals must equal form amount</div>

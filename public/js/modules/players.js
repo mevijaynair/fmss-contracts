@@ -15,23 +15,12 @@ const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
 function isPlayer() { return store.user?.role === 'player'; }
 
-// Auto-calculate status based on balance + color
+// Auto-calculate status from balance. Tone comes from the shared .tag-* classes,
+// which are token-based and follow the active theme.
 function statusFromBalance(balance) {
-  if (balance < 0) return {
-    text: '🚨 Out of contract',
-    cls: 'tag-danger',
-    style: 'font-weight: 700; background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%); color: white; padding: 0.5rem 0.75rem; border-radius: 4px;'
-  };
-  if (balance < 150) return {
-    text: '⚠️ Refill needed',
-    cls: 'tag-overdue',
-    style: 'font-weight: 600; background: #ff9800; color: white; padding: 0.4rem 0.6rem; border-radius: 4px;'
-  };
-  return {
-    text: '✓ In Contract',
-    cls: 'tag-paid',
-    style: 'font-weight: 600; background: #4caf50; color: white; padding: 0.4rem 0.6rem; border-radius: 4px;'
-  };
+  if (balance < 0) return { text: '🚨 Out of contract', cls: 'tag-critical' };
+  if (balance < 150) return { text: '⚠️ Refill needed', cls: 'tag-due' };
+  return { text: '✓ In Contract', cls: 'tag-paid' };
 }
 
 async function render() {
@@ -71,21 +60,21 @@ async function render() {
   // Render controls
   const controlsPanel = document.querySelector('[data-player-controls]') || document.createElement('div');
   controlsPanel.setAttribute('data-player-controls', '');
-  controlsPanel.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color);';
+  controlsPanel.className = 'filter-bar';
   controlsPanel.innerHTML = `
-    <input type="text" id="pl_search" placeholder="🔍 Search by name..." style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;" value="${searchQuery}">
-    <select id="pl_sort" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+    <input type="text" id="pl_search" placeholder="🔍 Search by name..." value="${searchQuery}">
+    <select id="pl_sort">
       <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Sort: Name</option>
       <option value="balance" ${sortBy === 'balance' ? 'selected' : ''}>Sort: Balance</option>
       <option value="status" ${sortBy === 'status' ? 'selected' : ''}>Sort: Status</option>
       <option value="games" ${sortBy === 'games' ? 'selected' : ''}>Sort: Games</option>
     </select>
-    <select id="pl_filter_status" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+    <select id="pl_filter_status">
       <option value="all" ${filterStatus === 'all' ? 'selected' : ''}>Status: All</option>
       <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>Status: In Contract</option>
       <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Status: Out</option>
     </select>
-    <select id="pl_filter_balance" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 6px;">
+    <select id="pl_filter_balance">
       <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Balance: All</option>
       <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>Balance: Positive</option>
       <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>Balance: Negative</option>
@@ -136,14 +125,13 @@ async function render() {
       lastTxnHtml = `<span style="white-space: nowrap;">${emoji} ${sign}${money(Math.abs(lastTxn.amount))} • ${formattedDate}</span>`;
     }
 
-    const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.08);' : '';
     return `
-    <tr style="border-left: 4px solid ${l.present_balance < 0 ? '#d32f2f' : 'transparent'}; ${rowBg}">
-      <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
-      <td><span class="tag ${status.cls}" ${status.style ? 'style="' + status.style + '"' : ''}>${status.text}</span></td>
+    <tr class="${l.present_balance < 0 ? 'row-alert' : ''}">
+      <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
+      <td><span class="tag ${status.cls}">${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
-      <td class="num"><span style="color: ${l.charged > 0 ? '#d32f2f' : 'var(--text-muted)'}; font-weight: 500; font-size: 0.9rem;">-${money(l.charged)}</span></td>
+      <td class="num"><span class="charged-cell ${l.charged > 0 ? 'is-charged' : ''}">-${money(l.charged)}</span></td>
       <td class="num">${balCell(l.present_balance)}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
@@ -365,16 +353,16 @@ async function renderPlayerDetail(player, stats) {
 
   // Build modular tabs
   let tabsHtml = `
-    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; overflow-x: auto;">
-      <button class="tab-btn active" data-tab="overview" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; border-bottom: 2px solid var(--sport); color: var(--sport); white-space: nowrap;">Overview</button>
-      <button class="tab-btn" data-tab="audit-trail" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Audit Trail</button>
-      <button class="tab-btn" data-tab="contributions" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Contributions</button>
-      <button class="tab-btn" data-tab="charges" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Charges</button>
-      <button class="tab-btn" data-tab="contracts" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">By Contract</button>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="audit-trail">Audit Trail</button>
+      <button class="tab-btn" data-tab="contributions">Contributions</button>
+      <button class="tab-btn" data-tab="charges">Charges</button>
+      <button class="tab-btn" data-tab="contracts">By Contract</button>
     </div>
 
     <!-- OVERVIEW TAB -->
-    <div class="tab-content" data-tab="overview" style="display: block;">
+    <div class="tab-content" data-tab="overview">
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
         <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
           <div style="color: var(--text-muted); font-size: 0.9rem;">Games Played</div>
@@ -396,12 +384,12 @@ async function renderPlayerDetail(player, stats) {
     </div>
 
     <!-- AUDIT TRAIL TAB (all transactions: contributions + external events + charges) -->
-    <div class="tab-content" data-tab="audit-trail" style="display: none;">
+    <div class="tab-content" data-tab="audit-trail" hidden>
       ${renderAuditTrail(allTransactions)}
     </div>
 
     <!-- CONTRIBUTIONS TAB -->
-    <div class="tab-content" data-tab="contributions" style="display: none;">
+    <div class="tab-content" data-tab="contributions" hidden>
       ${allContributions.length > 0
         ? `<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
             <thead style="background: var(--bg-subtle);">
@@ -428,7 +416,7 @@ async function renderPlayerDetail(player, stats) {
     </div>
 
     <!-- CHARGES TAB -->
-    <div class="tab-content" data-tab="charges" style="display: none;">
+    <div class="tab-content" data-tab="charges" hidden>
       <div class="hint">Game charges from current contract (${store.contracts.find(c => c.id === contractId)?.name || ''}):</div>
       ${stats.timeline?.events?.filter(e => e.type !== 'contribution').length > 0
         ? stats.timeline.events
@@ -445,7 +433,7 @@ async function renderPlayerDetail(player, stats) {
     </div>
 
     <!-- BY CONTRACT TAB -->
-    <div class="tab-content" data-tab="contracts" style="display: none;">
+    <div class="tab-content" data-tab="contracts" hidden>
       <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead style="background: var(--bg-subtle);">
           <tr>
@@ -475,12 +463,10 @@ async function renderPlayerDetail(player, stats) {
   $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
-      $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(b => {
-        b.style.color = b.dataset.tab === tab ? 'var(--sport)' : 'var(--text-muted)';
-        b.style.borderBottomColor = b.dataset.tab === tab ? 'var(--sport)' : 'transparent';
-      });
+      $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === tab));
       $('playerStatsGrid').querySelectorAll('.tab-content').forEach(tc => {
-        tc.style.display = tc.dataset.tab === tab ? 'block' : 'none';
+        tc.hidden = tc.dataset.tab !== tab;
       });
     });
   });
@@ -516,22 +502,23 @@ function payModal(playerId) {
 function resetPlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
   const checkboxId = `reset_confirm_${Date.now()}`;
-  openModal(`Reset ${p?.name || 'player'}?`, `
-    <div style="background: #f5f5f5; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #ddd;">
-      <div style="font-weight: 600; margin-bottom: 0.5rem; color: #333;">What will happen:</div>
-      <div style="color: #555; line-height: 1.6;">
+  const name = esc(p?.name || 'this player');
+  openModal(`Reset ${esc(p?.name || 'player')}?`, `
+    <div class="panel panel-warn">
+      <div class="panel-title">What will happen</div>
+      <div class="panel-body">
         ✓ Clear all money (contributions)<br>
         ✓ Reset balance to 0<br>
         ✓ Keep game records (history stays)
       </div>
     </div>
-    <label style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.5rem; cursor: pointer; padding: 0.75rem; background: #fafafa; border-radius: 6px; border: 1px solid #e0e0e0;">
-      <input type="checkbox" id="${checkboxId}" style="cursor: pointer; width: 20px; height: 20px;">
-      <span style="font-weight: 500; color: #333;">Yes, reset ${p?.name || 'this player'}</span>
+    <label class="confirm-check">
+      <input type="checkbox" id="${checkboxId}">
+      <span>Yes, reset ${name}</span>
     </label>
-    <div style="display: flex; gap: 0.5rem;">
-      <button class="btn" id="confirm_reset" style="flex: 1;" disabled>Reset</button>
-      <button class="btn btn-secondary" id="cancel_reset" style="flex: 1;">Cancel</button>
+    <div class="btn-row mt">
+      <button class="btn" id="confirm_reset" disabled>Reset</button>
+      <button class="btn btn-secondary" id="cancel_reset">Cancel</button>
     </div>`);
 
   const checkbox = $(`${checkboxId}`);
@@ -555,23 +542,24 @@ function deletePlayerModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
   const playerName = p?.name || 'this player';
   const checkboxId = `delete_confirm_${Date.now()}`;
-  openModal(`⚠️ Delete ${playerName}?`, `
-    <div style="background: #fff3f3; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 2px solid #dc3545;">
-      <div style="font-weight: 600; margin-bottom: 0.5rem; color: #dc3545;">⚠️ WARNING - Cannot undo!</div>
-      <div style="color: #333; line-height: 1.6;">
+  const safeName = esc(playerName);
+  openModal(`⚠️ Delete ${safeName}?`, `
+    <div class="panel panel-danger">
+      <div class="panel-title">⚠️ WARNING — cannot undo</div>
+      <div class="panel-body">
         ✗ Player will be deleted<br>
         ✗ All payments/money records gone<br>
         ✗ All game history gone<br>
         ✗ No way to get it back
       </div>
     </div>
-    <label style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.5rem; cursor: pointer; padding: 0.75rem; background: #fafafa; border-radius: 6px; border: 1px solid #e0e0e0;">
-      <input type="checkbox" id="${checkboxId}" style="cursor: pointer; width: 20px; height: 20px;">
-      <span style="font-weight: 500; color: #333;">Yes, delete ${playerName} forever</span>
+    <label class="confirm-check">
+      <input type="checkbox" id="${checkboxId}">
+      <span>Yes, delete ${safeName} forever</span>
     </label>
-    <div style="display: flex; gap: 0.5rem;">
-      <button class="btn btn-danger" id="confirm_delete" style="flex: 1;" disabled>DELETE</button>
-      <button class="btn btn-secondary" id="cancel_delete" style="flex: 1;">Cancel</button>
+    <div class="btn-row mt">
+      <button class="btn btn-danger" id="confirm_delete" disabled>DELETE</button>
+      <button class="btn btn-secondary" id="cancel_delete">Cancel</button>
     </div>`);
 
   const checkbox = $(`${checkboxId}`);

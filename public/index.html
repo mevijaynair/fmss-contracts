@@ -170,7 +170,10 @@
         <section class="view" data-view="results" hidden>
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Match Results</h3>
-              <span class="seg" id="resContractSeg"></span></div>
+              <div class="header-actions">
+                <span class="seg" id="resContractSeg"></span>
+                <button class="btn btn-sm" id="importResultsBtn">📥 Import</button>
+              </div></div>
             <div id="resultsContainer"></div>
           </div>
         </section>
@@ -401,7 +404,7 @@
           <div class="form-group"><label>Comments</label><input type="text" id="egComments" placeholder="optional"></div>
         </div>
 
-        <div style="margin-top: 1.5rem; border-top: 1px solid var(--color-border); padding-top: 1rem;">
+        <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
           <h4 style="margin-bottom: 0.8rem;">Player Charges</h4>
           <div style="overflow-x: auto;">
             <table class="sams-table" id="egChargesTable">
@@ -416,7 +419,7 @@
           </div>
         </div>
 
-        <div id="egImpactPreview" style="margin-top: 1.5rem; padding: 1rem; background: var(--color-bg-alt); border-radius: 0.5rem; display: none;">
+        <div id="egImpactPreview" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-inset); border-radius: 0.5rem; display: none;">
           <h4 style="margin-bottom: 0.8rem;">Impact Preview</h4>
           <div id="egImpactText"></div>
         </div>

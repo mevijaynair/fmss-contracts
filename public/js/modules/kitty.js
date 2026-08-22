@@ -18,7 +18,7 @@ async function render() {
       <td><span class="tag ${e.kind === 'income' ? 'tag-paid' : 'tag-overdue'}">${e.kind}</span></td>
       <td>${esc(e.label)}</td>
       <td class="num">${e.kind === 'income' ? balCell(e.amount) : `<span class="bal neg">-${money(e.amount)}</span>`}</td>
-      <td class="row-actions">${e.historical ? '<span class="tag" style="background: var(--bg-muted); color: var(--text-muted);">📋 Seed</span>'
+      <td class="row-actions">${e.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);">📋 Seed</span>'
         : `<button class="link-btn" data-del="${e.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="hint">No entries.</td></tr>';
 
@@ -183,17 +183,17 @@ async function renderPendingCollections() {
   const totalOwed = pending.reduce((s, l) => s + Math.abs(l.present_balance), 0);
 
   const html = `
-    <div style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #ffe0b2 0%, #ffe8c9 100%); border-radius: 8px; border-left: 4px solid #ff9800;">
-      <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 1rem;">💰 Pending Collections</div>
-      <div style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--text-muted);">
+    <div class="panel panel-warn">
+      <div class="panel-title">💰 Pending Collections</div>
+      <div class="panel-body">
         <strong>${pending.length}</strong> players owe <strong>${money(totalOwed)}</strong> total
       </div>
-      <div style="font-size: 0.85rem; line-height: 1.6; max-height: 200px; overflow-y: auto;">
+      <div class="panel-scroll">
         ${pending.map(p => `
-          <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: rgba(255,255,255,0.5); border-radius: 4px; margin-bottom: 0.4rem;">
-            <span><strong>${esc(p.player_name)}</strong></span>
-            <span style="color: #d32f2f; font-weight: 600;">${money(Math.abs(p.present_balance))}</span>
-            <button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${Math.abs(p.present_balance)}" title="Quick commit this amount to kitty" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;">✓ Commit</button>
+          <div class="panel-row">
+            <strong>${esc(p.player_name)}</strong>
+            <span class="bal neg">${money(Math.abs(p.present_balance))}</span>
+            <button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${Math.abs(p.present_balance)}" title="Quick commit this amount to kitty">✓ Commit</button>
           </div>
         `).join('')}
       </div>
@@ -224,17 +224,15 @@ async function renderPendingCollections() {
 // Render quick withdraw panel
 function renderQuickWithdraw() {
   const html = `
-    <div style="margin-top: 1rem; padding: 1.5rem; background: linear-gradient(135deg, #ffcccc 0%, #ffe0e0 100%); border-radius: 8px; border-left: 4px solid #d32f2f;">
-      <div style="font-weight: 700; margin-bottom: 1rem;">⚡ Quick Withdraw</div>
-      <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+    <div class="panel panel-danger">
+      <div class="panel-title">⚡ Quick Withdraw</div>
+      <div class="quick-row">
         ${[50, 100, 200, 500].map(amt => `
-          <button class="btn" data-quick-withdraw="${amt}" style="flex: 0 0 auto; font-size: 0.85rem;">
-            - ${money(amt)}
-          </button>
+          <button class="btn btn-sm" data-quick-withdraw="${amt}">- ${money(amt)}</button>
         `).join('')}
-        <input type="number" id="qw_custom" placeholder="Custom..." style="flex: 0 1 120px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-        <input type="text" id="qw_reason" placeholder="Reason..." style="flex: 1 1 200px; min-width: 150px; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-        <button class="btn btn-secondary" id="qw_submit" style="flex: 0 0 auto;">Go</button>
+        <input type="number" id="qw_custom" class="qw-amount" placeholder="Custom…">
+        <input type="text" id="qw_reason" class="qw-reason" placeholder="Reason…">
+        <button class="btn btn-secondary btn-sm" id="qw_submit">Go</button>
       </div>
     </div>
   `;

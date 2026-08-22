@@ -14,9 +14,9 @@ function renderSandboxForm() {
       <label>Test Player Name</label>
       <input type="text" id="sandboxName" placeholder="e.g., Test Player 1" required>
     </div>
-    <button class="btn" id="createSandbox" style="background: var(--accent); color: #000; font-weight: 600;">Create Test Player</button>
+    <button class="btn" id="createSandbox">Create Test Player</button>
 
-    <div id="sandboxList" style="margin-top: 2rem;"></div>
+    <div id="sandboxList" class="mt"></div>
   `;
 }
 
