@@ -17,9 +17,9 @@ function isPlayer() { return store.user?.role === 'player'; }
 
 // Auto-calculate status based on balance + color
 function statusFromBalance(balance) {
-  if (balance < 0) return { text: 'Out of contract', cls: 'tag-danger' };
-  if (balance < 150) return { text: 'Refill needed', cls: 'tag-overdue' };
-  return { text: 'In Contract', cls: 'tag-paid' };
+  if (balance < 0) return { text: '🚨 Out of contract', cls: 'tag-danger', style: 'font-weight: 600; background: var(--danger); color: white;' };
+  if (balance < 150) return { text: '⚠️ Refill needed', cls: 'tag-overdue', style: 'font-weight: 600;' };
+  return { text: '✓ In Contract', cls: 'tag-paid', style: 'font-weight: 600;' };
 }
 
 async function render() {
@@ -30,6 +30,9 @@ async function render() {
 
   // Filter
   let filtered = ledgers.filter(l => {
+    // Exclude test players
+    const testPlayerIds = ['fixtestplayer', 'newtestplayer', 'testplayer999'];
+    if (testPlayerIds.includes(l.player_id.toLowerCase())) return false;
     // Search by name
     if (searchQuery && !l.player_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     // Filter by status
@@ -116,15 +119,16 @@ async function render() {
       lastTxnHtml = `<span style="white-space: nowrap;">${emoji} ${sign}${money(Math.abs(lastTxn.amount))} • ${formattedDate}</span>`;
     }
 
+    const rowBg = l.present_balance < 0 ? 'background: rgba(255, 67, 54, 0.05);' : '';
     return `
-    <tr>
+    <tr style="border-left: 3px solid ${l.present_balance < 0 ? 'var(--danger)' : 'transparent'}; ${rowBg}">
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
-      <td><span class="tag ${status.cls}">${status.text}</span></td>
+      <td><span class="tag ${status.cls}" ${status.style ? `style="${status.style}"` : ''}>${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
-      <td class="num">${money(l.charged)}</td>
+      <td class="num"><span style="color: ${l.charged > 0 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight: 500;">-${money(l.charged)}</span></td>
       <td class="num">${balCell(l.present_balance)}</td>
-      <td>${l.games}</td>
+      <td style="text-align: center; font-weight: 600;">${l.games}</td>
       <td class="num">${lastTxnHtml}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
