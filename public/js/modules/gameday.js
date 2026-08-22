@@ -13,6 +13,38 @@ const RATE_LABEL = {
   captain_10: 'Captain', captain_12: 'Captain', noncontract: 'Non-contract',
 };
 
+// Parse team emojis from WhatsApp message
+function parseTeamEmojis(text) {
+  const red = ['🔴', '❤️', '🍎', '🌹'];
+  const blue = ['🔵', '💙', '🌊', '🫐'];
+  const redTeam = { emoji: '🔴', name: 'Red', color: '#d32f2f' };
+  const blueTeam = { emoji: '🔵', name: 'Blue', color: '#1976d2' };
+
+  const hasRed = red.some(e => text.includes(e));
+  const hasBlue = blue.some(e => text.includes(e));
+
+  return { hasRed, hasBlue, redTeam, blueTeam };
+}
+
+// Parse score from message (looks for "X-Y" pattern)
+function parseScore(text) {
+  const scoreMatch = text.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if (scoreMatch) {
+    return { goalsA: parseInt(scoreMatch[1]), goalsB: parseInt(scoreMatch[2]) };
+  }
+  return null;
+}
+
+// Get preset rate for player type
+function getPresetRate(rateType, contractId) {
+  const c = store.contracts?.find(x => x.id === contractId);
+  if (!c) return 0;
+  if (rateType === 'captain_10' || rateType === 'captain_12') return c.captain_rate || c.cost_per_gw || 0;
+  if (rateType === 'contracted_10' || rateType === 'contracted_12') return c.cost_per_gw || 0;
+  if (rateType === 'noncontract') return c.noncontract_rate || 0;
+  return 0;
+}
+
 function statusLabel(r) {
   if (!r.matched) return '<span class="miss-badge">new / unmatched</span>';
   if (r.is_captain) return 'Captain';
@@ -71,33 +103,50 @@ async function showUnmatchedMapping(unmatched) {
   }
 }
 
-async function showOutsidePlayerPrompts() {
-  const outsidePlayers = rows.filter(r => r.player_type === 'outside' && r.matched);
-  for (const r of outsidePlayers) {
-    const choice = prompt(
-      `${r.display_name} is an outside player (${r.outside_cost} AED).\n\nHow to handle?\n1 = Relationship deduction (auto-credit ${r.introduced_by})\n2 = Direct payment (no auto-credit)`,
-      '1'
-    );
-    r.outside_handling = choice === '2' ? 'direct' : 'relationship';
-  }
-}
+// Mark unidentified/outside players inline via dropdown (removed dialog prompts)
 
 function renderPreview(meta) {
   $('gdPreviewCard').hidden = false;
   const outsideCount = rows.filter(r => r.player_type === 'outside').length;
+  const unmatchedCount = rows.filter(r => !r.matched).length;
   let metaText = `${rows.length} players · ${meta.teams.join(' / ')} · ${meta.bucket}-player rate`;
-  if (outsideCount) metaText += ` · ${outsideCount} outside player(s)`;
+  if (outsideCount) metaText += ` · ${outsideCount} outside`;
+  if (unmatchedCount) metaText += ` · ${unmatchedCount} unidentified`;
   $('gdMeta').textContent = metaText;
 
-  $('gdTable').querySelector('tbody').innerHTML = rows.map((r, i) => `
+  $('gdTable').querySelector('tbody').innerHTML = rows.map((r, i) => {
+    // Auto-populate preset amount if empty
+    if (!r.amount || r.amount === 0) {
+      r.amount = getPresetRate(r.rate_type, contractId);
+    }
+
+    // Allow marking unmatched players as outside vs regular
+    const typeControl = !r.matched ? `
+      <select class="player-type-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem;">
+        <option value="regular" ${r.player_type !== 'outside' ? 'selected' : ''}>Contract</option>
+        <option value="outside" ${r.player_type === 'outside' ? 'selected' : ''}>Outside</option>
+      </select>` : statusLabel(r);
+
+    return `
     <tr>
       <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}</td>
       <td><span class="team-dot team-${esc(r.team)}"></span>${esc(r.team)}</td>
-      <td>${statusLabel(r)}</td>
+      <td>${typeControl}</td>
       <td><span class="tag">${RATE_LABEL[r.rate_type] || r.rate_type}</span></td>
       <td style="text-align:right;"><input class="amt-input" type="number" step="1" data-i="${i}" value="${r.amount}"></td>
+      <td style="text-align:center; font-size:0.9rem;"><span class="pending-badge" data-i="${i}">pending</span></td>
       <td class="row-actions"><button class="link-btn" data-del="${i}" title="Remove">✕</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+
+  $('gdTable').querySelectorAll('.player-type-select').forEach(sel =>
+    sel.addEventListener('change', () => {
+      rows[sel.dataset.i].player_type = sel.value;
+      if (sel.value === 'outside') {
+        rows[sel.dataset.i].outside_handling = 'relationship';
+      }
+      renderPreview(meta);
+    }));
 
   $('gdTable').querySelectorAll('.amt-input').forEach(inp =>
     inp.addEventListener('input', () => { rows[inp.dataset.i].amount = Number(inp.value) || 0; recalcTotal(); }));
@@ -125,19 +174,26 @@ async function doParse() {
     rows = parseResult.rows;
     if (!rows.length) { toast('No players detected', true); $('gdPreviewCard').hidden = true; return; }
 
+    // Auto-parse score from message
+    const scoreData = parseScore(text);
+    if (scoreData) {
+      $('gdTeamAGoals').value = scoreData.goalsA;
+      $('gdTeamBGoals').value = scoreData.goalsB;
+      toast(`Auto-parsed score: ${scoreData.goalsA}-${scoreData.goalsB}`, false);
+    }
+
+    // Auto-parse team emojis/colors
+    const teamData = parseTeamEmojis(text);
+    if (teamData.hasRed) $('gdTeamAName').value = teamData.redTeam.name;
+    if (teamData.hasBlue) $('gdTeamBName').value = teamData.blueTeam.name;
+
     // Show unmatched players with mapping suggestions
     const unmatchedTokens = parseResult.unmatched;
     if (unmatchedTokens.length) {
       await showUnmatchedMapping(unmatchedTokens);
       renderPreview(parseResult);
-      toast(`Mapped ${unmatchedTokens.length} unmatched players`, false);
+      toast(`Mapped ${unmatchedTokens.length} unmatched players. Mark outside/unidentified via dropdown.`, false);
     } else {
-      renderPreview(parseResult);
-    }
-
-    // Check for outside players and prompt for handling
-    if (parseResult.hasOutsidePlayers) {
-      await showOutsidePlayerPrompts();
       renderPreview(parseResult);
     }
   } catch (e) { toast(e.message, true); }

@@ -520,6 +520,8 @@ input.error:focus, select.error:focus, textarea.error:focus { box-shadow: 0 0 0 
 .capt-badge { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; color: #fff;
   background: var(--warning); padding: 0.05rem 0.35rem; border-radius: 5px; margin-left: 0.35rem; }
 .miss-badge { font-size: 0.66rem; color: var(--danger); font-weight: 600; }
+.pending-badge { font-size: 0.7rem; font-weight: 600; color: #ff9800; padding: 0.3rem 0.5rem;
+  border-radius: 4px; background: rgba(255, 152, 0, 0.15); }
 
 /* Editable amount cell in the preview table */
 .amt-input { width: 78px; text-align: right; padding: 0.32rem 0.45rem; font-variant-numeric: tabular-nums; }
