@@ -70,6 +70,7 @@ export const api = {
   // New endpoints (Phase 1 backend)
   results: (contract) => req('GET', `/results${contract ? `?contract=${contract}` : ''}`),
   playerStats: (playerId, contractId) => req('GET', `/players/${playerId}/stats?contract_id=${contractId}`),
+  playerTransactions: (playerId, limit = 200) => req('GET', `/players/${playerId}/transactions?limit=${limit}`),
   auditTrail: (q = {}) => {
     const p = new URLSearchParams(q).toString();
     return req('GET', `/audit/charges${p ? `?${p}` : ''}`);

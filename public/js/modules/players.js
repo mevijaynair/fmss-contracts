@@ -88,9 +88,34 @@ async function render() {
   $('pl_filter_status').addEventListener('change', (e) => { filterStatus = e.target.value; updateRender(); });
   $('pl_filter_balance').addEventListener('change', (e) => { filterBalance = e.target.value; updateRender(); });
 
+  // Fetch last transaction for each player
+  const lastTransactionMap = {};
+  await Promise.all(filtered.map(async l => {
+    try {
+      const txns = await api.playerTransactions(l.player_id, 1);
+      if (txns && txns.length > 0) {
+        lastTransactionMap[l.player_id] = txns[0];
+      }
+    } catch (e) {
+      console.error(`Failed to load transactions for ${l.player_id}:`, e);
+    }
+  }));
+
   $('playersTable').querySelector('tbody').innerHTML = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
     const status = statusFromBalance(l.present_balance);
+    const lastTxn = lastTransactionMap[l.player_id];
+    let lastTxnHtml = '<span class="hint">—</span>';
+    if (lastTxn) {
+      const isPositive = lastTxn.amount > 0;
+      const emoji = isPositive ? '🟢' : '🔴';
+      const sign = isPositive ? '+' : '';
+      const dateStr = lastTxn.date?.split('T')[0] || '';
+      const dateObj = new Date(dateStr);
+      const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      lastTxnHtml = `<span style="white-space: nowrap;">${emoji} ${sign}${money(Math.abs(lastTxn.amount))} • ${formattedDate}</span>`;
+    }
+
     return `
     <tr>
       <td><strong onclick="window.showPlayerDetail('${l.player_id}')" style="cursor: pointer; color: var(--sport);">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
@@ -100,13 +125,14 @@ async function render() {
       <td class="num">${money(l.charged)}</td>
       <td class="num">${balCell(l.present_balance)}</td>
       <td>${l.games}</td>
+      <td class="num">${lastTxnHtml}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
         <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
-    </tr>`; }).join('') || '<tr><td colspan="8" class="hint">No players in this contract yet.</td></tr>';
+    </tr>`; }).join('') || '<tr><td colspan="9" class="hint">No players in this contract yet.</td></tr>';
 
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
@@ -161,6 +187,102 @@ window.showPlayerDetail = async (playerId) => {
   }
 };
 
+// Render audit trail (grouped by date with color coding)
+function renderAuditTrail(transactions) {
+  if (!transactions || transactions.length === 0) {
+    return '<div class="hint">No transactions yet.</div>';
+  }
+
+  // Group transactions by date
+  const grouped = {};
+  transactions.forEach(t => {
+    const dateStr = t.date?.split('T')[0] || 'Unknown';
+    if (!grouped[dateStr]) {
+      grouped[dateStr] = [];
+    }
+    grouped[dateStr].push(t);
+  });
+
+  // Sort dates descending
+  const sortedDates = Object.keys(grouped).sort().reverse();
+
+  let html = '<div style="font-size: 0.9rem;">';
+
+  sortedDates.forEach(dateStr => {
+    const items = grouped[dateStr];
+    const totalAmount = items.reduce((sum, t) => sum + (t.amount || 0), 0);
+    const hasPositive = items.some(t => t.amount > 0);
+    const hasNegative = items.some(t => t.amount < 0);
+
+    const dateObj = new Date(dateStr);
+    const formattedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+
+    if (items.length === 1) {
+      const t = items[0];
+      const typeLabel = t.type === 'contribution' ? 'Contribution'
+        : t.type === 'event_deduction' ? (t.event_title || 'Event Deduction')
+        : t.type === 'charge' ? 'Game Charge'
+        : t.type === 'transfer_out' ? 'Transfer Out'
+        : t.type === 'transfer_in' ? 'Transfer In'
+        : 'Transaction';
+      const isPositive = t.amount > 0;
+      const emoji = isPositive ? '🟢' : '🔴';
+      const sign = isPositive ? '+' : '';
+      const color = isPositive ? 'var(--success)' : 'var(--danger)';
+
+      html += `
+        <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-subtle); border-radius: 6px; border-left: 3px solid ${color};">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 500;">${emoji} ${formattedDate}</div>
+              <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.2rem;">${esc(typeLabel)}</div>
+            </div>
+            <div style="text-align: right; font-weight: 600; color: ${color};">${sign}${money(Math.abs(t.amount))}</div>
+          </div>
+        </div>
+      `;
+    } else {
+      // Multiple items on same date
+      const emoji = hasPositive && !hasNegative ? '🟢' : hasNegative && !hasPositive ? '🔴' : '⚪';
+      const sign = totalAmount > 0 ? '+' : '';
+
+      let detailsHtml = '';
+      items.forEach(t => {
+        const typeLabel = t.type === 'contribution' ? 'Contribution'
+          : t.type === 'event_deduction' ? (t.event_title || 'Event Deduction')
+          : t.type === 'charge' ? 'Game Charge'
+          : t.type === 'transfer_out' ? 'Transfer Out'
+          : t.type === 'transfer_in' ? 'Transfer In'
+          : 'Transaction';
+        const isPos = t.amount > 0;
+        const eIcon = isPos ? '🟢' : '🔴';
+        const s = isPos ? '+' : '';
+        const color = isPos ? 'var(--success)' : 'var(--danger)';
+
+        detailsHtml += `<div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted);">
+          <span>${eIcon} ${esc(typeLabel)}</span>
+          <span style="color: ${color}; font-weight: 500;">${s}${money(Math.abs(t.amount))}</span>
+        </div>`;
+      });
+
+      html += `
+        <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: var(--bg-subtle); border-radius: 6px; border-left: 3px solid var(--border-color);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <div style="font-weight: 500;">${emoji} ${items.length} items on ${formattedDate}</div>
+            <div style="text-align: right; font-weight: 600; color: var(--text-muted);">${sign}${money(Math.abs(totalAmount))}</div>
+          </div>
+          <div style="display: grid; gap: 0.3rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+            ${detailsHtml}
+          </div>
+        </div>
+      `;
+    }
+  });
+
+  html += '</div>';
+  return html;
+}
+
 async function renderPlayerDetail(player, stats) {
   const detailCard = $('playerDetailCard');
   $('playerDetailName').textContent = `${player.name}`;
@@ -183,6 +305,15 @@ async function renderPlayerDetail(player, stats) {
     console.error('Failed to load ledgers:', e);
   }
 
+  // Fetch all transactions (audit trail)
+  let allTransactions = [];
+  try {
+    const data = await api.playerTransactions(player.id, 500);
+    allTransactions = data || [];
+  } catch (e) {
+    console.error('Failed to load transactions:', e);
+  }
+
   // Calculate cross-contract stats
   const totalGames = allLedgers.reduce((sum, l) => sum + (l.games || 0), 0);
   const totalContributions = allContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
@@ -190,11 +321,12 @@ async function renderPlayerDetail(player, stats) {
 
   // Build modular tabs
   let tabsHtml = `
-    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-      <button class="tab-btn active" data-tab="overview" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; border-bottom: 2px solid var(--sport); color: var(--sport);">Overview</button>
-      <button class="tab-btn" data-tab="contributions" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">Contributions</button>
-      <button class="tab-btn" data-tab="charges" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">Charges</button>
-      <button class="tab-btn" data-tab="contracts" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted);">By Contract</button>
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; overflow-x: auto;">
+      <button class="tab-btn active" data-tab="overview" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; border-bottom: 2px solid var(--sport); color: var(--sport); white-space: nowrap;">Overview</button>
+      <button class="tab-btn" data-tab="audit-trail" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Audit Trail</button>
+      <button class="tab-btn" data-tab="contributions" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Contributions</button>
+      <button class="tab-btn" data-tab="charges" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">Charges</button>
+      <button class="tab-btn" data-tab="contracts" style="padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-weight: 500; color: var(--text-muted); white-space: nowrap;">By Contract</button>
     </div>
 
     <!-- OVERVIEW TAB -->
@@ -217,6 +349,11 @@ async function renderPlayerDetail(player, stats) {
           <div style="font-size: 1.8rem; font-weight: 700;">${allLedgers.length}</div>
         </div>
       </div>
+    </div>
+
+    <!-- AUDIT TRAIL TAB (all transactions: contributions + external events + charges) -->
+    <div class="tab-content" data-tab="audit-trail" style="display: none;">
+      ${renderAuditTrail(allTransactions)}
     </div>
 
     <!-- CONTRIBUTIONS TAB -->

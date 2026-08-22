@@ -415,6 +415,35 @@ r.get('/players/:id/stats', wrap((req) => {
   return { timeline, ...stats };
 }));
 
+// ---- player transactions: audit trail (all transactions - contributions + external events + charges)
+r.get('/players/:id/transactions', wrap((req) => {
+  // Player may only read their own transactions; admin may read anyone's.
+  if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
+    throw new Error('Forbidden');
+  }
+  const limit = Number(req.query.limit) || 200;
+  const transactions = db.prepare(`
+    SELECT
+      t.id,
+      t.type,
+      t.amount,
+      t.description,
+      t.created_at as date,
+      c.name as contract_name,
+      e.title as event_title,
+      e.event_type,
+      p.name as related_player_name
+    FROM transactions t
+    LEFT JOIN contracts c ON t.contract_id = c.id
+    LEFT JOIN external_events e ON t.event_id = e.id
+    LEFT JOIN players p ON t.related_player_id = p.id
+    WHERE t.player_id = ?
+    ORDER BY t.created_at DESC
+    LIMIT ?
+  `).all(req.params.id, limit);
+  return transactions;
+}));
+
 // ---- audit trail: view charge history ----
 r.get('/audit/charges', wrap((req) => {
   const { player_id, gameweek_id, charge_id } = req.query;
