@@ -599,29 +599,97 @@ r.get('/dashboard', wrap((req) => {
   }
 
   // Admin dashboard: club-wide aggregates.
+  //
+  // Two deliberate choices here, both about being useful rather than merely true:
+  //
+  // 1. Credit and debt are reported separately, never netted. They are opposite
+  //    in kind — credit is money held ON BEHALF of players (a liability the club
+  //    must be able to honour), debt is money owed TO the club (an asset). A
+  //    single "net" figure hides whether the club is solvent against prepayments.
+  //
+  // 2. "Needs a refill" is expressed in GAMES OF RUNWAY, not a fixed number of
+  //    dirhams. A balance of 60 is comfortable at 30/game and nearly spent at
+  //    35/game, and a flat threshold cannot say which. Runway also answers the
+  //    question actually being asked: who will not make it through the next game.
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const LOW_RUNWAY_GAMES = 2;      // fewer than this and a top-up is due
+
   const contracts = contractsRepo.all();
   const perContract = contracts.map((c) => {
     const ledgers = ledgersRepo.forContract(c.id);
-    const credit = ledgers.filter(l => l.present_balance > 0).reduce((s, l) => s + l.present_balance, 0);
-    const debt = ledgers.filter(l => l.present_balance < 0).reduce((s, l) => s + l.present_balance, 0);
-    const refills = ledgers.filter(l => l.present_balance < 0);
+    // contractsRepo already parses this into an object; only a raw DB row is text.
+    const rates = typeof c.rates === 'string'
+      ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
+      : (c.rates || {});
+    // The standard contracted rate is what a regular actually pays per game.
+    const rate = Number(rates.contracted_10) || Number(rates.noncontract) || 0;
+
+    const credit = ledgers.filter(l => l.present_balance > 0)
+      .reduce((s, l) => s + l.present_balance, 0);
+    const debt = ledgers.filter(l => l.present_balance < 0)
+      .reduce((s, l) => s + l.present_balance, 0);
+
+    // Only chase people it makes sense to chase. A sandbox account, or someone
+    // who has never played and sits at exactly zero, is dormant rather than at
+    // risk — including them buries the handful who genuinely need a top-up.
+    const sandbox = new Set(playersRepo.all().filter(p => p.is_sandbox).map(p => p.id));
+    const active = ledgers.filter(l =>
+      !sandbox.has(l.player_id) && ((l.games || 0) > 0 || l.present_balance !== 0));
+
+    const withRunway = active.map(l => ({
+      player_id: l.player_id,
+      name: l.player_name,
+      balance: round2(l.present_balance),
+      games_left: rate > 0 ? Math.floor(l.present_balance / rate) : null,
+    }));
+
+    const inDebt = withRunway.filter(p => p.balance < 0);
+    const lowRunway = withRunway.filter(p =>
+      p.balance >= 0 && p.games_left !== null && p.games_left < LOW_RUNWAY_GAMES);
+
+    const games = gameweeksRepo.all(c.id);
+    const lastGame = games[0]?.date || null;      // all() sorts date DESC
+    const cutoff = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+
     return {
       id: c.id, name: c.name, venue: c.venue,
+      rate,
       players: ledgers.length,
-      net: Math.round(ledgers.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
-      credit: Math.round(credit * 100) / 100,
-      debt: Math.round(debt * 100) / 100,
-      refill_count: refills.length,
-      watchlist: refills.slice(0, 12).map(l => ({ name: l.player_name, balance: l.present_balance })),
-      games: gameweeksRepo.all(c.id).length,
+      net: round2(ledgers.reduce((s, l) => s + l.present_balance, 0)),
+      credit: round2(credit),
+      debt: round2(debt),
+      games: games.length,
+      last_game: lastGame,
+      games_30d: games.filter(g => String(g.date) >= cutoff).length,
+      // Split so the UI can distinguish "already owes" from "about to run out".
+      in_debt_count: inDebt.length,
+      low_runway_count: lowRunway.length,
+      refill_count: inDebt.length + lowRunway.length,
+      // Chase list: deepest debt first, then those closest to running out.
+      watchlist: [...inDebt.sort((a, b) => a.balance - b.balance),
+        ...lowRunway.sort((a, b) => a.balance - b.balance)].slice(0, 12),
     };
   });
+
+  const creditHeld = round2(perContract.reduce((s, c) => s + c.credit, 0));
+  const owed = round2(Math.abs(perContract.reduce((s, c) => s + c.debt, 0)));
+  const kitty = kittyRepo.balance();
+
   return {
     role: 'admin',
     players: playersRepo.all().length,
-    kitty: kittyRepo.balance(),
+    kitty,
     pending_contributions: pendingContributionsRepo.pendingCount(),
     contracts: perContract,
+    // Can the club honour what players have already paid in? Positive means the
+    // pot covers the prepayments; negative means some of that money is spent.
+    cash: {
+      credit_held: creditHeld,
+      owed,
+      kitty_balance: round2(kitty.balance),
+      cover: round2(kitty.balance - creditHeld),
+      covered_pct: creditHeld > 0 ? Math.round((kitty.balance / creditHeld) * 100) : null,
+    },
   };
 }));
 

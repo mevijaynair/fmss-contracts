@@ -806,6 +806,10 @@ tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .panel-row { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
   padding: 0.5rem 0.65rem; border-radius: 8px; background: var(--bg-card);
   border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem; }
+.watch-chip.is-debt { border-color: color-mix(in srgb, var(--danger) 40%, var(--border-color));
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-card)); }
+.watch-chip.is-debt strong { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); }
+
 .raw-block { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
   padding: 0.8rem; border-radius: 8px; background: var(--bg-inset);
   border: 1px solid var(--border-color); color: var(--text-muted);
