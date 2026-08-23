@@ -42,10 +42,20 @@ function levenshtein(a, b) {
 }
 
 // Build a normalized lookup from player name + aliases.
-function buildIndex(players) {
+export function buildIndex(players) {
   const exact = new Map();
   for (const p of players) {
-    for (const key of [p.name, ...(p.aliases || [])]) {
+    // playersRepo hands back a parsed array, but the column stores JSON text. If a
+    // caller passes a raw DB row, spreading that string yields one key per
+    // CHARACTER, and single-letter keys behave as wildcards in the prefix match
+    // below ("tush" starts with "t") — silently resolving to the wrong player.
+    let aliases = p.aliases || [];
+    if (typeof aliases === 'string') {
+      try { aliases = JSON.parse(aliases); } catch { aliases = []; }
+    }
+    if (!Array.isArray(aliases)) aliases = [];
+
+    for (const key of [p.name, ...aliases]) {
       const n = normalize(key);
       if (n && !exact.has(n)) exact.set(n, p);
     }
@@ -53,7 +63,7 @@ function buildIndex(players) {
   return exact;
 }
 
-function matchToken(token, players, index) {
+export function matchToken(token, players, index) {
   const n = normalize(token);
   if (!n) return null;
   if (index.has(n)) return index.get(n);
@@ -190,12 +200,40 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
     return { token, suggestions };
   });
 
+  // Same player listed twice (typically pasted under both teams after the message
+  // was edited, or because they swapped sides). Left unflagged this silently
+  // double-charges them for one game, so mark the repeats for the preview. The
+  // server refuses the commit outright — this is just so the admin sees why.
+  const timesSeen = new Map();
+  for (const r of rows) {
+    if (!r.player_id) continue;
+    timesSeen.set(r.player_id, (timesSeen.get(r.player_id) || 0) + 1);
+  }
+  const seenOnce = new Set();
+  for (const r of rows) {
+    if (!r.player_id || timesSeen.get(r.player_id) < 2) continue;
+    r.duplicate = true;                 // every row for that player
+    r.duplicate_repeat = seenOnce.has(r.player_id);  // all but the first
+    seenOnce.add(r.player_id);
+  }
+  const duplicates = [...timesSeen.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([player_id, count]) => ({
+      player_id,
+      count,
+      display_name: (rows.find(r => r.player_id === player_id) || {}).display_name || player_id,
+    }));
+
   return {
     num_players: numPlayers,
     bucket,
     teams: [...new Set(rows.map(r => r.team))],
     rows,
     unmatched: unmatchedWithSuggestions,
+    // Players appearing more than once. Non-empty means the game cannot be
+    // committed until the extra rows are removed.
+    duplicates,
+    hasDuplicates: duplicates.length > 0,
     // Flag for outside players in this game
     hasOutsidePlayers: rows.some(r => r.player_type === 'outside'),
     outsidePlayerCount: rows.filter(r => r.player_type === 'outside').length,

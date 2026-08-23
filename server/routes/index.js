@@ -21,6 +21,7 @@ import { playerRelationshipsRepo } from '../repos/player_relationships.js';
 import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { parseTeams } from '../parser.js';
+import { parseResultsSheet } from '../results_import.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => {
@@ -301,6 +302,93 @@ r.post('/parse', wrap((req) => {
   const statusOf = {};
   for (const l of ledgersRepo.forContract(contract_id)) statusOf[l.player_id] = l.status;
   return parseTeams(text || '', players, statusOf, contract.rates);
+}));
+
+// ---- results sheet import ----
+// Two-phase on purpose: without `commit` this only reports what WOULD happen, so
+// unmatched names surface before anything is written.
+//
+// Imported games are financial-nil. Participation only exists in `charges`, so
+// rows are written there, but every amount is 0 — this records who played, on
+// which team, and who captained. It never moves a balance.
+r.post('/admin/import/results', wrap((req) => {
+  requireAdmin(req);
+  const { contract_id: contractId, text, commit = false, create_missing: createMissing = false } =
+    req.body || {};
+  const contract = contractsRepo.get(contractId);
+  if (!contract) throw new Error('Unknown contract');
+
+  let parsed = parseResultsSheet(text || '', playersRepo.all());
+
+  // Names in the sheet are often real people who simply are not on a contract —
+  // guests and irregulars. On commit, optionally add them as outside players so
+  // their appearances count, then re-parse so those games pick them up. Tokens
+  // that collide with a shared-balance account are never auto-created: splitting
+  // one is a roster decision, not something to infer here.
+  let createdPlayers = [];
+  if (commit && createMissing) {
+    for (const u of parsed.unmatched) {
+      if (/shared account/i.test(u.reason || '')) continue;
+      const name = u.token.trim();
+      if (!name) continue;
+      try {
+        const p = playersRepo.create({ name });
+        db.prepare("UPDATE players SET player_type = 'outside' WHERE id = ?").run(p.id);
+        createdPlayers.push({ id: p.id, name: p.name, games: u.count });
+      } catch { /* already exists under a different spelling — leave it unmatched */ }
+    }
+    if (createdPlayers.length) parsed = parseResultsSheet(text || '', playersRepo.all());
+  }
+
+  // Flag games whose date already has a gameweek on this contract, so a re-paste
+  // does not silently duplicate a season.
+  const existing = new Map();
+  for (const g of gameweeksRepo.all(contractId)) existing.set(String(g.date).slice(0, 10), g.id);
+  const games = parsed.games.map(g => ({ ...g, duplicate_of: existing.get(g.date) || null }));
+
+  const importable = games.filter(g => !g.duplicate_of);
+  const summary = {
+    contract_id: contractId,
+    games_found: games.length,
+    games_importable: importable.length,
+    games_duplicate: games.length - importable.length,
+    players_linked: importable.reduce((a, g) => a + g.matched_count, 0),
+    unmatched_names: parsed.unmatched.length,
+  };
+
+  if (!commit) {
+    return { dry_run: true, summary, games, skipped: parsed.skipped, unmatched: parsed.unmatched };
+  }
+
+  const created = [];
+  for (const g of importable) {
+    const gw = gameweeksRepo.create({
+      contract_id: contractId,
+      date: g.date,
+      score: g.score_text,
+      teams_raw: g.teams_raw,
+      comments: 'Imported from results sheet',
+      cost_per_gw: 0,
+      game_cost: 0,
+      kitty_earned: 0,
+    }, g.players.map(p => ({
+      player_id: p.player_id,
+      team: p.team,
+      is_captain: p.is_captain,
+      rate_type: 'imported_result',
+      amount: 0,                 // financial-nil: participation only
+    })));
+    created.push({ id: gw.id, date: g.date, players: g.players.length });
+  }
+
+  return {
+    dry_run: false,
+    summary: { ...summary, games_created: created.length, players_created: createdPlayers.length },
+    created,
+    players_created: createdPlayers,
+    skipped: parsed.skipped,
+    unmatched: parsed.unmatched,
+  };
 }));
 
 // ---- contributions ----

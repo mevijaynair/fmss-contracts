@@ -13,24 +13,43 @@ async function render() {
 
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
-    const charges = g.charges || [];
-    const totalCharged = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-    const paidCount = charges.filter(c => c.paid).length;
-    const pendingCount = charges.length - paidCount;
-    const pendingAmount = charges.filter(c => !c.paid).reduce((s, c) => s + (Number(c.amount) || 0), 0);
-    const collectionRate = charges.length > 0 ? Math.round((paidCount / charges.length) * 100) : 0;
+    // The gameweeks LIST does not carry a `charges` array — only `num_players`
+    // and a `charged` total (per-charge detail lives on /gameweeks/:id). Reading
+    // g.charges here made every row show "0 players / 0" and, because that left
+    // pendingAmount at 0, labelled every game "✓ Collected" regardless of truth.
+    const charges = Array.isArray(g.charges) ? g.charges : null;
+    // Prefer charges_count over num_players — the latter counts everyone named in
+    // the original message, including unmatched people who were never billed.
+    const playerCount = charges ? charges.length
+      : (g.charges_count ?? Number(g.num_players) ?? 0);
+    const totalCharged = charges
+      ? charges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
+      : (Number(g.charged) || 0);
 
-    const statusColor = pendingAmount === 0 ? 'var(--success)' : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
-    const statusText = pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
+    // Settlement status needs per-charge `paid` flags. Without them, say so
+    // rather than implying the game is fully collected.
+    const known = !!charges;
+    const paidCount = known ? charges.filter(c => c.paid).length : 0;
+    const pendingAmount = known
+      ? charges.filter(c => !c.paid).reduce((s, c) => s + (Number(c.amount) || 0), 0)
+      : 0;
+    const collectionRate = known && charges.length
+      ? Math.round((paidCount / charges.length) * 100) : null;
+
+    const statusColor = !known ? 'var(--text-muted)'
+      : pendingAmount === 0 ? 'var(--success)'
+        : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
+    const statusText = !known ? '—'
+      : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
 
     return `
       <tr data-gw="${g.id}" style="cursor:pointer;">
         <td class="num"><strong>${esc(fmtDate(g.date))}</strong></td>
         <td class="num">#${g.contract_number || '—'}</td>
-        <td class="num">${charges.length} players</td>
+        <td class="num">${playerCount} players</td>
         <td class="num"><strong>${money(totalCharged)}</strong></td>
         <td><span style="color: ${statusColor}; font-weight: 600;">${statusText}</span></td>
-        <td class="num" style="font-size: 0.85rem; color: var(--text-muted);">${collectionRate}%</td>
+        <td class="num" style="font-size: 0.85rem; color: var(--text-muted);">${collectionRate === null ? '—' : collectionRate + '%'}</td>
         <td>${esc(g.score || '—')}</td>
         <td class="row-actions">
           ${!g.historical ? `<button class="btn btn-sm" data-gw-edit="${g.id}" style="padding: 0.3rem 0.6rem;">✏️</button>` : '<span class="hint">📋</span>'}
