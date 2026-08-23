@@ -184,7 +184,34 @@ r.get('/ledgers', wrap((req) => {
     return ledgersRepo.forPlayer(req.user.playerId)
       .filter(l => !req.query.contract || l.contract_id === req.query.contract);
   }
-  return req.query.contract ? ledgersRepo.forContract(req.query.contract) : ledgersRepo.all();
+  const rows = req.query.contract
+    ? ledgersRepo.forContract(req.query.contract)
+    : ledgersRepo.all();
+
+  // Attach the same runway the dashboard uses, plus the roster flags, so the
+  // players table can say "2 games left" and mark guests rather than leaving the
+  // reader to work it out from a raw balance.
+  const rateFor = {};
+  for (const c of contractsRepo.all()) {
+    const rates = typeof c.rates === 'string'
+      ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
+      : (c.rates || {});
+    rateFor[c.id] = Number(rates.contracted_10) || Number(rates.noncontract) || 0;
+  }
+  const meta = Object.fromEntries(playersRepo.all().map(p => [p.id, p]));
+  return rows.map(l => {
+    const rate = rateFor[l.contract_id] || 0;
+    const p = meta[l.player_id] || {};
+    return {
+      ...l,
+      rate,
+      games_left: rate > 0 ? Math.floor(l.present_balance / rate) : null,
+      player_type: p.player_type || 'regular',
+      is_sandbox: p.is_sandbox ? 1 : 0,
+      balance_group_id: p.balance_group_id || null,
+      special_role: p.special_role || null,
+    };
+  });
 }));
 r.put('/ledgers/:playerId/:contractId/status', wrap((req) => {
   requireAdmin(req);
@@ -527,6 +554,14 @@ r.get('/results', wrap((req) => {
 }));
 
 // ---- player stats: timeline, cost breakdown, streaks ----
+r.get('/players/:id/record', wrap((req) => {
+  // A player may read their own record; an admin may read anyone's.
+  if (req.user.role === 'player' && req.params.id !== req.user.playerId) {
+    throw new Error('Forbidden');
+  }
+  return statsRepo.matchRecord(req.params.id, req.query.contract || null);
+}));
+
 r.get('/players/:id/stats', wrap((req) => {
   // Player may only read their own stats; admin may read anyone's.
   if (req.user.role === 'player' && req.params.id !== req.user.playerId) {

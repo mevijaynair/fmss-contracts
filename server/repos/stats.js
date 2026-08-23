@@ -1,7 +1,71 @@
 // stats.js — player statistics: timeline, team history, cost breakdown, attendance.
 import { db } from '../db.js';
+import { normaliseScore, winningTeam } from '../results_import.js';
 
 export const statsRepo = {
+  /**
+   * A player's match record: won/drawn/lost, goals and captaincy.
+   *
+   * Shares normaliseScore/winningTeam with the Results view on purpose. The
+   * outcome depends on WHICH TEAM the player was on — a game is only a win for
+   * the winning side — so both places must resolve it the same way or the same
+   * player shows two different records.
+   *
+   * Rates are computed over games with a KNOWN result; a blank score cell counts
+   * as neither a win nor a loss, and is reported separately as `unknown`.
+   */
+  matchRecord(playerId, contractId = null) {
+    const rows = db.prepare(`
+      SELECT ch.team, ch.is_captain, g.id AS gw, g.score, g.scoreline
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      WHERE ch.player_id = ?${contractId ? ' AND g.contract_id = ?' : ''}`)
+      .all(...(contractId ? [playerId, contractId] : [playerId]));
+
+    const teamsOf = db.prepare(
+      'SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND team != \'\'');
+
+    const r = {
+      games: rows.length, wins: 0, draws: 0, losses: 0, unknown: 0,
+      // Two different reasons a game cannot be scored, worth telling apart: the
+      // result was unreadable, or nobody recorded which side the player was on.
+      // Seeded historical games have no team on any charge, so they can never be
+      // won or lost — only imported/parsed games carry teams.
+      no_score: 0, no_team: 0,
+      gf: 0, ga: 0, captainGames: 0, captainWins: 0,
+    };
+
+    for (const row of rows) {
+      if (row.is_captain) r.captainGames++;
+      const teams = teamsOf.all(row.gw).map(t => t.team);
+      const sc = normaliseScore(row.scoreline || row.score);
+      const wt = winningTeam(sc.winner, teams);
+      const decided = sc.known && (sc.winner === 'draw' || wt);
+      if (!decided) {
+        r.unknown++;
+        if (!sc.known) r.no_score++;
+        else if (!row.team) r.no_team++;
+        else r.no_team++;          // result names a side this game does not have
+        continue;
+      }
+      if (sc.winner !== 'draw' && !row.team) { r.unknown++; r.no_team++; continue; }
+
+      const w = Number(sc.goalsWin) || 0;
+      const l = Number(sc.goalsLose) || 0;
+      if (sc.winner === 'draw') { r.draws++; r.gf += w; r.ga += w; }
+      else if (row.team === wt) {
+        r.wins++; r.gf += w; r.ga += l;
+        if (row.is_captain) r.captainWins++;
+      } else { r.losses++; r.gf += l; r.ga += w; }
+    }
+
+    r.decided = r.wins + r.draws + r.losses;
+    r.winRate = r.decided ? Math.round((r.wins / r.decided) * 100) : null;
+    r.gd = r.gf - r.ga;
+    r.captainWinRate = r.captainGames ? Math.round((r.captainWins / r.captainGames) * 100) : null;
+    return r;
+  },
+
   // Get player's full timeline: opening balance → contributions → charges → present
   playerTimeline(playerId, contractId) {
     const opening = db.prepare(`

@@ -15,12 +15,19 @@ const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
 function isPlayer() { return store.user?.role === 'player'; }
 
-// Auto-calculate status from balance. Tone comes from the shared .tag-* classes,
-// which are token-based and follow the active theme.
-function statusFromBalance(balance) {
-  if (balance < 0) return { text: '🚨 Out of contract', cls: 'tag-critical' };
-  if (balance < 150) return { text: '⚠️ Refill needed', cls: 'tag-due' };
-  return { text: '✓ In Contract', cls: 'tag-paid' };
+// Status from RUNWAY, not a flat cash threshold — the same rule the dashboard
+// uses. 60 AED is comfortable at 30/game and nearly spent at 35/game, and a fixed
+// 150 could not tell those apart; the two views also disagreed as a result.
+function statusFromBalance(balance, gamesLeft) {
+  if (balance < 0) return { text: '🚨 Owes money', cls: 'tag-critical' };
+  if (gamesLeft === null || gamesLeft === undefined) {
+    return balance < 150
+      ? { text: '⚠️ Refill needed', cls: 'tag-due' }
+      : { text: '✓ In credit', cls: 'tag-paid' };
+  }
+  if (gamesLeft < 1) return { text: '⚠️ Cannot cover next game', cls: 'tag-due' };
+  if (gamesLeft < 2) return { text: '⚠️ 1 game left', cls: 'tag-due' };
+  return { text: `✓ ${gamesLeft} games left`, cls: 'tag-paid' };
 }
 
 async function render() {
@@ -112,7 +119,7 @@ async function render() {
   // Render as clean card grid instead of cluttered table
   const cardsHtml = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
-    const status = statusFromBalance(l.present_balance);
+    const status = statusFromBalance(l.present_balance, l.games_left);
     const lastTxn = lastTransactionMap[l.player_id];
     let lastTxnHtml = '<span class="hint">—</span>';
     if (lastTxn) {
@@ -127,12 +134,17 @@ async function render() {
 
     return `
     <tr class="${l.present_balance < 0 ? 'row-alert' : ''}">
-      <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}</td>
+      <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}${
+        l.player_type === 'outside' ? ' <span class="tag tag-due" title="Guest — not on a contract">Guest</span>' : ''}${
+        l.balance_group_id ? ' <span class="tag tag-cashier" title="Shares a balance with another player">🔗 Shared</span>' : ''}</td>
       <td><span class="tag ${status.cls}">${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
       <td class="num"><span class="charged-cell ${l.charged > 0 ? 'is-charged' : ''}">-${money(l.charged)}</span></td>
+      <td class="num">${l.games ?? 0}</td>
       <td class="num">${balCell(l.present_balance)}</td>
+      <td class="num">${l.games_left === null || l.games_left === undefined ? '<span class="hint">—</span>'
+        : `<span class="${l.games_left < 1 ? 'charged-cell is-charged' : 'hint'}">${l.games_left}</span>`}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
@@ -211,13 +223,51 @@ window.showPlayerDetailFor = async (playerId, cId) => {
 
 window.showPlayerDetail = async (playerId) => {
   try {
-    const stats = await api.get(`/players/${playerId}/stats?contract_id=${contractId}`);
+    const [stats, record] = await Promise.all([
+      api.get(`/players/${playerId}/stats?contract_id=${contractId}`),
+      // Match record across ALL contracts — the detail card is not contract-scoped.
+      api.get(`/players/${playerId}/record`).catch(() => null),
+    ]);
     const player = store.players.find(p => p.id === playerId);
-    await renderPlayerDetail(player, stats);
+    await renderPlayerDetail(player, stats, record);
   } catch (e) {
     toast(`Failed to load player stats: ${e.message}`, true);
   }
 };
+
+// Match record. Shown only when there is something to show, and it states WHY a
+// game could not be scored rather than reporting a misleading 0%: seeded
+// historical games carry no team on their charges, so they can never be won or
+// lost, only imported or parsed ones can.
+function matchRecordBlock(r) {
+  if (!r || !r.games) return '';
+  const pct = (v) => (v === null || v === undefined ? '—' : v + '%');
+  const signed = (n) => (n > 0 ? '+' + n : String(n));
+  const tile = (label, value, cls = '') => `
+    <div class="res-quarter" style="border-top-color: var(--sport)">
+      <div class="hint">${label}</div>
+      <div class="res-q-label" style="margin:0;padding:0;border:0">
+        <span class="${cls}">${value}</span></div>
+    </div>`;
+
+  const caveat = [];
+  if (r.no_score) caveat.push(`${r.no_score} with no result recorded`);
+  if (r.no_team) caveat.push(`${r.no_team} with no team recorded`);
+
+  return `
+    <h4 class="mini-h mt">Match record</h4>
+    ${r.decided ? '' : `<p class="hint">None of these games can be won or lost yet — see below.</p>`}
+    <div class="auto-grid" style="--col-min: 130px;">
+      ${tile('Played', r.games)}
+      ${tile('W / D / L', `${r.wins} / ${r.draws} / ${r.losses}`)}
+      ${tile('Win rate', pct(r.winRate), 'is-win')}
+      ${tile('Goals for / against', `${r.gf} / ${r.ga}`)}
+      ${tile('Goal difference', signed(r.gd), r.gd >= 0 ? 'is-win' : '')}
+      ${tile('Captained', r.captainGames ? `${r.captainWins}/${r.captainGames} (${pct(r.captainWinRate)})` : '—')}
+    </div>
+    ${caveat.length ? `<p class="hint mt">Rates cover the ${r.decided} game(s) with a usable
+      result. Excluded: ${caveat.join(', ')}.</p>` : ''}`;
+}
 
 // Render audit trail (grouped by date with color coding)
 function renderAuditTrail(transactions) {
@@ -315,7 +365,7 @@ function renderAuditTrail(transactions) {
   return html;
 }
 
-async function renderPlayerDetail(player, stats) {
+async function renderPlayerDetail(player, stats, record) {
   const detailCard = $('playerDetailCard');
   $('playerDetailName').textContent = `${player.name}`;
 
@@ -381,6 +431,7 @@ async function renderPlayerDetail(player, stats) {
           <div style="font-size: 1.8rem; font-weight: 700;">${allLedgers.length}</div>
         </div>
       </div>
+      ${matchRecordBlock(record)}
     </div>
 
     <!-- AUDIT TRAIL TAB (all transactions: contributions + external events + charges) -->
