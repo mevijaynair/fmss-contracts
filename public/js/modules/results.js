@@ -7,7 +7,7 @@ let contractId = 'sat';
 // Guests and irregulars are real players but distort a leaderboard: someone who
 // turned up once should not sit beside a regular on a rate table. Hide players
 // below this many appearances; the control in the Results header changes it.
-let minGames = 3;
+let minGames = 6;
 
 async function render() {
   try {
@@ -108,7 +108,7 @@ function showLeaderboards(stats) {
       </div>
     </div>`;
 
-  const opts = [1, 3, 5, 10];
+  const opts = [1, 3, 6, 10];
   slot('results-lb').innerHTML = `
     <div class="filter-bar" style="grid-template-columns: 1fr auto;">
       <div class="hint">
