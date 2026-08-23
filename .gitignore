@@ -3,3 +3,8 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/seed.json
+
+# Database backups. These contain PINs and password hashes for every player —
+# a backup file is a credential file. Never commit one.
+data/backups/
+*fmss-backup*.json

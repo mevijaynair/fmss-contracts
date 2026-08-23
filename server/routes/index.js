@@ -22,6 +22,7 @@ import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { parseTeams } from '../parser.js';
 import { parseResultsSheet, normaliseScore, winningTeam } from '../results_import.js';
+import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => {
@@ -433,6 +434,40 @@ r.post('/admin/import/results', wrap((req) => {
     skipped: parsed.skipped,
     unmatched: parsed.unmatched,
   };
+}));
+
+// ---- whole-database backup ----
+// Export is a plain JSON document of every table, meant to be kept offline.
+// Restore replaces everything, in one transaction, after snapshotting the
+// current database — see server/backup.js for why it is built that way.
+r.get('/admin/backup', wrap((req, res) => {
+  requireAdmin(req);
+  const includeCredentials = req.query.credentials !== 'false';
+  const doc = exportAll({ includeCredentials });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="fmss-backup-${stamp}.json"`);
+  res.send(JSON.stringify(doc, null, 2));
+}));
+
+// Describe what a backup would do, without writing anything.
+r.post('/admin/backup/inspect', wrap((req) => {
+  requireAdmin(req);
+  return inspectBackup(req.body?.backup ?? req.body);
+}));
+
+// Apply it. `confirm` must echo the row count from inspect, so a mis-click
+// cannot wipe the database — the caller has to have looked at the preview.
+r.post('/admin/backup/restore', wrap((req) => {
+  requireAdmin(req);
+  const doc = req.body?.backup ?? req.body;
+  const check = inspectBackup(doc);
+  if (!check.ok) throw new Error(check.problems[0] || 'Invalid backup');
+  if (Number(req.body?.confirm_rows) !== check.total_rows) {
+    throw new Error(
+      `Confirmation mismatch: expected ${check.total_rows} rows. Re-run the preview and try again.`);
+  }
+  return restoreBackup(doc);
 }));
 
 // ---- contributions ----

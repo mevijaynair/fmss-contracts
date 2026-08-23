@@ -19,6 +19,10 @@ const SEED_PATH = join(DATA_DIR, 'seed.json');
 // read-only under systemd ProtectSystem=strict (only /data is writable then).
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
+// Exported so the backup code can snapshot the real file, whether the path came
+// from FMSS_DB_PATH or the default under data/.
+export const DB_FILE = DB_PATH;
+
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
