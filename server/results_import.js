@@ -27,8 +27,32 @@ const MONTHS = {
   august: 8, september: 9, october: 10, november: 11, december: 12,
 };
 
-// "Team Legacy Blue: :" / "Red:" / "Blues -" → canonical colour.
-const TEAM_LABEL = /^(?:team\s+\S+\s+)?(red|blue|white|black|green|yellow|orange|purple)s?\s*[:\-]+\s*[:\-]*\s*/i;
+const COLOURS = ['red', 'blue', 'white', 'black', 'green', 'yellow', 'orange', 'purple', 'pink'];
+
+// A team label is whatever sits before the first colon on a line — "Red:",
+// "Team Legacy Blue: :", "Team RAVISHING:", "BOMBASTIC:". Requiring a colour word
+// was wrong: squad names like RAVISHING matched nothing, so the label itself was
+// read as a player AND every player collapsed onto one team, wrecking win
+// attribution. Anything up to a colon is now a label.
+const LABELLED_LINE = /^\s*([^:]{1,40}?)\s*:+\s*:?\s*/;
+
+// Bare label line: no colon, but short and word-like, e.g. "BOMBASTIC" or "BLUE"
+// on its own line with the players beneath it.
+const BARE_LABEL = /^\s*(?:team\s+)?([A-Za-z][A-Za-z0-9 '&-]{1,24})\s*$/;
+
+// Captain markers used instead of "(C)": "C1", "C2", "C3", "Capt1".
+const CAPTAIN_MARKER = /^(?:c|capt|captain)\s*\d+$/i;
+
+/** Normalise a raw label to a team name — canonical colour if it names one. */
+function canonicalTeam(raw) {
+  const s = String(raw).trim().replace(/^team\s+/i, '').trim();
+  const low = s.toLowerCase();
+  // "REDRed", "Reds", "Team Legacy Blue" → pick the colour it mentions.
+  for (const c of COLOURS) {
+    if (new RegExp(`(^|[^a-z])${c}`, 'i').test(low)) return c[0].toUpperCase() + c.slice(1);
+  }
+  return s.replace(/\s+/g, ' ').slice(0, 24) || 'Team';
+}
 
 // Words that are never player names in this sheet.
 const STOP = new Set(['no', 'capt', 'capts', 'captain', 'captains', 'game', 'none',
@@ -127,24 +151,49 @@ function stripCaptain(tok) {
 export function splitTeamsCell(cell) {
   const blocks = [];
   let current = null;
+  const startTeam = (label) => {
+    current = { team: canonicalTeam(label), tokens: [] };
+    blocks.push(current);
+  };
+
   for (const rawLine of String(cell || '').split('\n')) {
     let line = rawLine.trim();
     if (!line) continue;
-    const m = line.match(TEAM_LABEL);
-    if (m) {
-      const team = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
-      current = { team, tokens: [] };
-      blocks.push(current);
-      line = line.slice(m[0].length);
+
+    const labelled = line.match(LABELLED_LINE);
+    if (labelled) {
+      startTeam(labelled[1]);
+      line = line.slice(labelled[0].length);
+    } else {
+      // No colon. A short word-like line with no other content is a bare label
+      // ("BOMBASTIC" above its players); anything longer is a list of players.
+      const bare = line.match(BARE_LABEL);
+      if (bare && !/\s/.test(line.trim())) { startTeam(bare[1]); continue; }
     }
-    if (!current) { current = { team: 'Team 1', tokens: [] }; blocks.push(current); }
+
+    if (!current) startTeam('Team 1');
+
+    // Captain markers appear three ways: attached ("Shone(C)"), standing alone
+    // AFTER the name because the split broke it off ("Vijay (c)"), or numbered
+    // BEFORE it ("C1 Vijay").
+    let captainNext = false;
     for (const t of line.split(/[\s,]+/)) {
       const clean = t.trim();
       if (!clean) continue;
+      const alnum = clean.replace(/[^A-Za-z0-9]/g, '');
+
+      if (CAPTAIN_MARKER.test(alnum)) { captainNext = true; continue; }   // "C1 Vijay"
+      if (/^c$/i.test(alnum) && /^\(?c\)?$/i.test(clean)) {               // "Vijay (c)"
+        const prev = current.tokens[current.tokens.length - 1];
+        if (prev) prev.isCaptain = true; else captainNext = true;
+        continue;
+      }
+
       const { token, isCaptain } = stripCaptain(clean);
-      const bare = token.replace(/[^\p{L}\p{N}+'-]/gu, '');
-      if (!bare || STOP.has(bare.toLowerCase())) continue;
-      current.tokens.push({ token: bare, isCaptain });
+      const bareTok = token.replace(/[^\p{L}\p{N}+'-]/gu, '');
+      if (!bareTok || STOP.has(bareTok.toLowerCase())) continue;
+      current.tokens.push({ token: bareTok, isCaptain: isCaptain || captainNext });
+      captainNext = false;
     }
   }
   return blocks.filter(b => b.tokens.length);
