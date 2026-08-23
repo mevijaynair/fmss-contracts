@@ -21,7 +21,7 @@ import { playerRelationshipsRepo } from '../repos/player_relationships.js';
 import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { parseTeams } from '../parser.js';
-import { parseResultsSheet } from '../results_import.js';
+import { parseResultsSheet, normaliseScore, winningTeam } from '../results_import.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => {
@@ -506,9 +506,20 @@ r.get('/results', wrap((req) => {
     : gameweeksRepo.all();
   return games.map(g => {
     const charges = gameweeksRepo.get(g.id).charges || [];
+    const teams = [...new Set(charges.map(c => c.team).filter(Boolean))];
+    // Resolve the result to concrete goals and an actual winning TEAM. Without
+    // this the client had only free text, so it credited a win to everyone who
+    // played rather than to the side that won.
+    const score = normaliseScore(g.scoreline || g.score);
     return {
       ...g,
       charges,
+      teams,
+      result: {
+        ...score,
+        winner_team: winningTeam(score.winner, teams),
+        is_draw: score.winner === 'draw',
+      },
       total_charged: gameweeksRepo.chargeTotal(g.id),
       players_count: charges.length,
     };

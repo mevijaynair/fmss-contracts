@@ -245,8 +245,12 @@
             <div class="card-header"><h3 class="card-title">Game History</h3>
               <span class="seg" id="gwContractSeg"></span></div>
             <div style="overflow-x:auto;">
+              <div id="gwBulkBar" class="filter-bar" style="grid-template-columns:1fr auto" hidden>
+                <div class="hint"><strong id="gwSelCount">0</strong> game(s) selected</div>
+                <button class="btn btn-danger btn-sm" id="gwBulkDelete">Delete selected</button>
+              </div>
               <table class="sams-table" id="gwTable">
-                <thead><tr><th>Date</th><th>GW</th><th>Players</th><th class="num">Charged</th><th>Score</th><th></th></tr></thead>
+                <thead><tr><th style="width:2rem"><input type="checkbox" id="gwSelectAll" title="Select all"></th><th>Date</th><th>GW</th><th class="num">Players</th><th class="num">Charged</th><th>Settlement</th><th class="num">Collected</th><th>Result</th><th></th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>

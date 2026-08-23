@@ -137,6 +137,53 @@ export function parseSheetDate(raw) {
   return null;
 }
 
+// When a result names a winner but no margin ("Reds win"), assume this many
+// goals so the game still contributes a goal difference. Flagged as `assumed`
+// so it can be told apart from a real scoreline.
+export const ASSUMED_MARGIN = 3;
+
+/**
+ * Turn a free-text result into concrete goals, applying the house rules:
+ *   "12-9"          → 12–9   (exact)
+ *   "Blues win by 4" → 4–0   (margin known, goals not)
+ *   "Reds win"       → 3–0   (nothing known — assume a 3-goal win)
+ *   "Draw 6-6"       → 6–6
+ * Returns { winner, margin, goalsWin, goalsLose, known, assumed, text }.
+ * `winner` is the winning colour lowercased, 'draw', or null when unreadable.
+ */
+export function normaliseScore(raw) {
+  const s = parseScoreText(raw);
+  const out = {
+    text: s.text, winner: s.winner, margin: s.margin,
+    goalsWin: null, goalsLose: null, known: false, assumed: false,
+  };
+  if (!s.text) return out;
+
+  if (s.winner === 'draw') {
+    const level = s.goalsA !== null ? s.goalsA : 0;
+    return { ...out, winner: 'draw', margin: 0, goalsWin: level, goalsLose: level,
+      known: true, assumed: s.goalsA === null };
+  }
+  if (!s.winner) return out;                       // cannot tell who won
+
+  if (s.goalsA !== null && s.goalsB !== null) {    // a real scoreline
+    const hi = Math.max(s.goalsA, s.goalsB), lo = Math.min(s.goalsA, s.goalsB);
+    return { ...out, margin: hi - lo, goalsWin: hi, goalsLose: lo, known: true };
+  }
+  if (s.margin !== null) {                          // "won by 4" → 4–0
+    return { ...out, margin: s.margin, goalsWin: s.margin, goalsLose: 0, known: true };
+  }
+  return { ...out, margin: ASSUMED_MARGIN, goalsWin: ASSUMED_MARGIN, goalsLose: 0,
+    known: true, assumed: true };
+}
+
+/** Which of `teams` the winning colour refers to. Null for a draw or no match. */
+export function winningTeam(winner, teams = []) {
+  if (!winner || winner === 'draw') return null;
+  const w = String(winner).toLowerCase().replace(/s$/, '');
+  return teams.find(t => String(t).toLowerCase().replace(/s$/, '') === w) || null;
+}
+
 /**
  * Classify a free-text score.
  * Returns { text, teamA, teamB, goalsA, goalsB, winner, margin, known }.

@@ -1,7 +1,7 @@
 // gameweeks.js — game history list + detail modal.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, fmtDate, contractSeg, openModal } from '../util.js';
+import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../util.js';
 
 let contractId = 'sat';
 
@@ -44,6 +44,7 @@ async function render() {
 
     return `
       <tr data-gw="${g.id}" style="cursor:pointer;">
+        <td><input type="checkbox" class="gw-pick" data-id="${g.id}" title="Select for bulk delete"></td>
         <td class="num"><strong>${esc(fmtDate(g.date))}</strong></td>
         <td class="num">#${g.contract_number || '—'}</td>
         <td class="num">${playerCount} players</td>
@@ -55,7 +56,7 @@ async function render() {
           ${!g.historical ? `<button class="btn btn-sm" data-gw-edit="${g.id}" style="padding: 0.3rem 0.6rem;">✏️</button>` : '<span class="hint">📋</span>'}
         </td>
       </tr>`;
-  }).join('') || '<tr><td colspan="8" class="hint">No gameweeks recorded.</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="hint">No gameweeks recorded.</td></tr>';
 
   gwTable.querySelectorAll('tr[data-gw]').forEach(tr => {
     tr.addEventListener('click', (e) => {
@@ -63,12 +64,86 @@ async function render() {
     });
   });
 
+  // Bulk delete — imported seasons often need a re-do, and removing 30 games one
+  // dialog at a time is unusable.
+  const picks = () => [...gwTable.querySelectorAll('.gw-pick:checked')].map(c => c.dataset.id);
+  const syncBulk = () => {
+    const n = picks().length;
+    const bar = $('gwBulkBar');
+    if (bar) { bar.hidden = n === 0; }
+    const count = $('gwSelCount');
+    if (count) count.textContent = String(n);
+  };
+  gwTable.querySelectorAll('.gw-pick').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', syncBulk);
+  });
+  const all = $('gwSelectAll');
+  if (all) {
+    all.checked = false;
+    all.onclick = (e) => e.stopPropagation();
+    all.onchange = () => {
+      gwTable.querySelectorAll('.gw-pick').forEach(cb => { cb.checked = all.checked; });
+      syncBulk();
+    };
+  }
+  syncBulk();
+  const del = $('gwBulkDelete');
+  if (del) del.onclick = () => confirmBulkDelete(picks(), rowsList);
+
   gwTable.querySelectorAll('[data-gw-edit]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const gw = rowsList.find(g => g.id === btn.dataset.gwEdit);
       if (gw) editPayments(gw);
     });
+  });
+}
+
+// Deleting a game reverses its charges, so say plainly what is going to happen.
+function confirmBulkDelete(ids, rowsList) {
+  if (!ids.length) { toast('Nothing selected', true); return; }
+  const games = rowsList.filter(g => ids.includes(g.id));
+  const charged = games.reduce((s, g) => s + (Number(g.charged) || 0), 0);
+
+  openModal(`Delete ${ids.length} game(s)?`, `
+    <div class="panel panel-danger">
+      <div class="panel-title">⚠️ This cannot be undone</div>
+      <div class="panel-body">
+        ${ids.length} game(s) and every charge on them will be removed.
+        ${charged ? `<strong>${money(charged)} AED</strong> of charges will be reversed, so the
+           players involved will see their balances change.`
+          : 'These carry no charges, so no balance will move.'}
+      </div>
+    </div>
+    <div class="panel-scroll">
+      ${games.map(g => `<div class="panel-row"><strong>${esc(fmtDate(g.date))}</strong>
+        <span class="hint">${g.charges_count ?? g.num_players ?? 0} players</span>
+        <span class="hint">${money(Number(g.charged) || 0)}</span></div>`).join('')}
+    </div>
+    <label class="confirm-check">
+      <input type="checkbox" id="gwDelOk">
+      <span>Yes, delete these ${ids.length} game(s)</span>
+    </label>
+    <div class="btn-row mt">
+      <button class="btn btn-danger" id="gwDelGo" disabled>Delete</button>
+      <button class="btn btn-secondary" id="gwDelCancel">Cancel</button>
+    </div>`);
+
+  $('gwDelOk').addEventListener('change', (e) => { $('gwDelGo').disabled = !e.target.checked; });
+  $('gwDelCancel').addEventListener('click', closeModal);
+  $('gwDelGo').addEventListener('click', async () => {
+    $('gwDelGo').disabled = true;
+    let ok = 0;
+    const failed = [];
+    for (const id of ids) {
+      try { await api.deleteGameweek(id); ok++; }
+      catch (e) { failed.push(`${id}: ${e.message}`); }
+    }
+    closeModal();
+    toast(failed.length ? `Deleted ${ok}, ${failed.length} failed` : `✓ Deleted ${ok} game(s)`, !!failed.length);
+    if (failed.length) console.error('bulk delete failures', failed);
+    render();
   });
 }
 

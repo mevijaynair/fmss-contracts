@@ -29,12 +29,15 @@ const HTML = path.join(ROOT, 'public/index.html');
 const HOOK_CLASSES = new Set([
   'participant-row', 'participant-check', 'participant-amount', 'participant-contract',
   'player-type-select', 'charged-to-select', 'charge-delta',
-  'ch-team', 'ch-capt',
+  'ch-team', 'ch-capt', 'gw-pick',
 ]);
 
 // A line carrying this marker is allowed a raw colour (domain data, e.g. kit colours).
 const ALLOW_MARKER = 'ui-tokens-allow';
 
+// Numeric HTML entities (&#9662;) look like hex colours to the pattern below,
+// so strip them before testing.
+const ENTITY = /&#\d+;?/g;
 const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d|\bhsla?\(\s*\d|:\s*white\b|:\s*black\b/;
 
 const cache = new Map();
@@ -67,7 +70,7 @@ for (const file of jsFiles) {
   const rel = path.relative(ROOT, file);
   const lines = read(file).split('\n');
   lines.forEach((line, i) => {
-    if (!COLOUR.test(line)) return;
+    if (!COLOUR.test(line.replace(ENTITY, ''))) return;
     // The marker may sit on the line itself or on any of the 3 lines above, so a
     // single comment can cover a small block of related domain constants.
     if (lines.slice(Math.max(0, i - 3), i + 1).some(l => l.includes(ALLOW_MARKER))) return;
