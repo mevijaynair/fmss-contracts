@@ -4,6 +4,11 @@ import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../u
 
 let contractId = 'sat';
 
+// Guests and irregulars are real players but distort a leaderboard: someone who
+// turned up once should not sit beside a regular on a rate table. Hide players
+// below this many appearances; the control in the Results header changes it.
+let minGames = 3;
+
 async function render() {
   try {
     // /results, not /gameweeks — the gameweeks LIST returns num_players and a
@@ -83,7 +88,9 @@ function showEmpty() {
 }
 
 function showLeaderboards(stats) {
-  const all = Object.values(stats);
+  const everyone = Object.values(stats);
+  const all = everyone.filter(p => p.games >= minGames);
+  const hidden = everyone.length - all.length;
   const byGames = [...all].sort((a, b) => b.games - a.games);
   const byWins = [...all].sort((a, b) => b.wins - a.wins);
   const byCaptain = [...all].filter(p => p.captainGames > 0).sort((a, b) => b.captainWins - a.captainWins);
@@ -101,12 +108,25 @@ function showLeaderboards(stats) {
       </div>
     </div>`;
 
+  const opts = [1, 3, 5, 10];
   slot('results-lb').innerHTML = `
+    <div class="filter-bar" style="grid-template-columns: 1fr auto;">
+      <div class="hint">
+        Ranking <strong>${all.length}</strong> player(s) with ${minGames}+ appearance(s)${
+          hidden ? ` &middot; ${hidden} occasional player(s) hidden` : ''}
+      </div>
+      <span class="seg" id="resMinGames">
+        ${opts.map(n => `<button data-min="${n}" class="${n === minGames ? 'active' : ''}">${n === 1 ? 'All' : n + '+'}</button>`).join('')}
+      </span>
+    </div>
     <div class="auto-grid" style="--col-min: 260px;">
       ${board('🎮 Most Games', '', byGames, 'games')}
       ${board('🏆 Most Wins', 'is-win', byWins, 'wins')}
       ${board('👑 Best Captains', 'is-capt', byCaptain, 'captainWins')}
     </div>`;
+
+  slot('results-lb').querySelectorAll('#resMinGames button').forEach(b =>
+    b.addEventListener('click', () => { minGames = Number(b.dataset.min); render(); }));
 
   slot('results-lb').querySelectorAll('[data-player]').forEach(d => {
     d.addEventListener('click', () => {
@@ -170,44 +190,117 @@ export function initResults() {
 function showImportResultsModal() {
   openModal('Import Match Results', `
     <div class="stack-sm">
-      <label class="mini-h">Paste Results (Tab-Separated)</label>
+      <label class="mini-h">Paste the results sheet</label>
       <p class="hint">
-        Format: Date &rarr; Players (comma-sep) &rarr; Score/Result &rarr; Team A &rarr; Team B<br>
-        Example: 2026-08-22 &rarr; Vijay, Toby, Rojy &rarr; Reds win 7-5 &rarr; Reds &rarr; Blues
+        Copy the rows straight from the tracking sheet, including the header.
+        Expected columns: <strong>Date &nbsp;|&nbsp; Teams &nbsp;|&nbsp; Captains &nbsp;|&nbsp; Score</strong>.<br>
+        Team blocks may use <code>Red:</code> / <code>Blue:</code> labels across several lines,
+        captains may sit in their own column or inline as <code>(C)</code>, and rows reading
+        &ldquo;No game&rdquo; are skipped.
       </p>
-      <textarea id="ir_data" class="import-area" placeholder="2026-08-22	Vijay, Toby, Rojy	Reds win 7-5	Reds	Blues
-2026-08-29	Jithin, Kartik, Rakesh	Blues 9-6	Blues	Reds"></textarea>
+      <textarea id="ir_data" class="import-area" placeholder="Date&#9;Teams&#9;Captains&#9;Score
+6 December 2025&#9;&quot;Red: Hasan Sarath Nihas Tush Shone Jeetu
+
+Blue: Aws Zaki Rakesh Saheer Toby Sikku&quot;&#9;&#9;Reds win"></textarea>
+      <div class="panel panel-warn">
+        <div class="panel-title">This does not touch money</div>
+        <div class="panel-body">
+          Imported games record who played, their team and the captain, so the
+          leaderboards work. Every charge is written at <strong>0</strong> &mdash; no
+          balance moves.
+        </div>
+      </div>
     </div>
-    <button class="btn full-w mt" id="ir_import">Import Results</button>
+    <label class="confirm-check">
+      <input type="checkbox" id="ir_create" checked>
+      <span>Add unknown names as guest players so their games count</span>
+    </label>
+    <div class="btn-row mt">
+      <button class="btn" id="ir_preview">Preview</button>
+      <button class="btn btn-secondary" id="ir_cancel">Cancel</button>
+    </div>
+    <div id="ir_result" class="mt"></div>
   `);
 
-  $('ir_import').addEventListener('click', async () => {
-    const data = $('ir_data').value.trim();
-    if (!data) { toast('Paste data', true); return; }
+  $('ir_cancel').addEventListener('click', closeModal);
+  $('ir_preview').addEventListener('click', () => runImport(false));
+}
 
-    try {
-      const lines = data.split('\n').filter(l => l.trim());
-      let imported = 0;
+// Two-phase: preview first so unmatched names are visible before anything writes.
+async function runImport(commit) {
+  const text = $('ir_data')?.value.trim();
+  if (!text) { toast('Paste the sheet first', true); return; }
+  const out = $('ir_result');
+  out.innerHTML = '<p class="hint">Working&hellip;</p>';
 
-      for (const line of lines) {
-        const parts = line.split('\t').map(p => p.trim());
-        if (parts.length < 3) continue;
+  let r;
+  try {
+    const createMissing = !!$('ir_create')?.checked;
+    r = await api.post('/admin/import/results',
+      { contract_id: contractId, text, commit, create_missing: createMissing });
+  } catch (e) { out.innerHTML = ''; toast(`Import failed: ${e.message}`, true); return; }
 
-        const [dateStr, playersStr, resultStr] = parts;
-        const result = parseResult(resultStr, '');
+  if (commit) {
+    out.innerHTML = '';
+    closeModal();
+    const made = r.summary.players_created;
+    toast(`✓ Imported ${r.summary.games_created} game(s)${made ? `, added ${made} guest player(s)` : ''}`, false);
+    render();
+    return;
+  }
 
-        // Log: would store to backend
-        // For now, just count successful parses
-        if (dateStr && playersStr && result) imported++;
-      }
+  const s = r.summary;
+  const gameRows = r.games.map(g => `
+    <div class="res-row" style="cursor:default;">
+      <span class="res-name">${esc(g.date)} &nbsp; <span class="hint">${esc(g.teams.join(' v '))}</span></span>
+      <span class="res-val">${g.duplicate_of
+        ? '<span class="tag tag-due">already imported</span>'
+        : `${g.matched_count} players${g.captain_count ? ` · ${g.captain_count}C` : ''}`}</span>
+    </div>`).join('');
 
-      toast(`✓ Parsed ${imported} results (backend integration needed for persistence)`, false);
-      closeModal();
-      render();
-    } catch (e) {
-      toast(`Error: ${e.message}`, true);
-    }
-  });
+  out.innerHTML = `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">Preview</h3>
+        <span class="card-sub">${s.games_importable} of ${s.games_found} game(s) ready</span></div>
+      <div class="res-board" style="max-height:230px;overflow-y:auto;">${gameRows || '<p class="hint">Nothing parsed.</p>'}</div>
+    </div>
+
+    ${r.unmatched.length ? `
+      <div class="panel panel-warn mt">
+        <div class="panel-title">${r.unmatched.length} name(s) could not be linked</div>
+        <div class="panel-body">
+          Ticking <em>&ldquo;Add unknown names as guest players&rdquo;</em> will create the
+          roster ones on import; anything marked as a shared account needs splitting
+          by hand first.<br><br>
+          ${r.unmatched.map(u => `
+            <div class="panel-row">
+              <strong>${esc(u.token)}</strong>
+              <span class="hint">${esc(u.reason || 'not on roster')}</span>
+              <span class="hint">&times;${u.count}</span>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+    ${r.skipped.length ? `
+      <div class="panel mt">
+        <div class="panel-title">${r.skipped.length} row(s) skipped</div>
+        <div class="panel-body">
+          ${r.skipped.map(x => `Line ${x.line}: ${esc(x.raw || '(blank)')} &mdash; ${esc(x.reason)}`).join('<br>')}
+        </div>
+      </div>` : ''}
+
+    ${s.games_duplicate ? `
+      <p class="hint mt">${s.games_duplicate} game(s) already exist on this contract for that date and will be skipped.</p>` : ''}
+
+    <div class="btn-row mt">
+      <button class="btn" id="ir_commit" ${s.games_importable ? '' : 'disabled'}>
+        Import ${s.games_importable} game(s)
+      </button>
+      <button class="btn btn-secondary" id="ir_back">Back</button>
+    </div>`;
+
+  $('ir_commit')?.addEventListener('click', () => runImport(true));
+  $('ir_back')?.addEventListener('click', () => { out.innerHTML = ''; });
 }
 
 export function loadResults() {

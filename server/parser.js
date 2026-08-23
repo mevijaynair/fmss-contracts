@@ -42,10 +42,20 @@ function levenshtein(a, b) {
 }
 
 // Build a normalized lookup from player name + aliases.
-function buildIndex(players) {
+export function buildIndex(players) {
   const exact = new Map();
   for (const p of players) {
-    for (const key of [p.name, ...(p.aliases || [])]) {
+    // playersRepo hands back a parsed array, but the column stores JSON text. If a
+    // caller passes a raw DB row, spreading that string yields one key per
+    // CHARACTER, and single-letter keys behave as wildcards in the prefix match
+    // below ("tush" starts with "t") — silently resolving to the wrong player.
+    let aliases = p.aliases || [];
+    if (typeof aliases === 'string') {
+      try { aliases = JSON.parse(aliases); } catch { aliases = []; }
+    }
+    if (!Array.isArray(aliases)) aliases = [];
+
+    for (const key of [p.name, ...aliases]) {
       const n = normalize(key);
       if (n && !exact.has(n)) exact.set(n, p);
     }
@@ -53,7 +63,7 @@ function buildIndex(players) {
   return exact;
 }
 
-function matchToken(token, players, index) {
+export function matchToken(token, players, index) {
   const n = normalize(token);
   if (!n) return null;
   if (index.has(n)) return index.get(n);
