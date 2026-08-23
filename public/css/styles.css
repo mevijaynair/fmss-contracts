@@ -813,6 +813,18 @@ tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 /* Hidden for non-admins; main.js puts role-player on <body>. */
 body.role-player .role-admin-only { display: none !important; }
 
+.form-run { display: inline-flex; gap: 0.2rem; }
+.form-dot { width: 1.15rem; height: 1.15rem; border-radius: 4px; font-size: 0.66rem;
+  font-weight: 800; display: inline-grid; place-items: center; line-height: 1;
+  color: var(--bg-card); background: var(--text-faint); }
+.form-dot.is-w { background: color-mix(in srgb, var(--success) 82%, var(--text-main)); }
+.form-dot.is-d { background: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
+.form-dot.is-l { background: color-mix(in srgb, var(--danger) 78%, var(--text-main)); }
+
+/* Inline activity bar in the trend table. Width comes from --w. */
+.bar { display: block; height: 8px; min-width: 2px; width: var(--w, 0%); border-radius: 4px;
+  background: var(--sport-grad); }
+
 .raw-block { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
   padding: 0.8rem; border-radius: 8px; background: var(--bg-inset);
   border: 1px solid var(--border-color); color: var(--text-muted);

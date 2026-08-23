@@ -9,92 +9,283 @@ let contractId = 'sat';
 // below this many appearances; the control in the Results header changes it.
 let minGames = 6;
 
+
 async function render() {
   try {
-    // /results, not /gameweeks — the gameweeks LIST returns num_players and a
-    // `charged` total but no `charges` array (only /gameweeks/:id has that), so
-    // aggregating off it always produced an empty leaderboard.
     const gws = await api.results(contractId);
-    const stats = aggregate(Array.isArray(gws) ? gws : []);
-    if (!Object.keys(stats).length) { showEmpty(); return; }
+    const all = Array.isArray(gws) ? gws : [];
+    const stats = buildStats(all);
+    if (!all.length) { showEmpty(); return; }
+    showPeriodBar(all, stats);
     showLeaderboards(stats);
     showTable(stats);
-    showTrends(stats);
+    showPartnerships(all);
+    showTrends(all);
   } catch (e) { toast(`Error: ${e.message}`, true); }
 }
+// ---- Period scoping -------------------------------------------------------
+// All-time totals flatten a season into one number. Everything below can be
+// narrowed to a year or a quarter so form can be compared across time.
 
-// Aggregate per player, TEAM-AWARE. The server resolves each game to a winning
-// team and concrete goals; a win is credited only to that side. Previously one
-// result was applied to every player, so the losing team was credited too.
-function aggregate(gws) {
-  const map = {};
-  const blank = (name) => ({
-    name, games: 0, wins: 0, draws: 0, losses: 0, unknown: 0,
-    gf: 0, ga: 0, captainGames: 0, captainWins: 0,
-    charged: 0, paid: 0, defaults: 0,
-    q: { Q1: {}, Q2: {}, Q3: {}, Q4: {} },
-  });
+let period = 'all';               // 'all' | '2026' | '2026-Q1'
 
-  gws.forEach(gw => {
-    const q = ['Q1', 'Q2', 'Q3', 'Q4'][Math.floor(new Date(gw.date).getMonth() / 3)];
-    const res = gw.result || {};
-    const decided = res.known && (res.is_draw || res.winner_team);
+const qOf = (d) => 'Q' + (Math.floor(new Date(d).getMonth() / 3) + 1);
+const yOf = (d) => String(new Date(d).getFullYear());
 
-    (gw.charges || []).forEach(c => {
-      if (!map[c.player_id]) map[c.player_id] = blank(c.player_name);
-      const p = map[c.player_id];
-      p.games++;
-      p.charged += Number(c.amount) || 0;
-      if (c.paid) p.paid += Number(c.amount) || 0; else p.defaults++;
-
-      let outcome = null;
-      if (decided) {
-        outcome = res.is_draw ? 'draw' : (c.team === res.winner_team ? 'win' : 'loss');
-        const w = Number(res.goalsWin) || 0;
-        const l = Number(res.goalsLose) || 0;
-        if (outcome === 'draw') { p.gf += w; p.ga += w; }
-        else if (outcome === 'win') { p.gf += w; p.ga += l; }
-        else { p.gf += l; p.ga += w; }
-      }
-
-      if (outcome === 'win') p.wins++;
-      else if (outcome === 'loss') p.losses++;
-      else if (outcome === 'draw') p.draws++;
-      else p.unknown++;
-
-      if (c.is_captain) {
-        p.captainGames++;
-        if (outcome === 'win') p.captainWins++;
-      }
-
-      if (!p.q[q].games) p.q[q] = { games: 0, wins: 0, charged: 0 };
-      p.q[q].games++;
-      p.q[q].charged += Number(c.amount) || 0;
-      if (outcome === 'win') p.q[q].wins++;
-    });
-  });
-
-  Object.values(map).forEach(p => {
-    // Rates use games with a KNOWN result. Counting a blank score cell as a loss
-    // would punish players for missing data.
-    p.decided = p.wins + p.draws + p.losses;
-    p.winRate = p.decided ? Math.round((p.wins / p.decided) * 100) : null;
-    p.gd = p.gf - p.ga;
-    p.captainWinRate = p.captainGames ? Math.round((p.captainWins / p.captainGames) * 100) : null;
-    p.payRate = p.games ? Math.round((p.games - p.defaults) / p.games * 100) : 0;
-  });
-  return map;
+function inPeriod(date) {
+  if (period === 'all') return true;
+  if (/^\d{4}$/.test(period)) return yOf(date) === period;
+  const [y, q] = period.split('-');
+  return yOf(date) === y && qOf(date) === q;
 }
 
-const pct = (v) => (v === null ? '—' : v + '%');
+/** Every year/quarter the data actually covers, newest first. */
+function periodOptions(gws) {
+  const years = new Set();
+  const quarters = new Set();
+  for (const g of gws) {
+    if (!g.date) continue;
+    years.add(yOf(g.date));
+    quarters.add(`${yOf(g.date)}-${qOf(g.date)}`);
+  }
+  return {
+    years: [...years].sort().reverse(),
+    quarters: [...quarters].sort().reverse(),
+  };
+}
+
+// ---- Outcome resolution ---------------------------------------------------
+// One place decides what a game was for a given player, so every metric agrees.
+
+function outcomeFor(gw, charge) {
+  const res = gw.result || {};
+  if (!res.known || !(res.is_draw || res.winner_team)) return null;
+  if (res.is_draw) return 'draw';
+  if (!charge.team) return null;                 // side unknown — cannot judge
+  return charge.team === res.winner_team ? 'win' : 'loss';
+}
+
+/** Per player: an ordered list of their games, oldest first. */
+function timelines(gws) {
+  const byPlayer = {};
+  const sorted = [...gws].filter(g => inPeriod(g.date))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  for (const gw of sorted) {
+    for (const c of gw.charges || []) {
+      (byPlayer[c.player_id] ??= { name: c.player_name, games: [] }).games.push({
+        date: gw.date,
+        team: c.team,
+        captain: !!c.is_captain,
+        outcome: outcomeFor(gw, c),
+        gwId: gw.id,
+        result: gw.result || {},
+      });
+    }
+  }
+  return byPlayer;
+}
+
+// ---- Streaks and form -----------------------------------------------------
+
+/**
+ * Streaks over games with a KNOWN outcome. Undecided games are skipped rather
+ * than breaking a run — a missing score should not end someone's streak.
+ */
+function streaks(games) {
+  const decided = games.filter(g => g.outcome);
+  let curW = 0, curUnbeaten = 0, bestW = 0, bestUnbeaten = 0, run = 0, runU = 0;
+
+  for (const g of decided) {
+    if (g.outcome === 'win') { run++; runU++; }
+    else if (g.outcome === 'draw') { run = 0; runU++; }
+    else { run = 0; runU = 0; }
+    bestW = Math.max(bestW, run);
+    bestUnbeaten = Math.max(bestUnbeaten, runU);
+  }
+  // Current run = the tail of the list.
+  for (let i = decided.length - 1; i >= 0; i--) {
+    if (decided[i].outcome === 'win') curW++; else break;
+  }
+  for (let i = decided.length - 1; i >= 0; i--) {
+    if (decided[i].outcome === 'loss') break; else curUnbeaten++;
+  }
+  return { currentWin: curW, longestWin: bestW, currentUnbeaten: curUnbeaten, longestUnbeaten: bestUnbeaten };
+}
+
+/** Last five decided results, most recent last. */
+function form(games) {
+  return games.filter(g => g.outcome).slice(-5).map(g => g.outcome[0].toUpperCase());
+}
+
+// ---- Player rollup --------------------------------------------------------
+
+function buildStats(gws) {
+  const tl = timelines(gws);
+  const out = {};
+
+  for (const [id, { name, games }] of Object.entries(tl)) {
+    const s = {
+      id, name, games: games.length,
+      wins: 0, draws: 0, losses: 0, unknown: 0,
+      gf: 0, ga: 0, captainGames: 0, captainWins: 0,
+      first: games[0]?.date || null, last: games[games.length - 1]?.date || null,
+    };
+    for (const g of games) {
+      if (g.captain) s.captainGames++;
+      if (!g.outcome) { s.unknown++; continue; }
+      const w = Number(g.result.goalsWin) || 0;
+      const l = Number(g.result.goalsLose) || 0;
+      if (g.outcome === 'win') { s.wins++; s.gf += w; s.ga += l; if (g.captain) s.captainWins++; }
+      else if (g.outcome === 'loss') { s.losses++; s.gf += l; s.ga += w; }
+      else { s.draws++; s.gf += w; s.ga += w; }
+    }
+    s.decided = s.wins + s.draws + s.losses;
+    s.winRate = s.decided ? Math.round((s.wins / s.decided) * 100) : null;
+    s.gd = s.gf - s.ga;
+    s.gdPerGame = s.decided ? +(s.gd / s.decided).toFixed(2) : null;
+    s.captainWinRate = s.captainGames ? Math.round((s.captainWins / s.captainGames) * 100) : null;
+    Object.assign(s, streaks(games));
+    s.form = form(games);
+    out[id] = s;
+  }
+  return out;
+}
+
+// ---- Partnerships ---------------------------------------------------------
+
+/**
+ * Who wins together. For every pair that shared a team, how often that team won.
+ * Only decided games count, and a floor is applied — two players who happened to
+ * share one winning side are not a great partnership.
+ */
+function partnerships(gws, { minGames = 4 } = {}) {
+  const pair = {};
+  for (const gw of gws) {
+    if (!inPeriod(gw.date)) continue;
+    const res = gw.result || {};
+    if (!res.known || !(res.is_draw || res.winner_team)) continue;
+
+    const byTeam = {};
+    for (const c of gw.charges || []) {
+      if (!c.team) continue;
+      (byTeam[c.team] ??= []).push(c);
+    }
+    for (const [team, mates] of Object.entries(byTeam)) {
+      const won = res.is_draw ? null : team === res.winner_team;
+      for (let i = 0; i < mates.length; i++) {
+        for (let j = i + 1; j < mates.length; j++) {
+          const [a, b] = [mates[i], mates[j]].sort((x, y) => x.player_id.localeCompare(y.player_id));
+          const key = `${a.player_id}|${b.player_id}`;
+          const p = (pair[key] ??= { a: a.player_name, b: b.player_name, games: 0, wins: 0, draws: 0 });
+          p.games++;
+          if (won === true) p.wins++;
+          else if (won === null) p.draws++;
+        }
+      }
+    }
+  }
+  return Object.values(pair)
+    .filter(p => p.games >= minGames)
+    .map(p => ({ ...p, winRate: Math.round((p.wins / p.games) * 100) }))
+    .sort((x, y) => y.winRate - x.winRate || y.games - x.games);
+}
+
+// ---- Club-level trend series ---------------------------------------------
+
+/**
+ * One row per quarter the club actually played: games, how many had a usable
+ * result, goals, and the average winning margin. Ignores the period filter on
+ * purpose — a trend needs the whole history to be a trend.
+ */
+function trendSeries(gws) {
+  const buckets = {};
+  for (const gw of gws) {
+    if (!gw.date) continue;
+    const key = `${yOf(gw.date)}-${qOf(gw.date)}`;
+    const b = (buckets[key] ??= { key, games: 0, decided: 0, goals: 0, margins: [], players: 0, draws: 0 });
+    b.games++;
+    b.players += (gw.charges || []).length;
+    const res = gw.result || {};
+    if (res.known && (res.is_draw || res.winner_team)) {
+      b.decided++;
+      if (res.is_draw) b.draws++;
+      b.goals += (Number(res.goalsWin) || 0) + (Number(res.goalsLose) || 0);
+      if (!res.is_draw) b.margins.push(Number(res.margin) || 0);
+    }
+  }
+  return Object.values(buckets)
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(b => ({
+      ...b,
+      avgPlayers: b.games ? +(b.players / b.games).toFixed(1) : 0,
+      avgGoals: b.decided ? +(b.goals / b.decided).toFixed(1) : null,
+      avgMargin: b.margins.length ? +(b.margins.reduce((s, m) => s + m, 0) / b.margins.length).toFixed(1) : null,
+      drawPct: b.decided ? Math.round((b.draws / b.decided) * 100) : null,
+    }));
+}
+function slot(name) {
+  let el = document.querySelector(`[data-${name}]`);
+  if (!el) {
+    el = document.createElement('div');
+    el.setAttribute(`data-${name}`, '');
+    $('resultsContainer')?.appendChild(el);
+  }
+  return el;
+}
+function showEmpty() {
+  slot('results-lb').innerHTML = `
+    <div class="empty-state">
+      <div class="es-icon">📋</div>
+      <div class="es-title">No games recorded for this contract yet</div>
+      <div class="es-sub">Charge a game from Game Day, or bring in past results with Import.</div>
+      <button class="btn btn-sm" id="emptyImportBtn">📥 Import Results</button>
+    </div>`;
+  ['results-period','results-table','results-pairs','results-trends']
+    .forEach(k => { slot(k).innerHTML = ''; });
+  $('emptyImportBtn')?.addEventListener('click', showImportResultsModal);
+}
+const pct = (v) => (v === null || v === undefined ? '—' : v + '%');
 const signed = (n) => (n > 0 ? '+' + n : String(n));
 
-function showLeaderboards(stats) {
-  const everyone = Object.values(stats);
-  const all = everyone.filter(p => p.games >= minGames);
-  const hidden = everyone.length - all.length;
+// Last-five form as coloured letters, oldest first.
+const formDots = (f) => f.length
+  ? `<span class="form-run">${f.map(r =>
+      `<span class="form-dot is-${r.toLowerCase()}" title="${r}">${r}</span>`).join('')}</span>`
+  : '<span class="hint">—</span>';
 
-  // Rate boards need a floor of decided games, or someone 1-from-1 tops the chart.
+function showPeriodBar(gws, stats) {
+  const { years, quarters } = periodOptions(gws);
+  const btn = (val, label) =>
+    `<button data-period="${val}" class="${period === val ? 'active' : ''}">${label}</button>`;
+  const ranked = Object.values(stats).filter(p => p.games >= minGames).length;
+  const hidden = Object.keys(stats).length - ranked;
+
+  slot('results-period').innerHTML = `
+    <div class="filter-bar" style="grid-template-columns: 1fr auto auto;">
+      <div class="hint">
+        Ranking <strong>${ranked}</strong> player(s) with ${minGames}+ appearance(s)${
+          hidden ? ` &middot; ${hidden} occasional hidden` : ''}
+      </div>
+      <span class="seg" id="resPeriod">
+        ${btn('all', 'All time')}
+        ${years.map(y => btn(y, y)).join('')}
+        ${quarters.slice(0, 4).map(q => btn(q, q.replace('-', ' '))).join('')}
+      </span>
+      <span class="seg" id="resMinGames">
+        ${[1, 3, 6, 10].map(n =>
+          `<button data-min="${n}" class="${n === minGames ? 'active' : ''}">${n === 1 ? 'All' : n + '+'}</button>`).join('')}
+      </span>
+    </div>`;
+
+  slot('results-period').querySelectorAll('#resPeriod button').forEach(b =>
+    b.addEventListener('click', () => { period = b.dataset.period; render(); }));
+  slot('results-period').querySelectorAll('#resMinGames button').forEach(b =>
+    b.addEventListener('click', () => { minGames = Number(b.dataset.min); render(); }));
+}
+
+function showLeaderboards(stats) {
+  const all = Object.values(stats).filter(p => p.games >= minGames);
   const rated = all.filter(p => p.decided >= Math.max(3, Math.floor(minGames / 2)));
   const capts = all.filter(p => p.captainGames >= 2);
 
@@ -108,34 +299,31 @@ function showLeaderboards(stats) {
             <span class="res-name">${i + 1}. ${esc(p.name)}</span>
             <span class="res-val ${tone}">${fmt(p)}</span>
           </div>`).join('')
-        : '<p class="hint">Not enough games yet.</p>'}
+        : '<p class="hint">Not enough games in this period.</p>'}
       </div>
     </div>`;
 
-  const opts = [1, 3, 6, 10];
   slot('results-lb').innerHTML = `
-    <div class="filter-bar" style="grid-template-columns: 1fr auto;">
-      <div class="hint">Ranking <strong>${all.length}</strong> player(s) with ${minGames}+ appearance(s)${
-        hidden ? ` &middot; ${hidden} occasional player(s) hidden` : ''}</div>
-      <span class="seg" id="resMinGames">
-        ${opts.map(n => `<button data-min="${n}" class="${n === minGames ? 'active' : ''}">${n === 1 ? 'All' : n + '+'}</button>`).join('')}
-      </span>
-    </div>
     <div class="auto-grid" style="--col-min: 250px;">
       ${board('🎮 Most Games', 'appearances', '',
         [...all].sort((a, b) => b.games - a.games), p => p.games)}
       ${board('📈 Best Win Rate', 'of games with a result', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
         p => `${pct(p.winRate)} <span class="hint">${p.wins}/${p.decided}</span>`)}
+      ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
+        [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
+        p => `${p.longestWin}${p.currentWin > 1 ? ` <span class="hint">on ${p.currentWin} now</span>` : ''}`)}
+      ${board('🛡️ Longest Unbeaten', 'wins and draws', '',
+        [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
+        p => p.longestUnbeaten)}
       ${board('👑 Best Captain Rate', '2+ games as captain', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainGames - a.captainGames),
         p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainGames}</span>`)}
-      ${board('⚽ Goal Difference', 'across decided games', '',
-        [...rated].sort((a, b) => b.gd - a.gd), p => signed(p.gd))}
+      ${board('⚽ Goal Difference', 'per decided game', '',
+        [...rated].sort((a, b) => b.gdPerGame - a.gdPerGame),
+        p => `${signed(p.gd)} <span class="hint">${signed(p.gdPerGame)}/g</span>`)}
     </div>`;
 
-  slot('results-lb').querySelectorAll('#resMinGames button').forEach(b =>
-    b.addEventListener('click', () => { minGames = Number(b.dataset.min); render(); }));
   slot('results-lb').querySelectorAll('[data-player]').forEach(d =>
     d.addEventListener('click', () => {
       const p = all.find(x => x.name === d.dataset.player);
@@ -143,7 +331,6 @@ function showLeaderboards(stats) {
     }));
 }
 
-// Full standings — the numbers behind the boards.
 let sortKey = 'games';
 let sortDir = -1;
 
@@ -156,17 +343,19 @@ function showTable(stats) {
     ['draws', 'D', p => p.draws],
     ['losses', 'L', p => p.losses],
     ['winRate', 'Win %', p => pct(p.winRate)],
-    ['gf', 'GF', p => p.gf],
-    ['ga', 'GA', p => p.ga],
+    ['form', 'Form', p => formDots(p.form), 'left'],
+    ['currentWin', 'Streak', p => (p.currentWin > 0 ? `W${p.currentWin}` : '—')],
+    ['longestWin', 'Best', p => p.longestWin || '—'],
     ['gd', 'GD', p => signed(p.gd)],
+    ['gdPerGame', 'GD/g', p => (p.gdPerGame === null ? '—' : signed(p.gdPerGame))],
     ['captainGames', 'Capt', p => p.captainGames],
     ['captainWinRate', 'Capt %', p => pct(p.captainWinRate)],
     ['unknown', 'No result', p => p.unknown || '—'],
   ];
   rows.sort((a, b) => {
-    const va = a[sortKey];
-    const vb = b[sortKey];
+    const va = a[sortKey], vb = b[sortKey];
     if (typeof va === 'string') return sortDir * String(va).localeCompare(String(vb));
+    if (Array.isArray(va)) return sortDir * (vb.length - va.length);
     return sortDir * (((vb ?? -1)) - ((va ?? -1)));
   });
 
@@ -181,7 +370,7 @@ function showTable(stats) {
         <tbody>${rows.map(p => `<tr data-player="${esc(p.name)}" style="cursor:pointer">
           ${cols.map(([, , fmt, align]) =>
             `<td class="${align === 'left' ? '' : 'num'}">${fmt(p)}</td>`).join('')}
-        </tr>`).join('') || '<tr><td colspan="12" class="hint">No players.</td></tr>'}</tbody>
+        </tr>`).join('') || '<tr><td colspan="14" class="hint">No players in this period.</td></tr>'}</tbody>
       </table>
     </div>
   </div>`;
@@ -204,76 +393,90 @@ function showPlayerDetail(p) {
   const row = (k, v, cls = '') =>
     `<div class="res-q-row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
   openModal(esc(p.name), `
-    <h4 class="mini-h">Record</h4>
+    <h4 class="mini-h">Record${period === 'all' ? '' : ` · ${esc(period)}`}</h4>
     ${row('🎮 Played', p.games)}
     ${row('✅ Won', `${p.wins} (${pct(p.winRate)} of ${p.decided} decided)`, 'is-win')}
     ${row('🤝 Drawn', p.draws)}
     ${row('❌ Lost', p.losses)}
     ${p.unknown ? row('❔ No result recorded', p.unknown) : ''}
+    <h4 class="mini-h mt">Form &amp; streaks</h4>
+    ${row('Last five', formDots(p.form))}
+    ${row('Current win streak', p.currentWin || '—', 'is-win')}
+    ${row('Longest win streak', p.longestWin || '—', 'is-win')}
+    ${row('Longest unbeaten', p.longestUnbeaten || '—')}
     <h4 class="mini-h mt">Goals</h4>
     ${row('Scored / conceded', `${p.gf} / ${p.ga}`)}
-    ${row('Goal difference', signed(p.gd), p.gd >= 0 ? 'is-win' : '')}
+    ${row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`, p.gd >= 0 ? 'is-win' : '')}
     <h4 class="mini-h mt">Captaincy</h4>
     ${row('👑 Games led', p.captainGames)}
     ${row('Won as captain', `${p.captainWins} (${pct(p.captainWinRate)})`, 'is-win')}
-    <h4 class="mini-h mt">Payments</h4>
-    ${row('Charged', money(p.charged), 'is-money')}
-    ${row('Paid', `${money(p.paid)} (${p.payRate}%)`, 'is-money')}`);
+    <h4 class="mini-h mt">Span</h4>
+    ${row('First game', p.first ? fmtDate(p.first) : '—')}
+    ${row('Latest game', p.last ? fmtDate(p.last) : '—')}`);
 }
 
-function showTrends(stats) {
-  const q = { Q1: { games: 0, wins: 0, rev: 0 }, Q2: { games: 0, wins: 0, rev: 0 },
-              Q3: { games: 0, wins: 0, rev: 0 }, Q4: { games: 0, wins: 0, rev: 0 } };
-  Object.values(stats).forEach(p => {
-    ['Q1', 'Q2', 'Q3', 'Q4'].forEach(s => {
-      if (p.q[s].games) {
-        q[s].games += p.q[s].games;
-        q[s].wins += p.q[s].wins || 0;
-        q[s].rev += p.q[s].charged || 0;
-      }
-    });
-  });
+// Club trend across every quarter played — deliberately ignores the period
+// filter, because a trend needs the full history to be one.
+function showTrends(gws) {
+  const series = trendSeries(gws);
+  if (!series.length) { slot('results-trends').innerHTML = ''; return; }
+  const maxGames = Math.max(...series.map(s => s.games), 1);
 
   slot('results-trends').innerHTML = `<div class="sams-card">
-    <div class="card-header"><h3 class="card-title">📊 Seasonal Comparison</h3>
-      <span class="card-sub">Player-appearances by quarter</span></div>
-    <div class="auto-grid" style="--col-min: 190px;">
-      ${['Q1', 'Q2', 'Q3', 'Q4'].map(s => {
-        const wr = q[s].games > 0 ? Math.round((q[s].wins / q[s].games) * 100) : 0;
-        return `<div class="res-quarter ${q[s].games ? '' : 'is-empty'}">
-          <div class="res-q-label">${s}</div>
-          <div class="res-q-row"><span class="k">🎮 Appearances</span><span class="v">${q[s].games}</span></div>
-          <div class="res-q-row"><span class="k">🏆 Winning ones</span><span class="v is-win">${q[s].wins} (${wr}%)</span></div>
-          <div class="res-q-row is-total"><span class="k">💰 Revenue</span><span class="v is-money">${money(q[s].rev)}</span></div>
-        </div>`;
-      }).join('')}
+    <div class="card-header"><h3 class="card-title">📈 Club Trend by Quarter</h3>
+      <span class="card-sub">Activity, scoring and how close the games were</span></div>
+    <div style="overflow-x:auto">
+      <table class="sams-table">
+        <thead><tr><th>Quarter</th><th class="num">Games</th><th>Activity</th>
+          <th class="num">Avg players</th><th class="num">Avg goals</th>
+          <th class="num">Avg margin</th><th class="num">Draws</th>
+          <th class="num" title="Games with a usable result">Scored</th></tr></thead>
+        <tbody>${series.map(s => `
+          <tr>
+            <td><strong>${esc(s.key.replace('-', ' '))}</strong></td>
+            <td class="num">${s.games}</td>
+            <td><span class="bar" style="--w:${Math.round((s.games / maxGames) * 100)}%"></span></td>
+            <td class="num">${s.avgPlayers}</td>
+            <td class="num">${s.avgGoals ?? '—'}</td>
+            <td class="num">${s.avgMargin ?? '—'}</td>
+            <td class="num">${s.drawPct === null ? '—' : s.drawPct + '%'}</td>
+            <td class="num">${s.decided}/${s.games}</td>
+          </tr>`).join('')}</tbody>
+      </table>
     </div>
+    <p class="hint">Average margin is how one-sided a typical game was — a falling
+      number means closer matches. “Scored” is how many games have a usable result;
+      the rest cannot contribute to any win rate.</p>
   </div>`;
 }
 
-function slot(name) {
-  let el = document.querySelector(`[data-${name}]`);
-  if (!el) {
-    el = document.createElement('div');
-    el.setAttribute(`data-${name}`, '');
-    $('resultsContainer')?.appendChild(el);
-  }
-  return el;
-}
+// Who wins together. Useful for picking balanced sides.
+function showPartnerships(gws) {
+  const pairs = partnerships(gws, { minGames: 4 });
+  if (!pairs.length) { slot('results-pairs').innerHTML = ''; return; }
+  const top = pairs.slice(0, 8);
+  const bottom = pairs.slice(-8).reverse();
 
-function showEmpty() {
-  slot('results-lb').innerHTML = `
-    <div class="empty-state">
-      <div class="es-icon">📋</div>
-      <div class="es-title">No games recorded for this contract yet</div>
-      <div class="es-sub">Charge a game from Game Day, or bring in past results with Import.</div>
-      <button class="btn btn-sm" id="emptyImportBtn">📥 Import Results</button>
+  const list = (rows, tone) => rows.map(p => `
+    <div class="res-row" style="cursor:default">
+      <span class="res-name">${esc(p.a)} + ${esc(p.b)}</span>
+      <span class="res-val ${tone}">${p.winRate}% <span class="hint">${p.wins}/${p.games}</span></span>
+    </div>`).join('');
+
+  slot('results-pairs').innerHTML = `
+    <div class="auto-grid" style="--col-min: 280px;">
+      <div class="sams-card">
+        <div class="card-header"><h3 class="card-title">🤝 Best Partnerships</h3>
+          <span class="card-sub">Same side, 4+ games together</span></div>
+        <div class="res-board">${list(top, 'is-win')}</div>
+      </div>
+      <div class="sams-card">
+        <div class="card-header"><h3 class="card-title">🧊 Struggled Together</h3>
+          <span class="card-sub">Same floor, lowest win rate</span></div>
+        <div class="res-board">${list(bottom, '')}</div>
+      </div>
     </div>`;
-  slot('results-table').innerHTML = '';
-  slot('results-trends').innerHTML = '';
-  $('emptyImportBtn')?.addEventListener('click', showImportResultsModal);
 }
-
 export function initResults() {
   $('importResultsBtn')?.addEventListener('click', showImportResultsModal);
 }
