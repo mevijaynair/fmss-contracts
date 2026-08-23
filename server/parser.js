@@ -73,10 +73,18 @@ export function matchToken(token, players, index) {
       if (Math.abs(key.length - n.length) <= 3) return p;
     }
   }
-  // fuzzy: single-edit typo, only for longer tokens
+  // Fuzzy: a single-edit typo, but ONLY an inserted or dropped character, never a
+  // substitution. Same-length near-misses are usually two different people, not a
+  // misspelling — "Nihal" vs "Nihas" is one substitution apart and they are
+  // separate players, so merging them credited one with the other's games and
+  // meant Nihal never showed up as an unknown name to be added.
+  // Insertions/deletions stay allowed because that is what the real variants look
+  // like: Hasan/Hassan, Jeethu/Jeetu, Nimeesh/Nimesh. Deliberate short forms are
+  // handled by aliases (Roji, Khalid, Sahir), which are matched exactly above.
   if (n.length >= 4) {
     for (const [key, p] of index) {
-      if (Math.abs(key.length - n.length) <= 1 && levenshtein(n, key) <= 1) return p;
+      if (key.length === n.length) continue;              // substitution — too risky
+      if (Math.abs(key.length - n.length) === 1 && levenshtein(n, key) <= 1) return p;
     }
   }
   return null;
