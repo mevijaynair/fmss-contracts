@@ -36,21 +36,48 @@ const COLOURS = ['red', 'blue', 'white', 'black', 'green', 'yellow', 'orange', '
 // attribution. Anything up to a colon is now a label.
 const LABELLED_LINE = /^\s*([^:]{1,40}?)\s*:+\s*:?\s*/;
 
-// Bare label line: no colon, but short and word-like, e.g. "BOMBASTIC" or "BLUE"
-// on its own line with the players beneath it.
-const BARE_LABEL = /^\s*(?:team\s+)?([A-Za-z][A-Za-z0-9 '&-]{1,24})\s*$/;
+// Some rows separate the label with a dash instead: "Red -  Jeetu Hasan …".
+// Restricted to lines whose prefix actually names a colour, because a bare dash
+// is also used mid-list ("Rony (C) - Jeetu Kirk"), where the prefix is a player.
+const DASH_LABEL = new RegExp(`^\\s*((?:team\\s+)?(?:${COLOURS.join('|')})s?)\\s*[-–—]\\s+`, 'i');
+
+// Bare label line: no colon, but a single short word on its own line, e.g.
+// "BOMBASTIC" or "BLUE" with the players beneath it. Must be one word — a line
+// like "FUNny game" is a note, not a label.
+const BARE_LABEL = /^\s*(?:team\s+)?([A-Za-z][A-Za-z0-9'&-]{1,24})\s*$/;
+const isBareLabel = (line) => BARE_LABEL.test(line.trim());
+
+// Colour emoji used as a team marker instead of a word, e.g. "🤍 Nihas (C) …".
+// Without this the line has no label, so its players are absorbed into the
+// previous team — which is how one team ended up with two captains.
+const EMOJI_TEAMS = [
+  [/[🔴❤️❤🟥♥️🍎🌹🚩]/u, 'Red'],
+  [/[🔵💙🟦💎🌊🫐]/u, 'Blue'],
+  [/[🖤⚫🟫]/u, 'Black'],
+  [/[🤍⚪⬜]/u, 'White'],
+  [/[💛🟡]/u, 'Yellow'],
+  [/[💚🟢]/u, 'Green'],
+];
+function emojiTeam(line) {
+  for (const [re, name] of EMOJI_TEAMS) if (re.test(line)) return name;
+  return null;
+}
 
 // Captain markers used instead of "(C)": "C1", "C2", "C3", "Capt1".
 const CAPTAIN_MARKER = /^(?:c|capt|captain)\s*\d+$/i;
 
 /** Normalise a raw label to a team name — canonical colour if it names one. */
 function canonicalTeam(raw) {
-  const s = String(raw).trim().replace(/^team\s+/i, '').trim();
-  const low = s.toLowerCase();
+  const s0 = String(raw).trim();
+  const low0 = s0.toLowerCase();
   // "REDRed", "Reds", "Team Legacy Blue" → pick the colour it mentions.
   for (const c of COLOURS) {
-    if (new RegExp(`(^|[^a-z])${c}`, 'i').test(low)) return c[0].toUpperCase() + c.slice(1);
+    if (new RegExp(`(^|[^a-z])${c}`, 'i').test(low0)) return c[0].toUpperCase() + c.slice(1);
   }
+  // Only drop a leading "Team" when something meaningful survives, otherwise
+  // "Team 1" collapses to the bare name "1".
+  const stripped = s0.replace(/^team\s+/i, '').trim();
+  const s = /[a-z]/i.test(stripped) ? stripped : s0;
   return s.replace(/\s+/g, ' ').slice(0, 24) || 'Team';
 }
 
@@ -156,19 +183,35 @@ export function splitTeamsCell(cell) {
     blocks.push(current);
   };
 
-  for (const rawLine of String(cell || '').split('\n')) {
+  const lines = String(cell || '').split('\n');
+  // A cell sometimes opens with a note rather than players — "FUNny game" above
+  // the team blocks. Treated as players it invents a phantom team and turns the
+  // note into a roster name, so skip anything before the first real label when
+  // the cell has labels at all.
+  const isLabel = (l) => LABELLED_LINE.test(l) || DASH_LABEL.test(l) || isBareLabel(l) || !!emojiTeam(l);
+  const hasLabels = lines.some(l => isLabel(l.trim()));
+  let seenLabel = false;
+
+  for (const rawLine of lines) {
     let line = rawLine.trim();
     if (!line) continue;
 
-    const labelled = line.match(LABELLED_LINE);
+    if (!seenLabel && hasLabels && !isLabel(line)) continue;
+    if (isLabel(line)) seenLabel = true;
+
+    const labelled = line.match(LABELLED_LINE) || line.match(DASH_LABEL);
+    const emoji = emojiTeam(line);
+
     if (labelled) {
       startTeam(labelled[1]);
       line = line.slice(labelled[0].length);
-    } else {
-      // No colon. A short word-like line with no other content is a bare label
-      // ("BOMBASTIC" above its players); anything longer is a list of players.
-      const bare = line.match(BARE_LABEL);
-      if (bare && !/\s/.test(line.trim())) { startTeam(bare[1]); continue; }
+    } else if (emoji) {
+      // A colour emoji leads the line and its players follow.
+      startTeam(emoji);
+      line = line.replace(EMOJI_TEAMS.find(([re]) => re.test(line))[0], ' ');
+    } else if (isBareLabel(line)) {
+      startTeam(line);
+      continue;
     }
 
     if (!current) startTeam('Team 1');
@@ -182,10 +225,16 @@ export function splitTeamsCell(cell) {
       if (!clean) continue;
       const alnum = clean.replace(/[^A-Za-z0-9]/g, '');
 
-      if (CAPTAIN_MARKER.test(alnum)) { captainNext = true; continue; }   // "C1 Vijay"
-      if (/^c$/i.test(alnum) && /^\(?c\)?$/i.test(clean)) {               // "Vijay (c)"
+      // A marker in brackets belongs to the name it follows — "Rony (C1)" means
+      // Rony is captain, not whoever comes next. A bare marker leads its name:
+      // "C1 Vijay".
+      const isMarker = CAPTAIN_MARKER.test(alnum) || /^c$/i.test(alnum);
+      if (isMarker) {
+        const bracketed = /^[(\[]/.test(clean);
         const prev = current.tokens[current.tokens.length - 1];
-        if (prev) prev.isCaptain = true; else captainNext = true;
+        if (bracketed && prev) prev.isCaptain = true;
+        else if (prev && /^c$/i.test(alnum)) prev.isCaptain = true;   // "Vijay c"
+        else captainNext = true;
         continue;
       }
 
