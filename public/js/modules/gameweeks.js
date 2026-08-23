@@ -72,17 +72,104 @@ async function render() {
   });
 }
 
+// Gameweek detail — shows the ORIGINAL pasted text alongside the linked players,
+// so names the importer could not match can be spotted and added by hand.
 async function detail(id) {
   const g = await api.gameweek(id);
-  const charges = (g.charges || []).map(c => `
-    <div class="kv"><span class="k"><span class="team-dot team-${esc(c.team || 'Team 1')}"></span>${esc(c.player_name)}${c.is_captain ? '<span class="capt-badge">C</span>' : ''}</span>
-      <span class="v">${money(c.amount)}</span></div>`).join('');
-  openModal(`${fmtDate(g.date)} · ${esc((store.contracts.find(c=>c.id===g.contract_id)||{}).name||'')}`, `
+  const contract = (store.contracts.find(c => c.id === g.contract_id) || {}).name || '';
+  const charges = g.charges || [];
+  const teams = [...new Set(charges.map(c => c.team).filter(Boolean))];
+  const total = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+
+  // Which names in the raw text have no linked player? Rough, but it is the
+  // whole point of showing the raw text — it points at what to add.
+  const linked = new Set(charges.map(c => String(c.player_name || '').toLowerCase()));
+  const rawWords = (g.teams_raw || '').split(/[\s,:]+/)
+    .map(w => w.replace(/[^\p{L}\p{N}'-]/gu, '').trim())
+    .filter(w => w.length > 2 && !/^(red|blue|white|black|green|yellow|team|vs|game|no|capt)$/i.test(w));
+  const possiblyMissing = [...new Set(rawWords.filter(w =>
+    ![...linked].some(n => n.includes(w.toLowerCase()) || w.toLowerCase().includes(n))))];
+
+  const teamOptions = (sel) => ['', ...teams, 'Red', 'Blue', 'White']
+    .filter((t, i, a) => a.indexOf(t) === i)
+    .map(t => `<option value="${esc(t)}" ${t === sel ? 'selected' : ''}>${esc(t || '—')}</option>`).join('');
+
+  const rows = charges.map(c => `
+    <div class="panel-row" data-charge="${c.id}">
+      <strong style="flex:1">${esc(c.player_name)}</strong>
+      <select class="ch-team" data-charge="${c.id}" style="max-width:110px">${teamOptions(c.team)}</select>
+      <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
+        <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> C
+      </label>
+      <span class="hint" style="min-width:52px;text-align:right">${money(c.amount)}</span>
+      <button class="link-btn" data-remove="${c.id}" title="Remove from this game">✕</button>
+    </div>`).join('');
+
+  const players = (store.players || []).filter(p => !charges.some(c => c.player_id === p.id));
+
+  openModal(`${fmtDate(g.date)} · ${esc(contract)}`, `
     ${g.score ? `<p class="muted"><strong>Result:</strong> ${esc(g.score)}</p>` : ''}
-    ${g.teams_raw ? `<div class="teams-raw mt">${esc(g.teams_raw)}</div>` : ''}
-    <h4 class="mini-h mt">Charges (${g.num_players} players · ${money(g.charges?.reduce((s,c)=>s+c.amount,0)||0)} AED)</h4>
-    ${charges || '<p class="hint">No charges.</p>'}
-    ${!g.historical ? `<button class="btn mt" onclick="window.editGameweekClick('${g.id}')">Edit Game</button>` : ''}`);
+
+    <h4 class="mini-h mt">Original text</h4>
+    <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
+    ${g.captains_raw ? `<p class="hint">Captains column: ${esc(g.captains_raw)}</p>` : ''}
+
+    ${possiblyMissing.length ? `
+      <div class="panel panel-warn mt">
+        <div class="panel-title">${possiblyMissing.length} name(s) in the text with no linked player</div>
+        <div class="panel-body">${possiblyMissing.map(esc).join(' · ')}</div>
+      </div>` : ''}
+
+    <h4 class="mini-h mt">Players (${charges.length}${total ? ` · ${money(total)} AED` : ' · no charges'})</h4>
+    <div id="gwCharges">${rows || '<p class="hint">Nobody linked yet.</p>'}</div>
+
+    <h4 class="mini-h mt">Add a player</h4>
+    <div class="quick-row">
+      <select id="gwAddPlayer" style="flex:1 1 150px">
+        <option value="">Select player…</option>
+        ${players.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+      </select>
+      <select id="gwAddTeam" style="flex:0 1 110px">${teamOptions(teams[0] || '')}</select>
+      <label class="hint" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="gwAddCapt"> Captain</label>
+      <input type="number" id="gwAddAmount" class="qw-amount" value="0" min="0" step="0.5" title="0 records the appearance without charging">
+      <button class="btn btn-sm" id="gwAddBtn">Add</button>
+    </div>
+    <p class="hint">Amount 0 records the appearance without moving any balance.</p>
+
+    ${!g.historical ? `<button class="btn btn-secondary mt" onclick="window.editGameweekClick('${g.id}')">Edit amounts / result</button>` : ''}`);
+
+  const reopen = () => detail(id);
+
+  $('gwAddBtn')?.addEventListener('click', async () => {
+    const pid = $('gwAddPlayer').value;
+    if (!pid) { toast('Pick a player', true); return; }
+    try {
+      await api.addCharge(id, {
+        player_id: pid,
+        team: $('gwAddTeam').value,
+        is_captain: $('gwAddCapt').checked,
+        amount: Number($('gwAddAmount').value) || 0,
+      });
+      toast('Player added ✓'); reopen(); render();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  document.querySelectorAll('[data-remove]').forEach(b =>
+    b.addEventListener('click', async () => {
+      try { await api.removeCharge(id, b.dataset.remove); toast('Removed'); reopen(); render(); }
+      catch (e) { toast(e.message, true); }
+    }));
+
+  const patch = async (chargeId) => {
+    const team = document.querySelector(`.ch-team[data-charge="${chargeId}"]`).value;
+    const capt = document.querySelector(`.ch-capt[data-charge="${chargeId}"]`).checked;
+    try { await api.updateCharge(id, chargeId, { team, is_captain: capt }); toast('Updated'); }
+    catch (e) { toast(e.message, true); }
+  };
+  document.querySelectorAll('.ch-team').forEach(el =>
+    el.addEventListener('change', () => patch(el.dataset.charge)));
+  document.querySelectorAll('.ch-capt').forEach(el =>
+    el.addEventListener('change', () => patch(el.dataset.charge)));
 }
 
 // Edit payment status for players in this gameweek

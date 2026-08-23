@@ -29,6 +29,7 @@ const HTML = path.join(ROOT, 'public/index.html');
 const HOOK_CLASSES = new Set([
   'participant-row', 'participant-check', 'participant-amount', 'participant-contract',
   'player-type-select', 'charged-to-select', 'charge-delta',
+  'ch-team', 'ch-capt',
 ]);
 
 // A line carrying this marker is allowed a raw colour (domain data, e.g. kit colours).

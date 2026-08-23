@@ -806,6 +806,11 @@ tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .panel-row { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
   padding: 0.5rem 0.65rem; border-radius: 8px; background: var(--bg-card);
   border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem; }
+.raw-block { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
+  padding: 0.8rem; border-radius: 8px; background: var(--bg-inset);
+  border: 1px solid var(--border-color); color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.5; }
+
 .panel-scroll { max-height: 220px; overflow-y: auto; margin-top: 0.7rem; }
 
 /* Quick-action row: preset buttons + free-text inputs (kitty Quick Withdraw). */

@@ -22,6 +22,55 @@ export const gameweeksRepo = {
   chargeCount(id) {
     return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ?').get(id).n;
   },
+
+  /**
+   * Add one player to an existing game. Needed after an import, where a name the
+   * sheet used could not be matched to anyone — the raw team text is kept on the
+   * gameweek so the missing people can be filled in by hand afterwards.
+   * `amount` defaults to 0, which records the appearance without touching money.
+   */
+  addCharge(gameweekId, { player_id, team = '', is_captain = false, rate_type = 'manual', amount = 0 }) {
+    const gw = this.get(gameweekId);
+    if (!gw) throw new Error('Gameweek not found');
+    if (!player_id) throw new Error('player_id required');
+
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) throw new Error(`Invalid amount: ${amount}`);
+    // Same rule as create(): one charge per player per game, or they are billed
+    // twice and counted twice in the results.
+    if (gw.charges.some(c => c.player_id === player_id)) {
+      throw new Error('That player is already in this game');
+    }
+
+    ledgersRepo.ensure(player_id, gw.contract_id);
+    db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount)
+                VALUES (?,?,?,?,?,?,?)`)
+      .run(`c_add_${Date.now()}`, gameweekId, player_id, team,
+        is_captain ? 1 : 0, rate_type, amt);
+    db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
+      .run(this.chargeCount(gameweekId), gameweekId);
+    return this.get(gameweekId);
+  },
+
+  removeCharge(gameweekId, chargeId) {
+    const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
+      .get(chargeId, gameweekId);
+    if (!row) throw new Error('Charge not found');
+    db.prepare('DELETE FROM charges WHERE id = ?').run(chargeId);
+    db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
+      .run(this.chargeCount(gameweekId), gameweekId);
+    return this.get(gameweekId);
+  },
+
+  /** Change a player's team or captaincy without touching the amount. */
+  updateCharge(gameweekId, chargeId, { team, is_captain }) {
+    const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
+      .get(chargeId, gameweekId);
+    if (!row) throw new Error('Charge not found');
+    db.prepare('UPDATE charges SET team = ?, is_captain = ? WHERE id = ?')
+      .run(team ?? row.team, is_captain === undefined ? row.is_captain : (is_captain ? 1 : 0), chargeId);
+    return this.get(gameweekId);
+  },
   get(id) {
     const g = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(id);
     if (!g) return null;

@@ -345,6 +345,7 @@ export function parseResultsSheet(text, players) {
       matched_count: rowsOut.length,
       captain_count: rowsOut.filter(r => r.is_captain).length,
       teams_raw: teamsRaw.trim(),
+      captains_raw: String(captainsRaw || '').trim(),
     });
   });
 

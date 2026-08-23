@@ -207,6 +207,22 @@ r.post('/gameweeks', wrap((req) => {
 }));
 r.delete('/gameweeks/:id', wrap((req) => { requireAdmin(req); gameweeksRepo.remove(req.params.id); return { ok: true }; }));
 
+// ---- per-player edits on an existing game ----
+// After an import, names the sheet used may not have matched anyone. The raw
+// team text is kept on the gameweek so the gaps can be filled in here.
+r.post('/gameweeks/:id/charges', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.addCharge(req.params.id, req.body || {});
+}));
+r.put('/gameweeks/:id/charges/:chargeId', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.updateCharge(req.params.id, req.params.chargeId, req.body || {});
+}));
+r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.removeCharge(req.params.id, req.params.chargeId);
+}));
+
 // ---- gameweek edit with impact preview & audit ----
 r.get('/gameweeks/:id/impact', wrap((req) => {
   const { chargeEdits } = req.query;
@@ -367,6 +383,7 @@ r.post('/admin/import/results', wrap((req) => {
       date: g.date,
       score: g.score_text,
       teams_raw: g.teams_raw,
+      captains_raw: g.captains_raw || '',
       comments: 'Imported from results sheet',
       cost_per_gw: 0,
       game_cost: 0,
