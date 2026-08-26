@@ -5,11 +5,17 @@
   },
   "contracts": [
     {
-      "id": "mon_thu",
+      "id": "monthu",
       "name": "Mon/Thu",
       "venue": "O365",
-      "cost_per_gw": 0,
-      "rates": {},
+      "cost_per_gw": 275,
+      "rates": {
+        "contracted_10": 30,
+        "contracted_12": 27,
+        "captain_10": 25,
+        "captain_12": 20,
+        "noncontract": 35
+      },
       "tournament_rates": {},
       "sort": 1
     },
@@ -17,109 +23,556 @@
       "id": "sat",
       "name": "Saturdays",
       "venue": "Wasl Koora Dome",
-      "cost_per_gw": 0,
-      "rates": {},
+      "cost_per_gw": 292.5,
+      "rates": {
+        "contracted_10": 35,
+        "contracted_12": 27,
+        "captain_10": 25,
+        "captain_12": 20,
+        "noncontract": 35
+      },
       "tournament_rates": {},
       "sort": 2
     }
   ],
   "players": [
-    { "id": "toby", "name": "Toby", "aliases": [] },
-    { "id": "rakesh", "name": "Rakesh", "aliases": [] },
-    { "id": "jeetu", "name": "Jeetu", "aliases": [] },
-    { "id": "rojy", "name": "Rojy", "aliases": [] },
-    { "id": "nihas", "name": "Nihas", "aliases": [] },
-    { "id": "bibbin", "name": "Bibbin", "aliases": [] },
-    { "id": "tushar", "name": "Tushar", "aliases": [] },
-    { "id": "sarath", "name": "Sarath", "aliases": [] },
-    { "id": "shone", "name": "Shone", "aliases": [] },
-    { "id": "hasan", "name": "Hasan", "aliases": [] },
-    { "id": "saleel", "name": "Saleel", "aliases": [] },
-    { "id": "rony", "name": "Rony", "aliases": [] },
-    { "id": "aws_ali", "name": "AWS + Ali", "aliases": [], "balance_group_id": "aws_group" },
-    { "id": "nimesh", "name": "Nimesh", "aliases": [] },
-    { "id": "joe", "name": "Joe", "aliases": [] },
-    { "id": "abhi", "name": "Abhi", "aliases": [] },
-    { "id": "saheer", "name": "Saheer", "aliases": [] },
-    { "id": "hari", "name": "Hari", "aliases": [] },
-    { "id": "aws", "name": "AWS", "aliases": [], "balance_group_id": "aws_group" },
-    { "id": "praveen", "name": "Praveen", "aliases": [] },
-    { "id": "jaison", "name": "Jaison", "aliases": [] },
-    { "id": "arjun", "name": "Arjun", "aliases": [] },
-    { "id": "neel", "name": "Neel", "aliases": [] },
-    { "id": "vinod", "name": "Vinod", "aliases": [] },
-    { "id": "vineet", "name": "Vineet", "aliases": [] },
-    { "id": "charles", "name": "Charles", "aliases": [] },
-    { "id": "jules", "name": "Jules", "aliases": [] },
-    { "id": "khaled", "name": "Khaled", "aliases": [] },
-    { "id": "jithin", "name": "Jithin", "aliases": [] },
-    { "id": "ashik", "name": "Ashik", "aliases": [] },
-    { "id": "ulli", "name": "Ulli", "aliases": [] },
-    { "id": "nivin", "name": "Nivin", "aliases": [] }
+    {
+      "id": "toby",
+      "name": "Toby",
+      "aliases": []
+    },
+    {
+      "id": "rakesh",
+      "name": "Rakesh",
+      "aliases": []
+    },
+    {
+      "id": "jeetu",
+      "name": "Jeetu",
+      "aliases": []
+    },
+    {
+      "id": "rojy",
+      "name": "Rojy",
+      "aliases": []
+    },
+    {
+      "id": "nihas",
+      "name": "Nihas",
+      "aliases": []
+    },
+    {
+      "id": "bibbin",
+      "name": "Bibbin",
+      "aliases": []
+    },
+    {
+      "id": "tushar",
+      "name": "Tushar",
+      "aliases": []
+    },
+    {
+      "id": "sarath",
+      "name": "Sarath",
+      "aliases": []
+    },
+    {
+      "id": "shone",
+      "name": "Shone",
+      "aliases": []
+    },
+    {
+      "id": "hasan",
+      "name": "Hasan",
+      "aliases": []
+    },
+    {
+      "id": "saleel",
+      "name": "Saleel",
+      "aliases": []
+    },
+    {
+      "id": "rony",
+      "name": "Rony",
+      "aliases": []
+    },
+    {
+      "id": "aws_ali",
+      "name": "AWS + Ali",
+      "aliases": [],
+      "balance_group_id": "aws_group"
+    },
+    {
+      "id": "nimesh",
+      "name": "Nimesh",
+      "aliases": []
+    },
+    {
+      "id": "joe",
+      "name": "Joe",
+      "aliases": []
+    },
+    {
+      "id": "abhi",
+      "name": "Abhi",
+      "aliases": []
+    },
+    {
+      "id": "saheer",
+      "name": "Saheer",
+      "aliases": []
+    },
+    {
+      "id": "hari",
+      "name": "Hari",
+      "aliases": []
+    },
+    {
+      "id": "aws",
+      "name": "AWS",
+      "aliases": [],
+      "balance_group_id": "aws_group"
+    },
+    {
+      "id": "praveen",
+      "name": "Praveen",
+      "aliases": []
+    },
+    {
+      "id": "jaison",
+      "name": "Jaison",
+      "aliases": []
+    },
+    {
+      "id": "arjun",
+      "name": "Arjun",
+      "aliases": []
+    },
+    {
+      "id": "neel",
+      "name": "Neel",
+      "aliases": []
+    },
+    {
+      "id": "vinod",
+      "name": "Vinod",
+      "aliases": []
+    },
+    {
+      "id": "vineet",
+      "name": "Vineet",
+      "aliases": []
+    },
+    {
+      "id": "charles",
+      "name": "Charles",
+      "aliases": []
+    },
+    {
+      "id": "jules",
+      "name": "Jules",
+      "aliases": []
+    },
+    {
+      "id": "khaled",
+      "name": "Khaled",
+      "aliases": []
+    },
+    {
+      "id": "jithin",
+      "name": "Jithin",
+      "aliases": []
+    },
+    {
+      "id": "ashik",
+      "name": "Ashik",
+      "aliases": []
+    },
+    {
+      "id": "ulli",
+      "name": "Ulli",
+      "aliases": []
+    },
+    {
+      "id": "nivin",
+      "name": "Nivin",
+      "aliases": []
+    }
   ],
   "ledgers": [
-    { "player_id": "toby", "contract_id": "sat", "opening_balance": -700, "status": "" },
-    { "player_id": "rakesh", "contract_id": "sat", "opening_balance": -129, "status": "" },
-    { "player_id": "jeetu", "contract_id": "sat", "opening_balance": -241, "status": "" },
-    { "player_id": "rojy", "contract_id": "sat", "opening_balance": 127, "status": "" },
-    { "player_id": "nihas", "contract_id": "sat", "opening_balance": -95, "status": "" },
-    { "player_id": "bibbin", "contract_id": "sat", "opening_balance": 8, "status": "" },
-    { "player_id": "tushar", "contract_id": "sat", "opening_balance": 13, "status": "" },
-    { "player_id": "sarath", "contract_id": "sat", "opening_balance": 8, "status": "" },
-    { "player_id": "shone", "contract_id": "sat", "opening_balance": 143, "status": "" },
-    { "player_id": "hasan", "contract_id": "sat", "opening_balance": 170, "status": "" },
-    { "player_id": "saleel", "contract_id": "sat", "opening_balance": -137, "status": "" },
-    { "player_id": "rony", "contract_id": "sat", "opening_balance": 665, "status": "" },
-    { "player_id": "aws_ali", "contract_id": "sat", "opening_balance": -449, "status": "" },
-    { "player_id": "nimesh", "contract_id": "sat", "opening_balance": -74, "status": "" },
-    { "player_id": "joe", "contract_id": "sat", "opening_balance": 223, "status": "" },
-    { "player_id": "abhi", "contract_id": "sat", "opening_balance": 154, "status": "" },
-    { "player_id": "saheer", "contract_id": "sat", "opening_balance": -130, "status": "" },
-    { "player_id": "abhi", "contract_id": "mon_thu", "opening_balance": 117, "status": "" },
-    { "player_id": "rojy", "contract_id": "mon_thu", "opening_balance": 293, "status": "" },
-    { "player_id": "hari", "contract_id": "mon_thu", "opening_balance": 126, "status": "" },
-    { "player_id": "aws", "contract_id": "mon_thu", "opening_balance": 54, "status": "" },
-    { "player_id": "praveen", "contract_id": "mon_thu", "opening_balance": 382, "status": "" },
-    { "player_id": "shone", "contract_id": "mon_thu", "opening_balance": 571, "status": "" },
-    { "player_id": "jeetu", "contract_id": "mon_thu", "opening_balance": 77, "status": "" },
-    { "player_id": "joe", "contract_id": "mon_thu", "opening_balance": 442, "status": "" },
-    { "player_id": "toby", "contract_id": "mon_thu", "opening_balance": 429, "status": "" },
-    { "player_id": "nihas", "contract_id": "mon_thu", "opening_balance": 50, "status": "" },
-    { "player_id": "jaison", "contract_id": "mon_thu", "opening_balance": 207, "status": "" },
-    { "player_id": "arjun", "contract_id": "mon_thu", "opening_balance": 149, "status": "" },
-    { "player_id": "neel", "contract_id": "mon_thu", "opening_balance": 272, "status": "" },
-    { "player_id": "vinod", "contract_id": "mon_thu", "opening_balance": -291, "status": "" },
-    { "player_id": "rony", "contract_id": "mon_thu", "opening_balance": 716, "status": "" },
-    { "player_id": "vineet", "contract_id": "mon_thu", "opening_balance": 250, "status": "" },
-    { "player_id": "saleel", "contract_id": "mon_thu", "opening_balance": -114, "status": "" },
-    { "player_id": "nimesh", "contract_id": "mon_thu", "opening_balance": 258, "status": "" },
-    { "player_id": "charles", "contract_id": "mon_thu", "opening_balance": 34, "status": "" },
-    { "player_id": "bibbin", "contract_id": "mon_thu", "opening_balance": 85, "status": "" },
-    { "player_id": "tushar", "contract_id": "mon_thu", "opening_balance": 153, "status": "" },
-    { "player_id": "jules", "contract_id": "mon_thu", "opening_balance": 87, "status": "" },
-    { "player_id": "sarath", "contract_id": "mon_thu", "opening_balance": 150, "status": "" },
-    { "player_id": "khaled", "contract_id": "mon_thu", "opening_balance": 248, "status": "" }
+    {
+      "player_id": "toby",
+      "contract_id": "sat",
+      "opening_balance": -700,
+      "status": ""
+    },
+    {
+      "player_id": "rakesh",
+      "contract_id": "sat",
+      "opening_balance": -129,
+      "status": ""
+    },
+    {
+      "player_id": "jeetu",
+      "contract_id": "sat",
+      "opening_balance": -241,
+      "status": ""
+    },
+    {
+      "player_id": "rojy",
+      "contract_id": "sat",
+      "opening_balance": 127,
+      "status": ""
+    },
+    {
+      "player_id": "nihas",
+      "contract_id": "sat",
+      "opening_balance": -95,
+      "status": ""
+    },
+    {
+      "player_id": "bibbin",
+      "contract_id": "sat",
+      "opening_balance": 8,
+      "status": ""
+    },
+    {
+      "player_id": "tushar",
+      "contract_id": "sat",
+      "opening_balance": 13,
+      "status": ""
+    },
+    {
+      "player_id": "sarath",
+      "contract_id": "sat",
+      "opening_balance": 8,
+      "status": ""
+    },
+    {
+      "player_id": "shone",
+      "contract_id": "sat",
+      "opening_balance": 143,
+      "status": ""
+    },
+    {
+      "player_id": "hasan",
+      "contract_id": "sat",
+      "opening_balance": 170,
+      "status": ""
+    },
+    {
+      "player_id": "saleel",
+      "contract_id": "sat",
+      "opening_balance": -137,
+      "status": ""
+    },
+    {
+      "player_id": "rony",
+      "contract_id": "sat",
+      "opening_balance": 665,
+      "status": ""
+    },
+    {
+      "player_id": "aws_ali",
+      "contract_id": "sat",
+      "opening_balance": -449,
+      "status": ""
+    },
+    {
+      "player_id": "nimesh",
+      "contract_id": "sat",
+      "opening_balance": -74,
+      "status": ""
+    },
+    {
+      "player_id": "joe",
+      "contract_id": "sat",
+      "opening_balance": 223,
+      "status": ""
+    },
+    {
+      "player_id": "abhi",
+      "contract_id": "sat",
+      "opening_balance": 154,
+      "status": ""
+    },
+    {
+      "player_id": "saheer",
+      "contract_id": "sat",
+      "opening_balance": -130,
+      "status": ""
+    },
+    {
+      "player_id": "abhi",
+      "contract_id": "monthu",
+      "opening_balance": 117,
+      "status": ""
+    },
+    {
+      "player_id": "rojy",
+      "contract_id": "monthu",
+      "opening_balance": 293,
+      "status": ""
+    },
+    {
+      "player_id": "hari",
+      "contract_id": "monthu",
+      "opening_balance": 126,
+      "status": ""
+    },
+    {
+      "player_id": "aws",
+      "contract_id": "monthu",
+      "opening_balance": 54,
+      "status": ""
+    },
+    {
+      "player_id": "praveen",
+      "contract_id": "monthu",
+      "opening_balance": 382,
+      "status": ""
+    },
+    {
+      "player_id": "shone",
+      "contract_id": "monthu",
+      "opening_balance": 571,
+      "status": ""
+    },
+    {
+      "player_id": "jeetu",
+      "contract_id": "monthu",
+      "opening_balance": 77,
+      "status": ""
+    },
+    {
+      "player_id": "joe",
+      "contract_id": "monthu",
+      "opening_balance": 442,
+      "status": ""
+    },
+    {
+      "player_id": "toby",
+      "contract_id": "monthu",
+      "opening_balance": 429,
+      "status": ""
+    },
+    {
+      "player_id": "nihas",
+      "contract_id": "monthu",
+      "opening_balance": 50,
+      "status": ""
+    },
+    {
+      "player_id": "jaison",
+      "contract_id": "monthu",
+      "opening_balance": 207,
+      "status": ""
+    },
+    {
+      "player_id": "arjun",
+      "contract_id": "monthu",
+      "opening_balance": 149,
+      "status": ""
+    },
+    {
+      "player_id": "neel",
+      "contract_id": "monthu",
+      "opening_balance": 272,
+      "status": ""
+    },
+    {
+      "player_id": "vinod",
+      "contract_id": "monthu",
+      "opening_balance": -291,
+      "status": ""
+    },
+    {
+      "player_id": "rony",
+      "contract_id": "monthu",
+      "opening_balance": 716,
+      "status": ""
+    },
+    {
+      "player_id": "vineet",
+      "contract_id": "monthu",
+      "opening_balance": 250,
+      "status": ""
+    },
+    {
+      "player_id": "saleel",
+      "contract_id": "monthu",
+      "opening_balance": -114,
+      "status": ""
+    },
+    {
+      "player_id": "nimesh",
+      "contract_id": "monthu",
+      "opening_balance": 258,
+      "status": ""
+    },
+    {
+      "player_id": "charles",
+      "contract_id": "monthu",
+      "opening_balance": 34,
+      "status": ""
+    },
+    {
+      "player_id": "bibbin",
+      "contract_id": "monthu",
+      "opening_balance": 85,
+      "status": ""
+    },
+    {
+      "player_id": "tushar",
+      "contract_id": "monthu",
+      "opening_balance": 153,
+      "status": ""
+    },
+    {
+      "player_id": "jules",
+      "contract_id": "monthu",
+      "opening_balance": 87,
+      "status": ""
+    },
+    {
+      "player_id": "sarath",
+      "contract_id": "monthu",
+      "opening_balance": 150,
+      "status": ""
+    },
+    {
+      "player_id": "khaled",
+      "contract_id": "monthu",
+      "opening_balance": 248,
+      "status": ""
+    }
   ],
   "gameweeks": [],
   "charges": [],
   "contributions": [
-    { "player_id": "rakesh", "contract_id": "sat", "amount": 200, "date": "2026-01-15", "comments": "cash", "historical": 1 },
-    { "player_id": "praveen", "contract_id": "sat", "amount": -114, "date": "2026-01-20", "comments": "refund", "historical": 1 },
-    { "player_id": "jeetu", "contract_id": "mon_thu", "amount": 300, "date": "2026-02-01", "comments": "transfer", "historical": 1 },
-    { "player_id": "aws_ali", "contract_id": "sat", "amount": 350, "date": "2026-02-05", "comments": "split: 250 sat, 100 mon_thu", "historical": 1 },
-    { "player_id": "aws_ali", "contract_id": "mon_thu", "amount": 100, "date": "2026-02-05", "comments": "split: 250 sat, 100 mon_thu", "historical": 1 },
-    { "player_id": "toby", "contract_id": "sat", "amount": 150, "date": "2026-02-10", "comments": "cash", "historical": 1 },
-    { "player_id": "shone", "contract_id": "sat", "amount": 200, "date": "2026-02-15", "comments": "transfer", "historical": 1 },
-    { "player_id": "joe", "contract_id": "mon_thu", "amount": 250, "date": "2026-02-20", "comments": "cash", "historical": 1 },
-    { "player_id": "rony", "contract_id": "sat", "amount": -50, "date": "2026-03-01", "comments": "refund", "historical": 1 },
-    { "player_id": "nimesh", "contract_id": "mon_thu", "amount": 300, "date": "2026-03-05", "comments": "cash", "historical": 1 }
+    {
+      "player_id": "rakesh",
+      "contract_id": "sat",
+      "amount": 200,
+      "date": "2026-01-15",
+      "comments": "cash",
+      "historical": 1
+    },
+    {
+      "player_id": "praveen",
+      "contract_id": "sat",
+      "amount": -114,
+      "date": "2026-01-20",
+      "comments": "refund",
+      "historical": 1
+    },
+    {
+      "player_id": "jeetu",
+      "contract_id": "monthu",
+      "amount": 300,
+      "date": "2026-02-01",
+      "comments": "transfer",
+      "historical": 1
+    },
+    {
+      "player_id": "aws_ali",
+      "contract_id": "sat",
+      "amount": 350,
+      "date": "2026-02-05",
+      "comments": "split: 250 sat, 100 mon_thu",
+      "historical": 1
+    },
+    {
+      "player_id": "aws_ali",
+      "contract_id": "monthu",
+      "amount": 100,
+      "date": "2026-02-05",
+      "comments": "split: 250 sat, 100 mon_thu",
+      "historical": 1
+    },
+    {
+      "player_id": "toby",
+      "contract_id": "sat",
+      "amount": 150,
+      "date": "2026-02-10",
+      "comments": "cash",
+      "historical": 1
+    },
+    {
+      "player_id": "shone",
+      "contract_id": "sat",
+      "amount": 200,
+      "date": "2026-02-15",
+      "comments": "transfer",
+      "historical": 1
+    },
+    {
+      "player_id": "joe",
+      "contract_id": "monthu",
+      "amount": 250,
+      "date": "2026-02-20",
+      "comments": "cash",
+      "historical": 1
+    },
+    {
+      "player_id": "rony",
+      "contract_id": "sat",
+      "amount": -50,
+      "date": "2026-03-01",
+      "comments": "refund",
+      "historical": 1
+    },
+    {
+      "player_id": "nimesh",
+      "contract_id": "monthu",
+      "amount": 300,
+      "date": "2026-03-05",
+      "comments": "cash",
+      "historical": 1
+    }
   ],
   "kitty": [
-    { "kind": "income", "label": "Old sheet", "amount": 2734, "date": "2026-01-01", "historical": 1 },
-    { "kind": "income", "label": "Jersey Income 2025", "amount": 1078, "date": "2026-01-15", "historical": 1 },
-    { "kind": "income", "label": "Membership 2026", "amount": 456, "date": "2026-02-01", "historical": 1 },
-    { "kind": "expense", "label": "Pitch rental", "amount": -800, "date": "2026-01-10", "historical": 1 },
-    { "kind": "expense", "label": "Equipment", "amount": -250, "date": "2026-02-15", "historical": 1 },
-    { "kind": "expense", "label": "Other", "amount": -387, "date": "2026-03-01", "historical": 1 }
+    {
+      "kind": "income",
+      "label": "Old sheet",
+      "amount": 2734,
+      "date": "2026-01-01",
+      "historical": 1
+    },
+    {
+      "kind": "income",
+      "label": "Jersey Income 2025",
+      "amount": 1078,
+      "date": "2026-01-15",
+      "historical": 1
+    },
+    {
+      "kind": "income",
+      "label": "Membership 2026",
+      "amount": 456,
+      "date": "2026-02-01",
+      "historical": 1
+    },
+    {
+      "kind": "expense",
+      "label": "Pitch rental",
+      "amount": -800,
+      "date": "2026-01-10",
+      "historical": 1
+    },
+    {
+      "kind": "expense",
+      "label": "Equipment",
+      "amount": -250,
+      "date": "2026-02-15",
+      "historical": 1
+    },
+    {
+      "kind": "expense",
+      "label": "Other",
+      "amount": -387,
+      "date": "2026-03-01",
+      "historical": 1
+    }
   ]
 }

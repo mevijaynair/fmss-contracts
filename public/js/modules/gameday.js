@@ -260,6 +260,75 @@ function recalcTotal() {
   $('gdVsCost').textContent = cost
     ? `pitch cost ${money(cost)} · ${diff >= 0 ? 'surplus' : 'short'} ${money(Math.abs(diff))}`
     : '';
+
+  showRateWarning(meta, tot);
+  recomputeKitty();
+}
+
+// A contract with no rate card charges everyone 0 and says nothing, which is
+// indistinguishable from a deliberately free game. Say it plainly and disable the
+// confirm, rather than letting a worthless game be written.
+function showRateWarning(meta, total) {
+  let el = document.querySelector('[data-gd-ratewarn]');
+  if (!el) {
+    el = document.createElement('div');
+    el.setAttribute('data-gd-ratewarn', '');
+    $('gdTable').parentElement.insertBefore(el, $('gdTable'));
+  }
+  const noRates = meta?.rates_missing;
+  const zero = total === 0 && rows.length > 0;
+  const confirmBtn = $('gdConfirm');
+
+  if (!noRates && !zero) {
+    el.innerHTML = '';
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.title = ''; }
+    return;
+  }
+  el.innerHTML = `
+    <div class="panel panel-danger">
+      <div class="panel-title">${noRates
+        ? 'This contract has no rate card'
+        : 'Every charge on this game is 0'}</div>
+      <div class="panel-body">
+        ${noRates
+          ? 'No per-player rates are configured, so every player is being charged 0.'
+          : 'The rate card may be incomplete, or the amounts were cleared by hand.'}
+        Set them under <strong>Settings &rarr; Contract Settings &amp; Rate Cards</strong>,
+        then parse again. Committing now would record a game worth nothing and move
+        no balances.
+      </div>
+    </div>`;
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.title = 'Set the contract rates first';
+  }
+}
+
+// Kitty earned is the game's actual profit: what the players were charged, less
+// the pitch and water costs. It was a free-text box that defaulted to 0, so the
+// figure only ever reflected what someone remembered to type. Editing it still
+// works — a manual value is kept and marked as an override.
+function recomputeKitty() {
+  const el = $('gdKittyEarned');
+  if (!el) return;
+  if (el.dataset.override === '1') return;      // user typed their own figure
+
+  const charged = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const c = store.contracts.find(x => x.id === contractId);
+  const pitch = Number(c?.cost_per_gw) || 0;
+  const water = Number($('gdGameCost')?.value) || 0;
+  const profit = Math.round((charged - pitch - water) * 100) / 100;
+
+  el.value = profit;
+  const note = document.querySelector('[data-gd-kittynote]');
+  if (note) {
+    note.innerHTML = `charged ${money(charged)} &minus; pitch ${money(pitch)}
+      &minus; water ${money(water)} = <strong>${money(profit)}</strong>
+      <button type="button" class="link-btn" id="gdKittyReset">reset</button>`;
+    $('gdKittyReset')?.addEventListener('click', () => {
+      el.dataset.override = '0'; recomputeKitty();
+    });
+  }
 }
 
 async function doParse() {
@@ -332,6 +401,12 @@ async function doConfirm() {
     outside_cost: r.outside_cost,
     introduced_by: r.introduced_by,
     outside_handling: r.outside_handling || 'relationship',  // default to relationship
+    // Who actually settles this charge. Usually the player, but an outside guest
+    // is billed to the contracted player who brought them.
+    charged_to: r.charged_to || r.player_id,
+    // Payments often arrive after the game is entered, so a charge starts unpaid
+    // and is settled later from Game History.
+    paid: r.paid ? 1 : 0,
   }));
 
   // Unmatched players have no id — confirm whether to create them.
@@ -474,6 +549,13 @@ export function initGameday() {
   }
 
   $('gdParse').addEventListener('click', doParse);
+  // Typing in the kitty box means "I know better" — stop recomputing over it.
+  $('gdKittyEarned')?.addEventListener('input', (e) => {
+    e.target.dataset.override = '1';
+  });
+  // The water cost feeds the profit, so a change to it should flow through.
+  $('gdGameCost')?.addEventListener('input', () => recomputeKitty());
+
   $('gdConfirm').addEventListener('click', doConfirm);
   $('gdClear').addEventListener('click', clearForm);
 }

@@ -171,7 +171,15 @@ async function detail(id) {
 
   const rows = charges.map(c => `
     <div class="panel-row" data-charge="${c.id}">
-      <strong style="flex:1">${esc(c.player_name)}</strong>
+      <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap"
+             title="${c.paid ? 'Paid' + (c.paid_method ? ' by ' + esc(c.paid_method) : '') : 'Not yet paid'}">
+        <input type="checkbox" class="ch-paid" data-charge="${c.id}" ${c.paid ? 'checked' : ''}>
+        ${c.paid ? 'paid' : 'owes'}
+      </label>
+      <strong style="flex:1">${esc(c.player_name)}${
+        c.charged_to && c.charged_to !== c.player_id
+          ? ` <span class="hint">→ billed to ${esc((store.players.find(p => p.id === c.charged_to) || {}).name || c.charged_to)}</span>`
+          : ''}</strong>
       <select class="ch-team" data-charge="${c.id}" style="max-width:110px">${teamOptions(c.team)}</select>
       <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
         <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> C
@@ -241,6 +249,15 @@ async function detail(id) {
     try { await api.updateCharge(id, chargeId, { team, is_captain: capt }); toast('Updated'); }
     catch (e) { toast(e.message, true); }
   };
+  document.querySelectorAll('.ch-paid').forEach(el =>
+    el.addEventListener('change', async () => {
+      try {
+        await api.setChargePaid(id, el.dataset.charge, el.checked, el.checked ? 'cash' : null);
+        toast(el.checked ? 'Marked paid' : 'Marked unpaid');
+        reopen(); render();
+      } catch (e) { toast(e.message, true); el.checked = !el.checked; }
+    }));
+
   document.querySelectorAll('.ch-team').forEach(el =>
     el.addEventListener('change', () => patch(el.dataset.charge)));
   document.querySelectorAll('.ch-capt').forEach(el =>

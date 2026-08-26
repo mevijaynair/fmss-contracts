@@ -246,6 +246,13 @@ r.put('/gameweeks/:id/charges/:chargeId', wrap((req) => {
   requireAdmin(req);
   return gameweeksRepo.updateCharge(req.params.id, req.params.chargeId, req.body || {});
 }));
+r.put('/gameweeks/:id/charges/:chargeId/paid', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.setChargePaid(req.params.id, req.params.chargeId, {
+    paid: req.body?.paid !== false,
+    method: req.body?.method || null,
+  });
+}));
 r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {
   requireAdmin(req);
   return gameweeksRepo.removeCharge(req.params.id, req.params.chargeId);

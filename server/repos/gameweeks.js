@@ -52,6 +52,19 @@ export const gameweeksRepo = {
     return this.get(gameweekId);
   },
 
+  /**
+   * Mark a charge settled (or unsettle it). Payments routinely arrive after the
+   * game is entered, so a charge starts unpaid and is closed off here.
+   */
+  setChargePaid(gameweekId, chargeId, { paid = true, method = null } = {}) {
+    const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
+      .get(chargeId, gameweekId);
+    if (!row) throw new Error('Charge not found');
+    db.prepare('UPDATE charges SET paid = ?, paid_at = ?, paid_method = ? WHERE id = ?')
+      .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, paid ? method : null, chargeId);
+    return this.get(gameweekId);
+  },
+
   removeCharge(gameweekId, chargeId) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
@@ -123,11 +136,13 @@ export const gameweeksRepo = {
       gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
 
     const insCharge = db.prepare(`INSERT INTO charges
-      (id,gameweek_id,player_id,team,is_captain,rate_type,amount) VALUES (?,?,?,?,?,?,?)`);
+      (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+      VALUES (?,?,?,?,?,?,?,?,?)`);
     charges.forEach((ch, i) => {
       ledgersRepo.ensure(ch.player_id, gw.contract_id);
       insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
-        ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount));
+        ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
+        ch.charged_to || ch.player_id, ch.paid ? 1 : 0);
     });
     return this.get(id);
   },

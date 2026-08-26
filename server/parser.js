@@ -232,9 +232,18 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
       display_name: (rows.find(r => r.player_id === player_id) || {}).display_name || player_id,
     }));
 
+  // A contract with no rate card charges everyone 0 without complaining. That is
+  // indistinguishable from a free game, so say so explicitly and let the caller
+  // refuse to commit rather than silently writing a game worth nothing.
+  const configuredRates = Object.values(rates || {}).filter(v => Number(v) > 0).length;
+  const allZero = rows.length > 0 && rows.every(r => !Number(r.amount));
+
   return {
     num_players: numPlayers,
     bucket,
+    rates_configured: configuredRates,
+    rates_missing: configuredRates === 0,
+    all_amounts_zero: allZero,
     teams: [...new Set(rows.map(r => r.team))],
     rows,
     unmatched: unmatchedWithSuggestions,

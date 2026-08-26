@@ -56,6 +56,8 @@ export const api = {
   addCharge: (gwId, charge) => req('POST', `/gameweeks/${gwId}/charges`, charge),
   updateCharge: (gwId, chargeId, patch) => req('PUT', `/gameweeks/${gwId}/charges/${chargeId}`, patch),
   removeCharge: (gwId, chargeId) => req('DELETE', `/gameweeks/${gwId}/charges/${chargeId}`),
+  setChargePaid: (gwId, chargeId, paid, method) =>
+    req('PUT', `/gameweeks/${gwId}/charges/${chargeId}/paid`, { paid, method }),
 
   parse: (contract_id, text) => req('POST', '/parse', { contract_id, text }),
 

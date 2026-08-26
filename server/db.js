@@ -235,6 +235,27 @@ export function initSchema() {
   db.exec(SCHEMA);
   // Safe migrations: add new columns if they don't exist
   const migrations = [
+    // charges: settlement tracking. The UI has read charge.paid since the
+    // settlement view was built, but the column never existed — so every game
+    // reported an unknown (previously a falsely "collected") status.
+    () => {
+      try { db.prepare('SELECT paid FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN paid INTEGER NOT NULL DEFAULT 0'); }
+    },
+    () => {
+      try { db.prepare('SELECT paid_at FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN paid_at TEXT'); }
+    },
+    () => {
+      try { db.prepare('SELECT paid_method FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN paid_method TEXT'); }
+    },
+    // charges: who actually carries the cost. An outside player is billed to the
+    // contracted player who brought them, so the charge and the payer differ.
+    () => {
+      try { db.prepare('SELECT charged_to FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN charged_to TEXT'); }
+    },
     // gameweeks: add game_type, tournament_name
     () => {
       try {
