@@ -14,10 +14,34 @@ export const contractsRepo = {
   get(id) {
     return row(db.prepare('SELECT * FROM contracts WHERE id = ?').get(id));
   },
-  update(id, { name, venue, cost_per_gw, rates, tournament_rates }) {
-    db.prepare(`UPDATE contracts SET name=?, venue=?, cost_per_gw=?, rates=?, tournament_rates=? WHERE id=?`)
-      .run(name, venue, cost_per_gw, JSON.stringify(rates || {}),
-           JSON.stringify(tournament_rates || {}), id);
+  /**
+   * Partial update — only the fields actually supplied are written.
+   *
+   * This used to overwrite every column unconditionally, so any caller sending a
+   * subset silently blanked the rest. The settings form never sends
+   * tournament_rates, which meant saving a rate card wiped the tournament rates
+   * to {} every time. A form that quietly discards data it does not display is
+   * the worst kind of bug, because nothing looks wrong until you go looking.
+   */
+  update(id, patch = {}) {
+    const current = this.get(id);
+    if (!current) throw new Error(`Unknown contract: ${id}`);
+
+    const sets = [];
+    const vals = [];
+    const put = (col, v) => { sets.push(`${col}=?`); vals.push(v); };
+
+    if (patch.name !== undefined) put('name', String(patch.name).trim());
+    if (patch.venue !== undefined) put('venue', String(patch.venue).trim());
+    if (patch.cost_per_gw !== undefined) put('cost_per_gw', Number(patch.cost_per_gw) || 0);
+    if (patch.rates !== undefined) put('rates', JSON.stringify(patch.rates || {}));
+    if (patch.tournament_rates !== undefined) {
+      put('tournament_rates', JSON.stringify(patch.tournament_rates || {}));
+    }
+    if (!sets.length) return current;
+
+    vals.push(id);
+    db.prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE id=?`).run(...vals);
     return this.get(id);
   },
 
