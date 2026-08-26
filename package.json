@@ -16,7 +16,6 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.0"
   }
