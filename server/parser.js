@@ -184,16 +184,25 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
   const bucket = numPlayers >= 11 ? '12' : '10';
   for (const r of rows) {
     const status = (statusOf[r.player_id] || '').toLowerCase();
-    const inContract = r.matched && !status.startsWith('out');
-    if (r.is_captain) {
+    const inContract = r.matched && !status.startsWith('out') && r.player_type !== 'outside';
+    r.in_contract = inContract;
+
+    // Contract status is decided BEFORE captaincy. The captain rate is a discount
+    // the contract pays for, so someone outside it does not get it by wearing the
+    // armband — previously an out-of-contract captain was billed the captain rate,
+    // which is cheaper than the guest rate they should have paid.
+    if (!inContract) {
+      r.rate_type = 'noncontract';
+      // A guest with an agreed personal rate uses it; otherwise the standard one.
+      r.amount = Number(r.outside_cost) > 0
+        ? Number(r.outside_cost)
+        : (rates.noncontract ?? 0);
+    } else if (r.is_captain) {
       r.rate_type = `captain_${bucket}`;
-      r.amount = rates[`captain_${bucket}`] ?? rates.noncontract ?? 0;
-    } else if (inContract) {
+      r.amount = rates[`captain_${bucket}`] ?? rates[`contracted_${bucket}`] ?? rates.noncontract ?? 0;
+    } else {
       r.rate_type = `contracted_${bucket}`;
       r.amount = rates[`contracted_${bucket}`] ?? rates.noncontract ?? 0;
-    } else {
-      r.rate_type = 'noncontract';
-      r.amount = rates.noncontract ?? 0;
     }
   }
 

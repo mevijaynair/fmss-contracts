@@ -71,20 +71,50 @@ function detectCaptains(text, playerNames) {
   return captains;
 }
 
-// Get preset rate for player type
-function getPresetRate(rateType, contractId) {
+// The contract's rate card, whatever shape it arrives in.
+function rateCard(contractId) {
   const c = store.contracts?.find(x => x.id === contractId);
-  if (!c) return 0;
+  if (!c) return {};
+  return typeof c.rates === 'string'
+    ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
+    : (c.rates || {});
+}
 
-  // Use cost_per_gw as the base rate (set from contract)
-  const baseRate = Number(c.cost_per_gw) || 0;
-  const captainRate = Number(c.captain_rate) || baseRate;
-  const noncontractRate = Number(c.noncontract_rate) || baseRate;
+/**
+ * Per-player rate for a rate type.
+ *
+ * This used to read cost_per_gw — the PITCH hire for the whole game — as if it
+ * were a per-player rate, and looked for c.captain_rate / c.noncontract_rate,
+ * which do not exist (the card is nested under c.rates). Any charge that was
+ * zero got filled with the pitch cost, so one player could be billed 292.50.
+ */
+function getPresetRate(rateType, contractId) {
+  const rates = rateCard(contractId);
+  return Number(rates[rateType]) || Number(rates.noncontract) || 0;
+}
 
-  if (rateType === 'captain_10' || rateType === 'captain_12') return captainRate;
-  if (rateType === 'contracted_10' || rateType === 'contracted_12') return baseRate;
-  if (rateType === 'noncontract') return noncontractRate;
-  return baseRate;
+/**
+ * Recompute a row's rate after its contract status is changed by hand. Mirrors
+ * the server rule in parser.js: being outside the contract decides the rate
+ * before captaincy does, because the captain rate is a contract benefit.
+ */
+function applyRate(r, meta) {
+  const rates = rateCard(contractId);
+  const bucket = meta?.bucket || (rows.length >= 11 ? '12' : '10');
+  const outside = r.player_type === 'outside';
+
+  if (outside) {
+    r.rate_type = 'noncontract';
+    r.amount = Number(r.outside_cost) > 0
+      ? Number(r.outside_cost)
+      : (Number(rates.noncontract) || 0);
+  } else if (r.is_captain) {
+    r.rate_type = `captain_${bucket}`;
+    r.amount = Number(rates[`captain_${bucket}`]) || Number(rates[`contracted_${bucket}`]) || 0;
+  } else {
+    r.rate_type = `contracted_${bucket}`;
+    r.amount = Number(rates[`contracted_${bucket}`]) || Number(rates.noncontract) || 0;
+  }
 }
 
 // Match player including nicknames and cashier/admin
@@ -194,12 +224,16 @@ function renderPreview(meta) {
       r.amount = getPresetRate(r.rate_type, contractId);
     }
 
-    // Allow marking unmatched players as outside vs regular
-    const typeControl = !r.matched ? `
+    // Every player gets this control, not only the unmatched ones. A regular can
+    // turn up as a guest for one game and a guest can be signed up, and the
+    // preview was the one place that could not say so — the status was fixed text
+    // for anyone the parser recognised.
+    const isOutside = r.player_type === 'outside' || r.rate_type === 'noncontract';
+    const typeControl = `
       <select class="player-type-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem;">
-        <option value="regular" ${r.player_type !== 'outside' ? 'selected' : ''}>Contract</option>
-        <option value="outside" ${r.player_type === 'outside' ? 'selected' : ''}>Outside</option>
-      </select>` : statusLabel(r);
+        <option value="regular" ${!isOutside ? 'selected' : ''}>In contract</option>
+        <option value="outside" ${isOutside ? 'selected' : ''}>Out of contract</option>
+      </select>`;
 
     // Allow reassigning charge to another player (for transfers)
     const playerOptions = rows.map(p => `<option value="${p.player_id}" ${p.player_id === r.player_id ? 'selected' : ''}>${esc(p.display_name)}</option>`).join('');
@@ -225,10 +259,12 @@ function renderPreview(meta) {
 
   $('gdTable').querySelectorAll('.player-type-select').forEach(sel =>
     sel.addEventListener('change', () => {
-      rows[sel.dataset.i].player_type = sel.value;
-      if (sel.value === 'outside') {
-        rows[sel.dataset.i].outside_handling = 'relationship';
-      }
+      const row = rows[sel.dataset.i];
+      row.player_type = sel.value;
+      if (sel.value === 'outside') row.outside_handling = 'relationship';
+      // Re-price on the spot, otherwise the status says one thing and the amount
+      // still reflects the old one.
+      applyRate(row, meta);
       renderPreview(meta);
     }));
 

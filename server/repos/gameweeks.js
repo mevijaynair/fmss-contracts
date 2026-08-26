@@ -60,8 +60,27 @@ export const gameweeksRepo = {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
     if (!row) throw new Error('Charge not found');
+    const gw = db.prepare('SELECT contract_id, date FROM gameweeks WHERE id = ?').get(gameweekId);
     db.prepare('UPDATE charges SET paid = ?, paid_at = ?, paid_method = ? WHERE id = ?')
       .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, paid ? method : null, chargeId);
+
+    // An out-of-contract player pays cash on the day rather than from a prepaid
+    // balance, so that money lands in the kitty. A contract player's charge was
+    // already funded by their balance, so settling it moves nothing.
+    // Keyed to the charge so unticking removes exactly the entry it added.
+    const kittyId = `k_charge_${chargeId}`;
+    const payerId = row.charged_to || row.player_id;
+    const payer = db.prepare('SELECT name, player_type FROM players WHERE id = ?').get(payerId);
+    const isOutside = payer?.player_type === 'outside';
+    const amount = Number(row.amount) || 0;
+
+    db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId);
+    if (paid && isOutside && amount > 0) {
+      db.prepare(`INSERT INTO kitty (id,kind,label,amount,date,historical,created_at)
+                  VALUES (?,?,?,?,?,0,?)`)
+        .run(kittyId, 'income', `${payer.name} paid for ${gw?.date || 'a game'}`,
+          amount, gw?.date || new Date().toISOString().slice(0, 10), new Date().toISOString());
+    }
     return this.get(gameweekId);
   },
 
@@ -144,6 +163,21 @@ export const gameweeksRepo = {
         ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
         ch.charged_to || ch.player_id, ch.paid ? 1 : 0);
     });
+    // Whoever bought the water is out of pocket for it. game_cost_paid_by was
+    // recorded but nothing ever gave it back, so a player who bought the water
+    // silently subsidised the game. Credit them for it as a contribution, which
+    // is where the rest of their incoming money already lives.
+    const payer = gw.game_cost_paid_by;
+    const waterCost = Number(gw.game_cost) || 0;
+    if (payer && payer !== 'self' && waterCost > 0) {
+      ledgersRepo.ensure(payer, gw.contract_id);
+      db.prepare(`INSERT INTO contributions (id,player_id,contract_id,amount,date,comments,created_at)
+                  VALUES (?,?,?,?,?,?,?)`)
+        .run(`c_water_${id}`, payer, gw.contract_id, waterCost,
+          gw.date || now.slice(0, 10),
+          `Bought the water for the game on ${gw.date || now.slice(0, 10)}`, now);
+    }
+
     return this.get(id);
   },
   remove(id) {
@@ -163,6 +197,9 @@ export const gameweeksRepo = {
         }
       }
     }
+    // The water credit is a contribution keyed to this gameweek — remove it too,
+    // otherwise deleting the game leaves the payer permanently in credit for it.
+    db.prepare('DELETE FROM contributions WHERE id = ?').run(`c_water_${id}`);
     db.prepare('DELETE FROM gameweeks WHERE id = ?').run(id);   // charges cascade
   },
 
