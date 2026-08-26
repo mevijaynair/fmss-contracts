@@ -10,6 +10,11 @@ let searchQuery = '';
 let sortBy = 'name';
 let filterStatus = 'all';
 let filterBalance = 'all';
+// Guests are one-off outside players. They outnumber the regulars after a season
+// import and push the contracted squad off the screen, so the ledger shows only
+// contract players unless this is turned on. Guest debts are chased from the
+// gameweek settlement view instead.
+let showGuests = false;
 
 const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
@@ -45,6 +50,8 @@ async function render() {
       l.player_name.toLowerCase().includes(p.toLowerCase())
     );
     if (isTestPlayer) return false;
+    // Guests are hidden unless asked for — see showGuests.
+    if (!showGuests && l.player_type === 'outside') return false;
     // Search by name
     if (searchQuery && !l.player_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     // Filter by status
@@ -81,12 +88,22 @@ async function render() {
       <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>Status: In Contract</option>
       <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Status: Out</option>
     </select>
+    <label class="guest-toggle" title="Outside players who are not on a contract">
+      <input type="checkbox" id="pl_show_guests" ${showGuests ? 'checked' : ''}>
+      <span>Show guests<span id="pl_guest_count" class="hint"></span></span>
+    </label>
     <select id="pl_filter_balance">
       <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Balance: All</option>
       <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>Balance: Positive</option>
       <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>Balance: Negative</option>
     </select>
   `;
+
+  // How many guests are being withheld, and whether any of them owe. Hiding them
+  // silently would be worse than the clutter — a guest in debt still matters.
+  const guestRows = ledgers.filter(l => l.player_type === 'outside');
+  const guestsOwing = guestRows.filter(l => l.present_balance < 0);
+  const guestDebt = guestsOwing.reduce((a, l) => a + Math.abs(l.present_balance), 0);
 
   const tableContainer = $('playersTable').parentElement;
 
@@ -102,6 +119,16 @@ async function render() {
   $('pl_sort').addEventListener('change', (e) => { sortBy = e.target.value; updateRender(); });
   $('pl_filter_status').addEventListener('change', (e) => { filterStatus = e.target.value; updateRender(); });
   $('pl_filter_balance').addEventListener('change', (e) => { filterBalance = e.target.value; updateRender(); });
+  $('pl_show_guests')?.addEventListener('change', (e) => { showGuests = e.target.checked; updateRender(); });
+  const guestNote = $('pl_guest_count');
+  if (guestNote) {
+    guestNote.textContent = guestRows.length
+      ? (guestsOwing.length
+        ? ` (${guestRows.length}, ${guestsOwing.length} owing ${money(guestDebt)})`
+        : ` (${guestRows.length})`)
+      : '';
+    if (guestsOwing.length) guestNote.classList.add('is-owing');
+  }
 
   // Fetch last transaction for each player
   const lastTransactionMap = {};
