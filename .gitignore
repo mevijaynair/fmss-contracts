@@ -8,3 +8,7 @@ data/seed.json
 # a backup file is a credential file. Never commit one.
 data/backups/
 *fmss-backup*.json
+
+# Scratch auth tokens written by local test scripts. Never commit one.
+.tok
+*.token
