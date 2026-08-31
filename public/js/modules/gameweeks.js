@@ -13,28 +13,21 @@ async function render() {
 
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
-    // The gameweeks LIST does not carry a `charges` array — only `num_players`
-    // and a `charged` total (per-charge detail lives on /gameweeks/:id). Reading
-    // g.charges here made every row show "0 players / 0" and, because that left
-    // pendingAmount at 0, labelled every game "✓ Collected" regardless of truth.
-    const charges = Array.isArray(g.charges) ? g.charges : null;
+    // The gameweeks LIST used to carry no payment-status data at all — only
+    // num_players and a charged total — so Settlement/Collected had nothing to
+    // work with and showed "—" on every row, even for games with real charges.
+    // The repo now computes paid_count/pending_amount per row the same way it
+    // already computes charged/charges_count, so the list can show real status
+    // without fetching every game's full charge detail.
     // Prefer charges_count over num_players — the latter counts everyone named in
     // the original message, including unmatched people who were never billed.
-    const playerCount = charges ? charges.length
-      : (g.charges_count ?? Number(g.num_players) ?? 0);
-    const totalCharged = charges
-      ? charges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
-      : (Number(g.charged) || 0);
+    const playerCount = g.charges_count ?? Number(g.num_players) ?? 0;
+    const totalCharged = Number(g.charged) || 0;
 
-    // Settlement status needs per-charge `paid` flags. Without them, say so
-    // rather than implying the game is fully collected.
-    const known = !!charges;
-    const paidCount = known ? charges.filter(c => c.paid).length : 0;
-    const pendingAmount = known
-      ? charges.filter(c => !c.paid).reduce((s, c) => s + (Number(c.amount) || 0), 0)
-      : 0;
-    const collectionRate = known && charges.length
-      ? Math.round((paidCount / charges.length) * 100) : null;
+    const known = playerCount > 0;
+    const paidCount = Number(g.paid_count) || 0;
+    const pendingAmount = Number(g.pending_amount) || 0;
+    const collectionRate = known ? Math.round((paidCount / playerCount) * 100) : null;
 
     const statusColor = !known ? 'var(--text-muted)'
       : pendingAmount === 0 ? 'var(--success)'

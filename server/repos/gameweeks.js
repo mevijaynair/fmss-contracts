@@ -17,10 +17,24 @@ export const gameweeksRepo = {
       ...g,
       charged: this.chargeTotal(g.id),
       charges_count: this.chargeCount(g.id),
+      // The list previously carried no payment-status data at all, so the frontend
+      // had nothing to show for Settlement/Collected except "—" on every row — it
+      // required a per-charge `paid` array that only the single-gameweek detail
+      // endpoint returns. These two aggregates let the list render real status
+      // without an N+1 fetch of every game's charges.
+      paid_count: this.paidCount(g.id),
+      pending_amount: this.pendingAmount(g.id),
     }));
   },
   chargeCount(id) {
     return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ?').get(id).n;
+  },
+  paidCount(id) {
+    return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ? AND paid = 1').get(id).n;
+  },
+  pendingAmount(id) {
+    return db.prepare('SELECT COALESCE(SUM(amount),0) AS t FROM charges WHERE gameweek_id = ? AND paid = 0')
+      .get(id).t;
   },
 
   /**
