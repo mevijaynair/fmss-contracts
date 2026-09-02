@@ -1,9 +1,5 @@
 // opening_balances.js — manage opening balances per player per contract (1 Aug baseline)
-import { randomBytes } from 'node:crypto';
-
-function generateId() {
-  return randomBytes(8).toString('hex');
-}
+import { ledgersRepo } from './ledgers.js';
 
 export const openingBalancesRepo = {
   // Bulk import opening balances for a contract. Creates/updates ledger records.
@@ -14,7 +10,6 @@ export const openingBalancesRepo = {
     }
 
     const results = { imported: 0, skipped: 0, errors: [] };
-    const now = new Date().toISOString();
 
     for (const row of balances) {
       const { name, balance } = row;
@@ -31,23 +26,16 @@ export const openingBalancesRepo = {
         continue;
       }
 
-      // Check if ledger record exists for this player-contract combo
-      const existing = db.prepare(
-        'SELECT id FROM ledgers WHERE player_id = ? AND contract_id = ?'
-      ).get(player.id, contractId);
-
-      if (existing) {
-        // Update opening balance
-        db.prepare(
-          'UPDATE ledgers SET opening_balance = ? WHERE id = ?'
-        ).run(balance, existing.id);
-      } else {
-        // Create new ledger record with opening balance
-        db.prepare(
-          `INSERT INTO ledgers (id, player_id, contract_id, opening_balance, contributed, charged, present_balance, games, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 0, 0, ?, 0, 'active', ?, ?)`
-        ).run(generateId(), player.id, contractId, balance, balance, now, now);
-      }
+      // ledgers has no surrogate id — its key is (player_id, contract_id). This
+      // used to SELECT/INSERT a nonexistent `id` column and an INSERT list with
+      // columns (contributed, charged, present_balance) that don't exist on the
+      // table either — every call threw before writing anything, so this import
+      // path has never actually worked.
+      db.prepare(
+        `INSERT INTO ledgers (player_id, contract_id, opening_balance, status)
+         VALUES (?, ?, ?, '')
+         ON CONFLICT (player_id, contract_id) DO UPDATE SET opening_balance = excluded.opening_balance`
+      ).run(player.id, contractId, balance);
 
       results.imported++;
     }
@@ -55,39 +43,30 @@ export const openingBalancesRepo = {
     return results;
   },
 
-  // Get all opening balances for a contract (for verification/export)
+  // Get all opening balances for a contract (for verification/export).
+  // contributed/charged/present_balance aren't stored columns — ledgersRepo
+  // already computes them live from contributions/charges, so reuse that
+  // instead of re-deriving (and re-breaking) the same query here.
   getBalances(db, playersRepo, contractId) {
-    const ledgers = db.prepare(
-      `SELECT l.id, l.player_id, p.name, l.opening_balance, l.contributed, l.charged, l.present_balance
-       FROM ledgers l
-       JOIN players p ON p.id = l.player_id
-       WHERE l.contract_id = ?
-       ORDER BY p.name`
-    ).all(contractId);
-
-    return ledgers.map(l => ({
+    return ledgersRepo.forContract(contractId).map(l => ({
       player_id: l.player_id,
-      name: l.name,
+      name: l.player_name,
       opening_balance: l.opening_balance,
       contributed: l.contributed,
       charged: l.charged,
-      present_balance: l.present_balance
+      present_balance: l.present_balance,
     }));
   },
 
   // Get summary stats for a contract
   getSummary(db, contractId) {
-    const stats = db.prepare(
-      `SELECT
-        COUNT(*) as player_count,
-        SUM(opening_balance) as total_opening,
-        SUM(contributed) as total_contributed,
-        SUM(charged) as total_charged,
-        SUM(present_balance) as total_balance
-       FROM ledgers
-       WHERE contract_id = ?`
-    ).get(contractId);
-
-    return stats;
+    const rows = ledgersRepo.forContract(contractId);
+    return {
+      player_count: rows.length,
+      total_opening: rows.reduce((s, l) => s + l.opening_balance, 0),
+      total_contributed: rows.reduce((s, l) => s + l.contributed, 0),
+      total_charged: rows.reduce((s, l) => s + l.charged, 0),
+      total_balance: Math.round(rows.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
+    };
   },
 };
