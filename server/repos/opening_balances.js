@@ -47,8 +47,8 @@ export const openingBalancesRepo = {
   // contributed/charged/present_balance aren't stored columns — ledgersRepo
   // already computes them live from contributions/charges, so reuse that
   // instead of re-deriving (and re-breaking) the same query here.
-  getBalances(db, playersRepo, contractId) {
-    return ledgersRepo.forContract(contractId).map(l => ({
+  getBalances(db, playersRepo, contractId, rows = ledgersRepo.forContract(contractId)) {
+    return rows.map(l => ({
       player_id: l.player_id,
       name: l.player_name,
       opening_balance: l.opening_balance,
@@ -58,9 +58,10 @@ export const openingBalancesRepo = {
     }));
   },
 
-  // Get summary stats for a contract
-  getSummary(db, contractId) {
-    const rows = ledgersRepo.forContract(contractId);
+  // Get summary stats for a contract. `rows` lets a caller that already fetched
+  // ledgersRepo.forContract() (e.g. right after getBalances()) pass it straight
+  // through instead of paying for the same per-row subqueries twice.
+  getSummary(db, contractId, rows = ledgersRepo.forContract(contractId)) {
     return {
       player_count: rows.length,
       total_opening: rows.reduce((s, l) => s + l.opening_balance, 0),

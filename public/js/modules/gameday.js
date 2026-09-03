@@ -90,7 +90,10 @@ function rateCard(contractId) {
  */
 function getPresetRate(rateType, contractId) {
   const rates = rateCard(contractId);
-  return Number(rates[rateType]) || Number(rates.noncontract) || 0;
+  // `??`, not `||` — a rate card can legitimately set a rate to exactly 0 (e.g.
+  // "captains play free"), and `||` would treat that real 0 as missing and
+  // fall through to the next rate instead.
+  return Number(rates[rateType] ?? rates.noncontract ?? 0);
 }
 
 /**
@@ -100,20 +103,24 @@ function getPresetRate(rateType, contractId) {
  */
 function applyRate(r, meta) {
   const rates = rateCard(contractId);
-  const bucket = meta?.bucket || (rows.length >= 11 ? '12' : '10');
+  // Always derive from the current live roster, not the bucket meta captured
+  // at parse time — meta.bucket goes stale the moment a row is added/removed
+  // (e.g. deleting a duplicate drops an 11-player game to 10), and this must
+  // match parser.js's own rule (numPlayers >= 11 ? '12' : '10').
+  const bucket = rows.length >= 11 ? '12' : '10';
   const outside = r.player_type === 'outside';
 
   if (outside) {
     r.rate_type = 'noncontract';
     r.amount = Number(r.outside_cost) > 0
       ? Number(r.outside_cost)
-      : (Number(rates.noncontract) || 0);
+      : Number(rates.noncontract ?? 0);
   } else if (r.is_captain) {
     r.rate_type = `captain_${bucket}`;
-    r.amount = Number(rates[`captain_${bucket}`]) || Number(rates[`contracted_${bucket}`]) || 0;
+    r.amount = Number(rates[`captain_${bucket}`] ?? rates[`contracted_${bucket}`] ?? 0);
   } else {
     r.rate_type = `contracted_${bucket}`;
-    r.amount = Number(rates[`contracted_${bucket}`]) || Number(rates.noncontract) || 0;
+    r.amount = Number(rates[`contracted_${bucket}`] ?? rates.noncontract ?? 0);
   }
 }
 
@@ -155,13 +162,6 @@ function findPlayerByToken(token) {
   if (p) return p;
 
   return null;
-}
-
-function statusLabel(r) {
-  if (!r.matched) return '<span class="miss-badge">new / unmatched</span>';
-  if (r.is_captain) return 'Captain';
-  if (r.player_type === 'outside') return `<span class="outside-badge">outside (${r.outside_cost} AED)</span>`;
-  return r.rate_type === 'noncontract' ? 'Out of contract' : 'In contract';
 }
 
 async function showUnmatchedMapping(unmatched) {
@@ -244,7 +244,8 @@ function renderPreview(meta) {
 
     return `
     <tr>
-      <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}</td>
+      <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}${
+        !r.matched ? ' <span class="miss-badge">new / unmatched</span>' : ''}</td>
       <td><span class="team-dot team-${esc(r.team)}"></span>${esc(r.team)}</td>
       <td>${typeControl}</td>
       <td><span class="tag">${RATE_LABEL[r.rate_type] || r.rate_type}</span></td>
@@ -297,7 +298,13 @@ function recalcTotal() {
     ? `pitch cost ${money(cost)} · ${diff >= 0 ? 'surplus' : 'short'} ${money(Math.abs(diff))}`
     : '';
 
-  showRateWarning(meta, tot);
+  // recalcTotal() takes no arguments and isn't nested inside renderPreview(),
+  // so it has no `meta` in scope — this referenced a free `meta` identifier
+  // that doesn't exist anywhere in the module, throwing a ReferenceError on
+  // every call (every re-render, every amount edit, every contract switch)
+  // and silently skipping the rate-warning gate and kitty auto-calc below it.
+  // parseResult is the module-level equivalent of what callers pass as `meta`.
+  showRateWarning(parseResult, tot);
   recomputeKitty();
 }
 

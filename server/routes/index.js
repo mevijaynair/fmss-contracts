@@ -997,8 +997,9 @@ r.post('/admin/opening-balances/import', wrap((req) => {
 // Admin: get current opening balances for a contract (for verification).
 r.get('/admin/opening-balances/:contractId', wrap((req) => {
   requireAdmin(req);
-  const balances = openingBalancesRepo.getBalances(db, playersRepo, req.params.contractId);
-  const summary = openingBalancesRepo.getSummary(db, req.params.contractId);
+  const ledgerRows = ledgersRepo.forContract(req.params.contractId);
+  const balances = openingBalancesRepo.getBalances(db, playersRepo, req.params.contractId, ledgerRows);
+  const summary = openingBalancesRepo.getSummary(db, req.params.contractId, ledgerRows);
   return { balances, summary };
 }));
 

@@ -9,22 +9,32 @@ export const gameweeksRepo = {
       ? 'SELECT * FROM gameweeks WHERE contract_id = ? ORDER BY date DESC, gw_number DESC'
       : 'SELECT * FROM gameweeks ORDER BY date DESC';
     const rows = contractId ? db.prepare(sql).all(contractId) : db.prepare(sql).all();
+    if (!rows.length) return rows;
+
+    // One aggregate query for every gameweek in this result, instead of the
+    // four per-row queries (chargeTotal/chargeCount/paidCount/pendingAmount)
+    // this used to run for each row — that was 4N queries for N gameweeks,
+    // paid even by callers (import-duplicate-detection, contract summaries)
+    // that never read paid_count/pending_amount at all.
+    const ids = rows.map(g => g.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const stats = db.prepare(`
+      SELECT gameweek_id,
+             COUNT(*) AS charges_count,
+             COALESCE(SUM(amount), 0) AS charged,
+             COALESCE(SUM(CASE WHEN paid = 1 THEN 1 ELSE 0 END), 0) AS paid_count,
+             COALESCE(SUM(CASE WHEN paid = 0 THEN amount ELSE 0 END), 0) AS pending_amount
+      FROM charges WHERE gameweek_id IN (${placeholders})
+      GROUP BY gameweek_id
+    `).all(...ids);
+    const statsById = new Map(stats.map(s => [s.gameweek_id, s]));
+    const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0 };
+
     // charges_count alongside the charged total: the stored num_players counts
     // everyone named in the message, including people who were never matched to
     // an account, so it runs 1–3 ahead of the players actually charged. Lists
     // should show what was billed.
-    return rows.map(g => ({
-      ...g,
-      charged: this.chargeTotal(g.id),
-      charges_count: this.chargeCount(g.id),
-      // The list previously carried no payment-status data at all, so the frontend
-      // had nothing to show for Settlement/Collected except "—" on every row — it
-      // required a per-charge `paid` array that only the single-gameweek detail
-      // endpoint returns. These two aggregates let the list render real status
-      // without an N+1 fetch of every game's charges.
-      paid_count: this.paidCount(g.id),
-      pending_amount: this.pendingAmount(g.id),
-    }));
+    return rows.map(g => ({ ...g, ...(statsById.get(g.id) || empty) }));
   },
   chargeCount(id) {
     return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ?').get(id).n;
@@ -156,40 +166,54 @@ export const gameweeksRepo = {
 
     const id = `${gw.contract_id}_live_${Date.now()}`;
     const now = new Date().toISOString();
-    db.prepare(`INSERT INTO gameweeks
-      (id,contract_id,gw_number,contract_number,date,cost_per_gw,num_players,
-       teams_raw,captains_raw,score,comments,historical,created_at,
-       scoreline,teams_json,whatsapp_message,game_cost,game_cost_paid_by,kitty_earned)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)`).run(
-      id, gw.contract_id, gw.gw_number ?? this.nextGwNumber(gw.contract_id),
-      gw.contract_number ?? 0, gw.date || now.slice(0, 10), gw.cost_per_gw || 0,
-      charges.length, gw.teams_raw || '', gw.captains_raw || '', gw.score || '',
-      gw.comments || '', now,
-      gw.scoreline || '', gw.teams_json || null, gw.whatsapp_message || '',
-      gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
 
-    const insCharge = db.prepare(`INSERT INTO charges
-      (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
-      VALUES (?,?,?,?,?,?,?,?,?)`);
-    charges.forEach((ch, i) => {
-      ledgersRepo.ensure(ch.player_id, gw.contract_id);
-      insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
-        ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
-        ch.charged_to || ch.player_id, ch.paid ? 1 : 0);
-    });
-    // Whoever bought the water is out of pocket for it. game_cost_paid_by was
-    // recorded but nothing ever gave it back, so a player who bought the water
-    // silently subsidised the game. Credit them for it as a contribution, which
-    // is where the rest of their incoming money already lives.
-    const payer = gw.game_cost_paid_by;
-    const waterCost = Number(gw.game_cost) || 0;
-    if (payer && payer !== 'self' && waterCost > 0) {
-      ledgersRepo.ensure(payer, gw.contract_id);
-      db.prepare(`INSERT INTO contributions (id,player_id,contract_id,amount,date,comments,created_at)
-                  VALUES (?,?,?,?,?,?,?)`)
-        .run(`c_water_${id}`, payer, gw.contract_id, waterCost,
-          gw.date || now.slice(0, 10),
-          `Bought the water for the game on ${gw.date || now.slice(0, 10)}`, now);
+    // Wrapped in a transaction: the water-cost credit below can fail (e.g. the
+    // payer was deleted between page load and submit, tripping the contributions
+    // FK) after the gameweek and charges are already written. Without a
+    // transaction that leaves a committed gameweek with no failure surfaced
+    // beyond an error toast, and a retry from the same form double-charges
+    // every player for the same match.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`INSERT INTO gameweeks
+        (id,contract_id,gw_number,contract_number,date,cost_per_gw,num_players,
+         teams_raw,captains_raw,score,comments,historical,created_at,
+         scoreline,teams_json,whatsapp_message,game_cost,game_cost_paid_by,kitty_earned)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)`).run(
+        id, gw.contract_id, gw.gw_number ?? this.nextGwNumber(gw.contract_id),
+        gw.contract_number ?? 0, gw.date || now.slice(0, 10), gw.cost_per_gw || 0,
+        charges.length, gw.teams_raw || '', gw.captains_raw || '', gw.score || '',
+        gw.comments || '', now,
+        gw.scoreline || '', gw.teams_json || null, gw.whatsapp_message || '',
+        gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
+
+      const insCharge = db.prepare(`INSERT INTO charges
+        (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
+      charges.forEach((ch, i) => {
+        ledgersRepo.ensure(ch.player_id, gw.contract_id);
+        insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
+          ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
+          ch.charged_to || ch.player_id, ch.paid ? 1 : 0);
+      });
+      // Whoever bought the water is out of pocket for it. game_cost_paid_by was
+      // recorded but nothing ever gave it back, so a player who bought the water
+      // silently subsidised the game. Credit them for it as a contribution, which
+      // is where the rest of their incoming money already lives.
+      const payer = gw.game_cost_paid_by;
+      const waterCost = Number(gw.game_cost) || 0;
+      if (payer && payer !== 'self' && waterCost > 0) {
+        ledgersRepo.ensure(payer, gw.contract_id);
+        db.prepare(`INSERT INTO contributions (id,player_id,contract_id,amount,date,comments,created_at)
+                    VALUES (?,?,?,?,?,?,?)`)
+          .run(`c_water_${id}`, payer, gw.contract_id, waterCost,
+            gw.date || now.slice(0, 10),
+            `Bought the water for the game on ${gw.date || now.slice(0, 10)}`, now);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
     }
 
     return this.get(id);
