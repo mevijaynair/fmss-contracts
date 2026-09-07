@@ -154,7 +154,12 @@ export const authUsersRepo = {
       auditLog(db, { player_id: p.id, action: 'account_created', details: { method: 'admin_bulk' } });
       created.push({ player_id: p.id, name: p.name, pin });
     }
-    return this.listPlayerLogins(db, playersRepo);
+    // Return the plaintext PINs. They exist for exactly this moment — only the
+    // salted hash is stored — so a caller that does not surface them now has
+    // created credentials nobody will ever be able to use. This used to return
+    // listPlayerLogins() and throw `created` away, which is why bulk-generated
+    // logins were unusable.
+    return { created, logins: this.listPlayerLogins(db, playersRepo) };
   },
 
   // Reset a player's PIN to a new random value; requires the player to set it on next login.
@@ -217,10 +222,14 @@ export const authUsersRepo = {
 
   // ---- listings ----
 
-  // Every player + login status + PIN (for admin panel, shareable).
+  // Every player + login status. NOT the PIN: the `pin` column holds a salted
+  // SHA-256 hash, so there is no PIN here to share. This used to return that
+  // hash as `pin`, and the admin panel rendered the 64-character digest in a
+  // pin-chip as though it were a credential. A PIN can only be seen at the
+  // moment it is created — create, reset, or bulk generate.
   listPlayerLogins(db, playersRepo) {
     const logins = db.prepare(
-      `SELECT player_id, pin, is_active FROM auth_users WHERE role = 'player'`
+      `SELECT player_id, is_active FROM auth_users WHERE role = 'player'`
     ).all();
     const byPlayer = Object.fromEntries(logins.map(l => [l.player_id, l]));
     return playersRepo.all()
@@ -231,7 +240,6 @@ export const authUsersRepo = {
           player_id: p.id,
           name: p.name,
           has_login: !!l,
-          pin: l ? l.pin : null,
           is_active: l ? !!l.is_active : false,
         };
       });
