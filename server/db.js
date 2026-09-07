@@ -256,12 +256,20 @@ export function initSchema() {
       try { db.prepare('SELECT charged_to FROM charges LIMIT 1').get(); }
       catch { db.exec('ALTER TABLE charges ADD COLUMN charged_to TEXT'); }
     },
+    // NOTE ON QUOTING: string literals in DDL must use SINGLE quotes. Double
+    // quotes denote an IDENTIFIER in SQL; SQLite only accepts them as strings
+    // via a deprecated fallback for unresolvable identifiers. That fallback is
+    // not applied when the schema is re-parsed strictly, so a double-quoted
+    // DEFAULT makes VACUUM fail outright with
+    //   no such column: "regular" - should this be a string literal in single-quotes?
+    // which disables VACUUM-based backup and maintenance for the whole database.
+    //
     // gameweeks: add game_type, tournament_name
     () => {
       try {
         db.prepare('SELECT game_type FROM gameweeks LIMIT 1').get();
       } catch {
-        db.exec('ALTER TABLE gameweeks ADD COLUMN game_type TEXT NOT NULL DEFAULT "regular"');
+        db.exec("ALTER TABLE gameweeks ADD COLUMN game_type TEXT NOT NULL DEFAULT 'regular'");
       }
     },
     () => {
@@ -284,7 +292,7 @@ export function initSchema() {
       try {
         db.prepare('SELECT tournament_rates FROM contracts LIMIT 1').get();
       } catch {
-        db.exec('ALTER TABLE contracts ADD COLUMN tournament_rates TEXT NOT NULL DEFAULT "{}"');
+        db.exec("ALTER TABLE contracts ADD COLUMN tournament_rates TEXT NOT NULL DEFAULT '{}'");
       }
     },
     // charge_audit: drop the hard FK to charges so deleting a game with edited
@@ -455,7 +463,7 @@ export function initSchema() {
       const hasIntroducedBy = cols.some(c => c.name === 'introduced_by');
       if (!hasIntroducedBy) {
         db.exec('ALTER TABLE players ADD COLUMN introduced_by TEXT REFERENCES players(id)'); // Who brought them in
-        db.exec('ALTER TABLE players ADD COLUMN player_type TEXT NOT NULL DEFAULT "regular" CHECK(player_type IN ("regular", "outside"))');
+        db.exec("ALTER TABLE players ADD COLUMN player_type TEXT NOT NULL DEFAULT 'regular' CHECK(player_type IN ('regular', 'outside'))");
         db.exec('ALTER TABLE players ADD COLUMN outside_cost REAL'); // 35 or 40 for outside players
         db.exec('ALTER TABLE players ADD COLUMN balance_group_id TEXT'); // Shared balance group (e.g., "aws_ali")
       }
