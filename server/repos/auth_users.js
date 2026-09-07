@@ -20,13 +20,19 @@ function hashPin(pin, salt) {
 // Audit log a security event (login, PIN change, etc.)
 function auditLog(db, event) {
   const { user_id, player_id, action, details, ip_address, user_agent } = event;
+  // Coerce undefined to null. node:sqlite refuses to bind undefined ("Provided
+  // value cannot be bound to SQLite parameter N"), and SIX of the eight callers
+  // here legitimately omit one of these: an account_created event has no
+  // user_id, a login_success event has no player_id. Every one of those threw,
+  // which is why generateAllPlayerLogins stopped after its first insert and why
+  // recordSuccessfulLogin — on the hot path of every player sign-in — failed.
   db.prepare(
     `INSERT INTO audit_log (id, user_id, player_id, action, details, ip_address, user_agent, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    generateId(), user_id, player_id, action,
+    generateId(), user_id ?? null, player_id ?? null, action,
     details ? JSON.stringify(details) : null,
-    ip_address, user_agent, new Date().toISOString()
+    ip_address ?? null, user_agent ?? null, new Date().toISOString()
   );
 }
 
