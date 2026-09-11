@@ -15,9 +15,20 @@ export const externalEventsRepo = {
   // Example: Player A paid 500 AED for team lunch. Players B,C,D each owe 100 AED.
   //   → Player A gets +500 (incoming), B,C,D each get -100 (deduction)
   createEvent(db, authUsersRepo, adminUserId, payload) {
-    const { title, description, event_type, event_date, payer_id, participants } = payload;
+    const { title, description, event_type, event_date, payer_id, participants, contract_id } = payload;
     if (!title || !event_type || !event_date || !payer_id || !participants?.length) {
       throw new Error('title, event_type, event_date, payer_id, and participants required');
+    }
+    // A transaction with no contract belongs to no ledger, so it never reaches a
+    // balance (see the ADJUSTED note in repos/ledgers.js). This used to write the
+    // payer's credit with contract_id NULL, which silently dropped the money
+    // instead of crediting them. Refuse rather than pretend it worked.
+    if (!contract_id) {
+      throw new Error('contract_id is required — an event must settle against a contract ledger, otherwise the payer credit reaches no balance.');
+    }
+    const missing = participants.filter(p => !(p.contract_id || contract_id));
+    if (missing.length) {
+      throw new Error(`Every participant needs a contract: ${missing.map(p => p.player_id).join(', ')}`);
     }
 
     const eventId = generateId();
@@ -27,15 +38,21 @@ export const externalEventsRepo = {
     db.prepare(
       `INSERT INTO external_events (id, title, description, event_type, event_date, created_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(eventId, title, description, event_type, event_date, adminUserId, now, now);
+      // node:sqlite refuses to bind undefined, so an omitted description would
+      // throw rather than store nothing.
+    ).run(eventId, title, description ?? null, event_type, event_date, adminUserId, now, now);
 
     // Credit the payer (incoming funds)
     const totalAmount = participants.reduce((s, p) => s + p.amount, 0);
+    // 'adjustment', not 'contribution': ledgers.js deliberately ignores the
+    // 'contribution' and 'charge' types there, because the dedicated
+    // contributions/charges tables own them. A credit typed 'contribution'
+    // would never reach the payer's balance.
     db.prepare(
       `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, event_id, status, created_by, created_at, updated_at)
-       VALUES (?, ?, NULL, 'contribution', ?, ?, ?, 'approved', ?, ?, ?)`
+       VALUES (?, ?, ?, 'adjustment', ?, ?, ?, 'approved', ?, ?, ?)`
     ).run(
-      generateId(), payer_id,
+      generateId(), payer_id, contract_id,
       totalAmount,  // positive = credit / incoming
       `Paid for: ${title}`, eventId, adminUserId, now, now
     );
@@ -49,7 +66,7 @@ export const externalEventsRepo = {
         `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, event_id, status, created_by, created_at, updated_at)
          VALUES (?, ?, ?, 'event_deduction', ?, ?, ?, 'approved', ?, ?, ?)`
       ).run(
-        generateId(), p.player_id, p.contract_id || null,
+        generateId(), p.player_id, p.contract_id || contract_id,
         -Math.abs(p.amount),  // negative = deduction
         title, eventId, adminUserId, now, now
       );

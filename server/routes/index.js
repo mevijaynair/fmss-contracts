@@ -855,12 +855,12 @@ r.get('/admin/audit', wrap((req) => {
 // payer_id: who paid (gets credit/incoming), participants: who shares cost (get debits/deductions)
 r.post('/admin/events', wrap((req) => {
   requireAdmin(req);
-  const { title, description, event_type, event_date, payer_id, participants } = req.body;
+  const { title, description, event_type, event_date, payer_id, participants, contract_id } = req.body;
   if (!title || !event_type || !event_date || !payer_id || !participants?.length) {
     throw new Error('title, event_type, event_date, payer_id, and participants (array) required');
   }
   return externalEventsRepo.createEvent(db, authUsersRepo, req.user.id, {
-    title, description, event_type, event_date, payer_id, participants
+    title, description, event_type, event_date, payer_id, participants, contract_id
   });
 }));
 

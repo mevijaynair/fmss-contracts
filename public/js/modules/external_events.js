@@ -29,6 +29,11 @@ function renderEventForm() {
       <label>Description</label>
       <input type="text" id="eventDesc" placeholder="Optional notes">
     </div>
+    <div class="form-group">
+      <label>Settle against</label>
+      <p class="hint" style="margin: 0.4rem 0 0.5rem;">Which contract's ledger this event moves money in</p>
+      <select id="eventContract" required></select>
+    </div>
     <div class="form-group" style="background: var(--bg-subtle); padding: 1rem; border-radius: 8px; margin: 1rem 0;">
       <label style="font-weight: 600; color: var(--accent);">Who Paid the Bill?</label>
       <p class="hint" style="margin: 0.4rem 0 0.8rem;">This person will get credited for the full amount</p>
@@ -180,6 +185,13 @@ export function initExternalEvents() {
         .join('');
   }
 
+  const contractSelect = $('eventContract');
+  if (contractSelect && store.contracts) {
+    contractSelect.innerHTML = store.contracts
+      .map(c => `<option value="${c.id}">${esc(c.name)}</option>`)
+      .join('');
+  }
+
   const submitEvent = $('submitEvent');
   if (submitEvent) {
     submitEvent.addEventListener('click', async () => {
@@ -188,9 +200,10 @@ export function initExternalEvents() {
       const event_date = $('eventDate').value;
       const description = $('eventDesc').value;
       const payer_id = $('eventPayer').value;
+      const contract_id = $('eventContract').value;
 
-      if (!title || !event_type || !event_date || !payer_id) {
-        toast('Title, type, date, and payer required', true);
+      if (!title || !event_type || !event_date || !payer_id || !contract_id) {
+        toast('Title, type, date, payer and contract required', true);
         return;
       }
 
@@ -214,7 +227,7 @@ export function initExternalEvents() {
       }
 
       try {
-        const event = await api.createEvent(title, event_type, event_date, participants, description, payer_id);
+        const event = await api.createEvent(title, event_type, event_date, participants, description, payer_id, contract_id);
         toast(`Event created: ${event.title} (AED ${event.total_paid.toFixed(2)} credited to payer)`);
         $('eventTitle').value = '';
         $('eventType').value = '';

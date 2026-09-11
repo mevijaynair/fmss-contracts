@@ -10,6 +10,23 @@
 
 import { db } from '../db.js';
 
+// Movements with no home in contributions/charges: transfers between players,
+// external-event deductions, introducer credits, manual adjustments. Amounts are
+// already signed (positive = credit), so this adds rather than subtracts.
+//
+// 'contribution' and 'charge' are deliberately excluded — those two types are
+// owned by the dedicated tables below, and counting them here would double them.
+// Only 'approved' rows count, so a pending transfer does not move a balance
+// before an admin signs it off.
+//
+// NOTE: a transaction with a NULL contract_id belongs to no ledger and is
+// invisible here. Anything written to this table that should affect a balance
+// must name its contract.
+const ADJUSTED = `COALESCE((SELECT SUM(t.amount) FROM transactions t
+  WHERE t.player_id = l.player_id AND t.contract_id = l.contract_id
+    AND t.status = 'approved'
+    AND t.type NOT IN ('contribution', 'charge')), 0)`;
+
 const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
   WHERE q.player_id = l.player_id AND q.contract_id = l.contract_id AND q.historical = 0), 0)`;
 const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
@@ -32,10 +49,11 @@ const SELECT = `
          l.opening_balance, l.status,
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,
+         ${ADJUSTED} AS adjusted,
          ${LIFETIME_GAMES} AS games,
          ${LAST_INCOMING} AS last_incoming_date,
          ${LAST_GAME_DATE} AS last_game_date,
-         ROUND(l.opening_balance + ${CONTRIB} - ${CHARGED}, 2) AS present_balance
+         ROUND(l.opening_balance + ${CONTRIB} - ${CHARGED} + ${ADJUSTED}, 2) AS present_balance
   FROM ledgers l JOIN players p ON p.id = l.player_id`;
 
 export const ledgersRepo = {
@@ -65,6 +83,7 @@ export const ledgersRepo = {
       opening_balance: ledgers.reduce((s, l) => s + l.opening_balance, 0),
       contributed: ledgers.reduce((s, l) => s + l.contributed, 0),
       charged: ledgers.reduce((s, l) => s + l.charged, 0),
+      adjusted: ledgers.reduce((s, l) => s + l.adjusted, 0),
       games: ledgers.reduce((s, l) => s + l.games, 0),
       present_balance: Math.round(ledgers.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
       first_game_date: null,
@@ -75,6 +94,7 @@ export const ledgersRepo = {
         opening_balance: l.opening_balance,
         contributed: l.contributed,
         charged: l.charged,
+        adjusted: l.adjusted,
         present_balance: l.present_balance,
         games: l.games
       }))
@@ -123,6 +143,8 @@ export const ledgersRepo = {
     let totalOpening = 0;
     let totalContributed = 0;
     let totalCharged = 0;
+    let totalAdjusted = 0;
+    let totalPresent = 0;
     let memberDetails = [];
 
     for (const member of groupMembers) {
@@ -131,12 +153,17 @@ export const ledgersRepo = {
         totalOpening += ledger.opening_balance;
         totalContributed += ledger.contributed;
         totalCharged += ledger.charged;
+        totalAdjusted += ledger.adjusted;
+        // Sum the balance the SELECT already computed rather than re-deriving it
+        // from the parts — re-deriving silently drops any term added later.
+        totalPresent += ledger.present_balance;
         memberDetails.push({
           player_id: member.id,
           player_name: ledger.player_name,
           opening_balance: ledger.opening_balance,
           contributed: ledger.contributed,
           charged: ledger.charged,
+          adjusted: ledger.adjusted,
           individual_balance: ledger.present_balance,
         });
       }
@@ -149,7 +176,8 @@ export const ledgersRepo = {
       combined_opening_balance: totalOpening,
       combined_contributed: totalContributed,
       combined_charged: totalCharged,
-      combined_present_balance: Math.round((totalOpening + totalContributed - totalCharged) * 100) / 100,
+      combined_adjusted: totalAdjusted,
+      combined_present_balance: Math.round(totalPresent * 100) / 100,
     };
   },
 

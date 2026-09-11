@@ -27,13 +27,18 @@ async function render() {
     const known = playerCount > 0;
     const paidCount = Number(g.paid_count) || 0;
     const pendingAmount = Number(g.pending_amount) || 0;
-    const collectionRate = known ? Math.round((paidCount / playerCount) * 100) : null;
+    // A game can carry charges that are all worth 0 — the bulk-imported seasons
+    // are attendance records, not bills. pending_amount is 0 for those too, so
+    // without this they read as "✓ Collected" when nothing was ever billed.
+    const billed = totalCharged > 0;
+    const collectionRate = known && billed ? Math.round((paidCount / playerCount) * 100) : null;
 
-    const statusColor = !known ? 'var(--text-muted)'
+    const statusColor = !known || !billed ? 'var(--text-muted)'
       : pendingAmount === 0 ? 'var(--success)'
         : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
     const statusText = !known ? '—'
-      : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
+      : !billed ? 'no charges'
+        : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
 
     return `
       <tr data-gw="${g.id}" style="cursor:pointer;">
