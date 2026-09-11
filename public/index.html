@@ -324,22 +324,7 @@
 
         <!-- EXTERNAL EVENTS (admin) — restaurant bills, venue costs, etc. -->
         <section class="view" data-view="events" hidden>
-          <div class="sams-card">
-            <div class="card-header">
-              <h3 class="card-title">External Events</h3>
-              <span class="card-sub">Restaurant bills, venue costs, equipment — deduct from players' balances</span>
-            </div>
-            <div id="eventFormContainer"></div>
-          </div>
-          <div class="sams-card" style="margin-top: 1.5rem;">
-            <h4 class="card-title">Recent Events</h4>
-            <div style="overflow-x:auto;">
-              <table class="sams-table" id="eventsTable">
-                <thead><tr><th>Event</th><th>Type</th><th>Date</th><th>Players</th><th>Total (AED)</th><th></th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
+          <div id="eventsRoot"></div>
         </section>
 
         <!-- OPENING BALANCES (admin) — import initial balances for a contract (1 Aug baseline) -->

@@ -2,6 +2,9 @@ node_modules/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# Suffixed copies — data/fmss.db.prequoting-backup, fmss.db.old and the like.
+# data/*.db does not match these, and a stray database is a credential file.
+data/*.db.*
 data/seed.json
 
 # Database backups. These contain PINs and password hashes for every player —

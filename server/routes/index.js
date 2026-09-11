@@ -849,42 +849,84 @@ r.get('/admin/audit', wrap((req) => {
   return logs.map(l => ({ ...l, details: l.details ? JSON.parse(l.details) : null }));
 }));
 
-// ---- external events (restaurant bills, venue costs, etc.) ----
+// ---- programmes: Onam nights, tours, team dinners ----
 
-// Admin: create an external event where one person paid and costs are divided among others.
-// payer_id: who paid (gets credit/incoming), participants: who shares cost (get debits/deductions)
 r.post('/admin/events', wrap((req) => {
   requireAdmin(req);
-  const { title, description, event_type, event_date, payer_id, participants, contract_id } = req.body;
-  if (!title || !event_type || !event_date || !payer_id || !participants?.length) {
-    throw new Error('title, event_type, event_date, payer_id, and participants (array) required');
-  }
-  return externalEventsRepo.createEvent(db, authUsersRepo, req.user.id, {
-    title, description, event_type, event_date, payer_id, participants, contract_id
-  });
+  return externalEventsRepo.createEvent(db, authUsersRepo, req.user.id, req.body);
 }));
 
-// Admin: list all external events.
 r.get('/admin/events', wrap((req) => {
   requireAdmin(req);
   return externalEventsRepo.listEvents(db, {
     event_type: req.query.event_type,
+    status: req.query.status,
     since: req.query.since,
-    limit: Number(req.query.limit) || 100
+    limit: Number(req.query.limit) || 100,
   });
 }));
 
-// Admin: get transactions for a specific event (who paid what).
+// Everything one screen needs about a programme: the event, its guest list and
+// the money picture, in one round trip.
 r.get('/admin/events/:eventId', wrap((req) => {
   requireAdmin(req);
-  return externalEventsRepo.getEventTransactions(db, req.params.eventId);
+  const event = externalEventsRepo.getEvent(db, req.params.eventId);
+  if (!event) throw new Error('Event not found');
+  return {
+    event,
+    attendees: externalEventsRepo.listAttendees(db, req.params.eventId),
+    summary: externalEventsRepo.summary(db, req.params.eventId),
+    transactions: externalEventsRepo.getEventTransactions(db, req.params.eventId),
+  };
 }));
 
-// Admin: delete an external event (refunds all participants).
+r.put('/admin/events/:eventId', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.updateEvent(db, req.params.eventId, req.body);
+}));
+
 r.delete('/admin/events/:eventId', wrap((req) => {
   requireAdmin(req);
   externalEventsRepo.deleteEvent(db, req.params.eventId);
   return { ok: true };
+}));
+
+r.post('/admin/events/:eventId/attendees', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.addAttendee(db, req.params.eventId, req.body);
+}));
+
+r.put('/admin/events/attendees/:attendeeId', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.updateAttendee(db, req.params.attendeeId, req.body);
+}));
+
+r.put('/admin/events/attendees/:attendeeId/paid', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.setAttendeePaid(db, req.params.attendeeId, !!req.body.paid);
+}));
+
+r.delete('/admin/events/attendees/:attendeeId', wrap((req) => {
+  requireAdmin(req);
+  externalEventsRepo.removeAttendee(db, req.params.attendeeId);
+  return { ok: true };
+}));
+
+r.post('/admin/events/:eventId/close', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.close(db, req.params.eventId);
+}));
+
+r.post('/admin/events/:eventId/reopen', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.reopen(db, req.params.eventId);
+}));
+
+// Deliberate, never automatic — the surplus or shortfall reaches the club fund
+// only when an admin asks for it.
+r.post('/admin/events/:eventId/post-to-kitty', wrap((req) => {
+  requireAdmin(req);
+  return externalEventsRepo.postNetToKitty(db, kittyRepo, req.params.eventId);
 }));
 
 // ---- player-to-player transfers (kitty transfers) ----

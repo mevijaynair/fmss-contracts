@@ -137,6 +137,8 @@ body.single-sport .sport-scoped { display: none !important; }
   font-size: 0.9rem; color: var(--text-muted); font-weight: 500; position: relative;
   transition: background 0.14s, color 0.14s; }
 .nav button svg { width: 18px; height: 18px; flex: none; opacity: 0.85; transition: opacity 0.14s; }
+/* Separates the everyday views from the occasional tools below them. */
+.nav-divider { height: 1px; background: var(--border-color); margin: 0.6rem 0.75rem 0.5rem; }
 .nav button:hover { background: var(--bg-subtle); color: var(--text-main); }
 .nav button:hover svg { opacity: 1; }
 .nav button.active { background: var(--sport-soft); color: var(--sport-on-soft); font-weight: 600; }

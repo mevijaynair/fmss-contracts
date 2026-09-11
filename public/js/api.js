@@ -101,15 +101,22 @@ export const api = {
   resetPin: (playerId) => req('POST', `/admin/logins/${playerId}/reset`, {}),
   setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
 
-  // ---- external events (restaurant bills, venue costs) ----
-  createEvent: (title, event_type, event_date, participants, description, payer_id, contract_id) =>
-    req('POST', '/admin/events', { title, description, event_type, event_date, payer_id, participants, contract_id }),
+  // ---- programmes (Onam nights, tours, team dinners) ----
+  createEvent: (payload) => req('POST', '/admin/events', payload),
   listEvents: (q = {}) => {
     const p = new URLSearchParams(q).toString();
     return req('GET', `/admin/events${p ? `?${p}` : ''}`);
   },
-  getEventTransactions: (eventId) => req('GET', `/admin/events/${eventId}`),
+  getEvent: (eventId) => req('GET', `/admin/events/${eventId}`),
+  updateEvent: (eventId, patch) => req('PUT', `/admin/events/${eventId}`, patch),
   deleteEvent: (eventId) => req('DELETE', `/admin/events/${eventId}`),
+  addAttendee: (eventId, payload) => req('POST', `/admin/events/${eventId}/attendees`, payload),
+  updateAttendee: (attendeeId, patch) => req('PUT', `/admin/events/attendees/${attendeeId}`, patch),
+  setAttendeePaid: (attendeeId, paid) => req('PUT', `/admin/events/attendees/${attendeeId}/paid`, { paid }),
+  removeAttendee: (attendeeId) => req('DELETE', `/admin/events/attendees/${attendeeId}`),
+  closeEvent: (eventId) => req('POST', `/admin/events/${eventId}/close`, {}),
+  reopenEvent: (eventId) => req('POST', `/admin/events/${eventId}/reopen`, {}),
+  postEventToKitty: (eventId) => req('POST', `/admin/events/${eventId}/post-to-kitty`, {}),
 
   // ---- player-to-player transfers (kitty transfers) ----
   submitTransfer: (to_player_id, contract_id, amount, notes) =>

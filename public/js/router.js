@@ -12,7 +12,7 @@ const ADMIN_NAV = [
 
 // Advanced/rarely-used admin items — collapsed into Settings
 const ADMIN_ADVANCED = [
-  { view: 'events',        label: 'External Events', title: 'External Events' },
+  { view: 'events',        label: 'Programmes',    title: 'Programmes — events, tours and dinners' },
   { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment' },
   { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers' },
   { view: 'logins',        label: 'Player Logins', title: 'Player Logins' },
@@ -51,10 +51,21 @@ let current = null;
 let currentNav = ADMIN_NAV;
 
 export function buildNav(role = 'admin') {
-  currentNav = role === 'player' ? PLAYER_NAV : ADMIN_NAV;
+  const primary = role === 'player' ? PLAYER_NAV : ADMIN_NAV;
+  const advanced = role === 'player' ? [] : ADMIN_ADVANCED;
+  // ADMIN_ADVANCED used to be declared and never rendered, and showView refuses
+  // any view missing from currentNav — so Events, Sandbox, Transfers and Player
+  // Logins existed as built screens that nothing could open. They live under a
+  // divider now rather than in the main list, since they are occasional tools.
+  currentNav = [...primary, ...advanced];
+
+  const button = (n) =>
+    `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`;
   const nav = document.getElementById('nav');
-  nav.innerHTML = currentNav.map(n =>
-    `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`).join('');
+  nav.innerHTML = primary.map(button).join('')
+    + (advanced.length
+      ? `<div class="nav-divider" aria-hidden="true"></div>${advanced.map(button).join('')}`
+      : '');
   nav.querySelectorAll('button').forEach(b =>
     b.addEventListener('click', () => showView(b.dataset.view)));
 }

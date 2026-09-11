@@ -201,7 +201,9 @@ CREATE TABLE IF NOT EXISTS external_events (
   description   TEXT,
   event_date    TEXT NOT NULL,
   event_type    TEXT NOT NULL,              -- 'meal', 'venue', 'equipment', 'other'
-  created_by    TEXT NOT NULL REFERENCES auth_users(id),  -- admin who created
+  -- Plain TEXT, like transactions.created_by: an admin signed in with the
+  -- shared password has no auth_users row to point at.
+  created_by    TEXT,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
 );
@@ -555,6 +557,106 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_financing_gw ON game_financing(gameweek_id)');
         db.exec('CREATE INDEX IF NOT EXISTS idx_financing_contract ON game_financing(contract_id)');
         db.exec('CREATE INDEX IF NOT EXISTS idx_financing_category ON game_financing(category)');
+      }
+    },
+
+    // external_events: turn a flat split-the-bill record into a budgeted programme
+    // (an Onam night, a tour) that can be planned before it happens, priced per
+    // head by tier, and closed once the money is in.
+    () => {
+      const cols = db.prepare('PRAGMA table_info(external_events)').all().map(c => c.name);
+      const add = (sql) => db.exec(`ALTER TABLE external_events ADD COLUMN ${sql}`);
+      // Which ledger a balance-charged attendee is billed against.
+      if (!cols.includes('contract_id')) add('contract_id TEXT REFERENCES contracts(id)');
+      // What it was expected to cost, versus what it actually cost.
+      if (!cols.includes('budget_amount')) add('budget_amount REAL NOT NULL DEFAULT 0');
+      if (!cols.includes('actual_amount')) add('actual_amount REAL NOT NULL DEFAULT 0');
+      // Who fronted the real spend, if anyone — they get credited for it.
+      if (!cols.includes('paid_by_player_id')) add('paid_by_player_id TEXT REFERENCES players(id)');
+      // Per-head price list, e.g. {"adult":150,"child":75,"infant":0}. Held as
+      // JSON because it is small, per-event, and only ever read whole.
+      if (!cols.includes('tiers')) add("tiers TEXT NOT NULL DEFAULT '{}'");
+      if (!cols.includes('status')) {
+        add("status TEXT NOT NULL DEFAULT 'planning' CHECK(status IN ('planning', 'open', 'closed'))");
+      }
+      if (!cols.includes('closed_at')) add('closed_at TEXT');
+    },
+
+    // external_events.created_by was NOT NULL REFERENCES auth_users(id), which an
+    // admin signed in with the shared password can never satisfy — they have no
+    // auth_users row, so req.user.id is undefined and every insert died on the
+    // binding. transactions.created_by is plain nullable TEXT for exactly this
+    // reason; match it. Rebuilt rather than altered because SQLite cannot drop a
+    // NOT NULL in place.
+    () => {
+      const fk = db.prepare('PRAGMA foreign_key_list(external_events)').all();
+      const createdBy = db.prepare('PRAGMA table_info(external_events)').all()
+        .find(c => c.name === 'created_by');
+      if (!createdBy || (createdBy.notnull === 0 && fk.every(f => f.from !== 'created_by'))) return;
+
+      // RENAME re-parses the whole schema, so on a database still carrying the
+      // double-quoted literals that be95df1 describes it fails on an unrelated
+      // table. That is a repairable condition (scripts/fix-schema-quoting.js),
+      // not a reason to take the app down at boot — leave the old shape in place
+      // and say so. createEvent still works; it just cannot record a password
+      // admin as the author until the database is repaired.
+      try {
+      db.exec('PRAGMA foreign_keys = OFF;');
+      db.exec(`CREATE TABLE external_events_new (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT,
+        event_date TEXT NOT NULL, event_type TEXT NOT NULL,
+        contract_id TEXT REFERENCES contracts(id),
+        budget_amount REAL NOT NULL DEFAULT 0,
+        actual_amount REAL NOT NULL DEFAULT 0,
+        paid_by_player_id TEXT REFERENCES players(id),
+        tiers TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'planning' CHECK(status IN ('planning', 'open', 'closed')),
+        closed_at TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+      db.exec(`INSERT INTO external_events_new
+        (id, title, description, event_date, event_type, contract_id, budget_amount,
+         actual_amount, paid_by_player_id, tiers, status, closed_at, created_by, created_at, updated_at)
+        SELECT id, title, description, event_date, event_type, contract_id, budget_amount,
+               actual_amount, paid_by_player_id, tiers, status, closed_at, created_by, created_at, updated_at
+        FROM external_events`);
+      db.exec('DROP TABLE external_events;');
+      db.exec('ALTER TABLE external_events_new RENAME TO external_events;');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_event_type ON external_events(event_type)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_event_date ON external_events(event_date)');
+      } catch (e) {
+        console.warn('[migrate] could not relax external_events.created_by:', e.message);
+        try { db.exec('DROP TABLE IF EXISTS external_events_new;'); } catch { /* nothing to undo */ }
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON;');
+      }
+    },
+
+    // event_attendees: one row per head, member or guest. A guest may hang off a
+    // host member (a wife, kids) or stand alone if they settle directly, so
+    // player_id and host_player_id are both nullable but never both absent
+    // without a guest_name to identify the row.
+    () => {
+      try {
+        db.prepare('SELECT id FROM event_attendees LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE event_attendees (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL REFERENCES external_events(id) ON DELETE CASCADE,
+          player_id TEXT REFERENCES players(id),
+          guest_name TEXT,
+          host_player_id TEXT REFERENCES players(id),
+          tier TEXT NOT NULL DEFAULT 'adult',
+          amount_due REAL NOT NULL DEFAULT 0,
+          pay_method TEXT NOT NULL DEFAULT 'cash' CHECK(pay_method IN ('cash', 'balance')),
+          paid INTEGER NOT NULL DEFAULT 0,
+          paid_at TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_event ON event_attendees(event_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_player ON event_attendees(player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_host ON event_attendees(host_player_id)');
       }
     },
   ];
