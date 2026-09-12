@@ -151,18 +151,29 @@ function initAdmin() {
     const usingSplit = splitDiv && splitDiv.style.display !== 'none';
 
     if (usingSplit) {
-      const splits = Array.from(document.querySelectorAll('[data-split-contract]')).map(row => ({
-        contract_id: row.querySelector('[data-split-contract]').value,
-        amount: Number(row.querySelector('[data-split-amount]').value) || 0,
-      }));
-
-      const splitTotal = splits.reduce((s, x) => s + x.amount, 0);
-      if (Math.abs(splitTotal - totalAmount) > 0.01) {
-        toast('Split amounts must equal total', true);
-        return;
-      }
-
       try {
+        // Each split is a row DIV wrapping the select and the amount. This used
+        // to select the SELECTS and then look for a [data-split-contract]
+        // *inside* each one, which is never there — so .value threw on a null,
+        // outside the try, and the submit died without saving anything or
+        // saying why. A split payment simply appeared to do nothing.
+        const splits = Array.from(document.querySelectorAll('#splitRows > div'))
+          .map(row => ({
+            contract_id: row.querySelector('[data-split-contract]')?.value || '',
+            amount: Number(row.querySelector('[data-split-amount]')?.value) || 0,
+          }))
+          .filter(s => s.contract_id && s.amount > 0);
+
+        if (!splits.length) {
+          toast('Put an amount against at least one contract', true);
+          return;
+        }
+        const splitTotal = splits.reduce((s, x) => s + x.amount, 0);
+        if (Math.abs(splitTotal - totalAmount) > 0.01) {
+          toast(`Split adds up to ${splitTotal}, but the payment is ${totalAmount}`, true);
+          return;
+        }
+
         for (const split of splits) {
           await api.createContribution({
             player_id: playerId,
@@ -171,7 +182,7 @@ function initAdmin() {
             date, comments: comments ? `${comments} (split from total)` : 'Split contribution',
           });
         }
-        toast('Split contribution added ✓');
+        toast(`Split across ${splits.length} contracts ✓`);
         $('cf_amount').value = ''; $('cf_comments').value = '';
         renderLog();
       } catch (err) { toast(err.message, true); }
@@ -209,11 +220,14 @@ function renderSplitRows() {
           ${store.contracts.map(x => `<option value="${x.id}" ${x.id === c.id ? 'selected' : ''}>${x.name}</option>`).join('')}
         </select>
         <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-        <button type="button" class="btn btn-secondary btn-sm" style="padding: 0.5rem 0.8rem;" onclick="this.parentElement.remove(); updateSplitTotal();">✕</button>`;
+        <button type="button" class="btn btn-secondary btn-sm" data-split-remove style="padding: 0.5rem 0.8rem;">✕</button>`;
       rows.appendChild(row);
 
       row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
       row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
+      row.querySelector('[data-split-remove]').addEventListener('click', () => {
+        row.remove(); updateSplitTotal();
+      });
     });
   }
 
@@ -227,11 +241,14 @@ function renderSplitRows() {
         ${store.contracts.map(x => `<option value="${x.id}">${x.name}</option>`).join('')}
       </select>
       <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-      <button type="button" class="btn btn-secondary btn-sm" style="padding: 0.5rem 0.8rem;" onclick="this.parentElement.remove(); updateSplitTotal();">✕</button>`;
+      <button type="button" class="btn btn-secondary btn-sm" data-split-remove style="padding: 0.5rem 0.8rem;">✕</button>`;
     rows.appendChild(row);
 
     row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
     row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
+    row.querySelector('[data-split-remove]').addEventListener('click', () => {
+      row.remove(); updateSplitTotal();
+    });
   };
 }
 
