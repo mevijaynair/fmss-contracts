@@ -131,12 +131,17 @@ async function render() {
     const billed = totalCharged > 0;
     const collectionRate = known && billed ? Math.round((paidCount / playerCount) * 100) : null;
 
+    // A pre-baseline game was settled on the credit sheets before any of this
+    // existed. Saying "no charges" about it invites someone to go looking for
+    // the missing money; saying where it was settled does not.
     const statusColor = !known || !billed ? 'var(--text-muted)'
       : pendingAmount === 0 ? 'var(--success)'
         : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
-    const statusText = !known ? '—'
-      : !billed ? 'no charges'
-        : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
+    const statusText = g.historical && !billed
+      ? '<span title="Played before this app tracked money. Settled on the credit sheets, and already inside the opening balances.">settled in the sheets</span>'
+      : !known ? '—'
+        : !billed ? 'no charges'
+          : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
 
     return `
       <tr data-gw="${g.id}" style="cursor:pointer;">

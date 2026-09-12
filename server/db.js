@@ -659,6 +659,26 @@ export function initSchema() {
       }
     },
 
+    // Games that predate the contract's baseline and never billed anybody were
+    // tracked on the credit sheets, not in here. They carry a charge row per
+    // player worth 0 — an attendance record — and the opening balance already
+    // nets their money out. `historical` is the flag that means exactly that,
+    // and it had never been set on them, so they read as ordinary games that
+    // nobody had got round to billing.
+    //
+    // Deliberately narrow: only games BEFORE season_start, and only where not a
+    // single charge carries an amount. A real game can never match, so this
+    // cannot quietly write off money.
+    () => {
+      db.prepare(
+        `UPDATE gameweeks SET historical = 1
+         WHERE historical = 0
+           AND date < (SELECT season_start FROM contracts WHERE contracts.id = gameweeks.contract_id)
+           AND NOT EXISTS (
+             SELECT 1 FROM charges ch WHERE ch.gameweek_id = gameweeks.id AND ch.amount > 0)`
+      ).run();
+    },
+
     // A date the fixture was not played. Without this there is no way to tell
     // "no game that week" apart from "nobody has entered it yet", and the whole
     // point of tracking the schedule is telling those two apart.
