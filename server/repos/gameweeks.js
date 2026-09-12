@@ -139,11 +139,14 @@ export const gameweeksRepo = {
              COALESCE(SUM(ch.amount), 0) AS charged,
              COALESCE(SUM(CASE WHEN ${awaitingCash} THEN 0 ELSE 1 END), 0) AS paid_count,
              COALESCE(SUM(CASE WHEN ${awaitingCash} THEN ch.amount ELSE 0 END), 0) AS pending_amount,
-             -- Who to go and ask. A total on its own tells you money is out
-             -- there without telling you whose pocket it is in, which is the
-             -- one thing needed to collect it. NULLs are skipped, so this is
-             -- empty for a game with nothing outstanding.
-             GROUP_CONCAT(CASE WHEN ${awaitingCash} THEN sp.name END, ', ') AS pending_names
+             -- Who to go and ask, and for how much. A total on its own tells you
+             -- money is out there without telling you whose pocket it is in,
+             -- which is the one thing needed to collect it. Packed as
+             -- name|amount pairs joined by ';' — neither character occurs in a
+             -- player name — and NULLs are skipped, so this is empty for a game
+             -- with nothing outstanding.
+             GROUP_CONCAT(CASE WHEN ${awaitingCash}
+               THEN sp.name || '|' || ch.amount END, ';') AS pending_names
       FROM charges ch
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
       WHERE ch.gameweek_id IN (${placeholders})
