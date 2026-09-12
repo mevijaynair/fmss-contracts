@@ -49,9 +49,42 @@ export const playersRepo = {
     // Find player by exact name match (case-insensitive)
     return row(db.prepare('SELECT * FROM players WHERE LOWER(name) = LOWER(?)').get(name));
   },
+  /**
+   * Remove a player who should never have existed — a typo, or a name added
+   * from the wrong import.
+   *
+   * Refuses anyone carrying financial history. Deleting a player who has been
+   * charged for games or has paid money in would tear rows out of the club's
+   * accounts to tidy up a roster, which is never the right trade; rename them
+   * or leave them dormant instead.
+   *
+   * Fourteen tables reference players(id). This used to clear three, so with
+   * foreign keys on, deleting anyone who had reached any of the other eleven —
+   * a locked opening-balance snapshot, for instance — failed outright.
+   */
   delete(id) {
-    // Complete removal: player + all ledger rows + all contributions
-    db.prepare('DELETE FROM contributions WHERE player_id = ?').run(id);
+    const counts = {
+      charges: db.prepare('SELECT COUNT(*) n FROM charges WHERE player_id = ? OR charged_to = ?').get(id, id).n,
+      contributions: db.prepare('SELECT COUNT(*) n FROM contributions WHERE player_id = ?').get(id).n,
+      transactions: db.prepare('SELECT COUNT(*) n FROM transactions WHERE player_id = ? OR related_player_id = ?').get(id, id).n,
+      events: db.prepare('SELECT COUNT(*) n FROM event_attendees WHERE player_id = ? OR host_player_id = ?').get(id, id).n,
+      financing: db.prepare('SELECT COUNT(*) n FROM game_financing WHERE payer_id = ?').get(id).n,
+      paid_for_event: db.prepare('SELECT COUNT(*) n FROM external_events WHERE paid_by_player_id = ?').get(id).n,
+    };
+    const held = Object.entries(counts).filter(([, n]) => n > 0);
+    if (held.length) {
+      throw new Error(
+        `${id} has financial history (${held.map(([k, n]) => `${n} ${k}`).join(', ')}) and cannot be deleted. ` +
+        'Rename them or leave them dormant instead — removing them would take those records with them.'
+      );
+    }
+
+    // Safe to remove: nothing here is an accounting record.
+    db.prepare('UPDATE players SET introduced_by = NULL WHERE introduced_by = ?').run(id);
+    db.prepare('UPDATE audit_log SET player_id = NULL WHERE player_id = ?').run(id);
+    db.prepare('DELETE FROM opening_balances_snapshot WHERE player_id = ?').run(id);
+    db.prepare('DELETE FROM contributions_pending WHERE player_id = ?').run(id);
+    db.prepare('DELETE FROM auth_users WHERE player_id = ?').run(id);
     db.prepare('DELETE FROM ledgers WHERE player_id = ?').run(id);
     db.prepare('DELETE FROM players WHERE id = ?').run(id);
   },
