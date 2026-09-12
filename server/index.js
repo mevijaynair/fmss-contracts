@@ -71,7 +71,7 @@ app.post('/api/login', (req, res) => {
     } else {
       // Admin login: password only
       if (!password) return res.status(400).json({ error: 'password is required' });
-      result = auth.loginAdmin(password);
+      result = auth.loginAdmin(db, password);
     }
 
     res.json(result);

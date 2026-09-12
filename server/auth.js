@@ -49,11 +49,18 @@ export const auth = {
   },
 
   // Admin login: password-only
-  loginAdmin(password) {
+  loginAdmin(db, password) {
     if (password !== getSecret()) {
       throw new Error('Invalid password');
     }
+    // Carry the shared admin's id so req.user.id is a real auth_users row.
+    // Without it the token had no identity at all, and everything that records
+    // who acted — transfer approvals, audit entries — had nothing to write.
+    // Falls back to null rather than failing a login if the row is somehow
+    // absent: signing in matters more than attribution.
+    const admin = db.prepare("SELECT id FROM auth_users WHERE role = 'admin' ORDER BY created_at LIMIT 1").get();
     const payload = {
+      userId: admin?.id ?? null,
       role: 'admin',
       adminMode: true,
     };

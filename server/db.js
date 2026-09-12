@@ -659,6 +659,31 @@ export function initSchema() {
       }
     },
 
+    // An identity for the shared-password admin.
+    //
+    // Admin tokens carried only { role, adminMode }, so req.user.id was
+    // undefined everywhere — which broke external event creation, the
+    // opening-balance snapshot and transfer approval in turn, each discovered
+    // only when somebody opened that screen. Three tables also hold a foreign
+    // key to auth_users for "who did this", and none of them could ever be
+    // filled in.
+    //
+    // This row is an anchor for attribution, not a credential: the password in
+    // the environment remains the only way to sign in as admin. It carries no
+    // PIN and an empty password hash, so nothing can authenticate as it through
+    // the player path — which additionally requires role = 'player'.
+    //
+    // It is deliberately one shared identity, because that is what a shared
+    // password is. Naming individual admins would need real per-person
+    // credentials, and this does not foreclose that.
+    () => {
+      db.prepare(
+        `INSERT OR IGNORE INTO auth_users
+           (id, email, password_hash, pin, pin_salt, requires_pin_change, role, player_id, is_active, created_at)
+         VALUES ('admin', NULL, '', NULL, NULL, 0, 'admin', NULL, 1, ?)`
+      ).run(new Date().toISOString());
+    },
+
     // One bank transfer can be split across contracts, which writes a row per
     // contract. Without something joining them, two unrelated-looking entries
     // are all that is left of a single payment — and reconciling them back to a
