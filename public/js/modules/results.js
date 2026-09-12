@@ -359,7 +359,7 @@ function showLeaderboards(stats) {
         [...all].sort((a, b) => b.games - a.games), p => p.games)}
       ${board('📈 Best Win Rate', 'of games with a result', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
-        p => `${pct(p.winRate)} <span class="hint">${p.wins}/${p.decided}</span>`)}
+        p => ({ v: pct(p.winRate), meta: `${p.wins} of ${p.decided} decided` }))}
       ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
         [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
         p => ({ v: p.longestWin, meta: `${esc(shortSpan(p.longestWinFrom, p.longestWinTo))}${
@@ -370,13 +370,17 @@ function showLeaderboards(stats) {
           meta: esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo)) }))}
       ${board('👑 Best Captain Rate', 'wins as captain, of games with a result', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
-        p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainDecided}${
-  p.captainGames > p.captainDecided
-    ? ` <span title="Captained, but the game has no recorded score, so it cannot count either way">+${
-      p.captainGames - p.captainDecided} unscored</span>` : ''}</span>`)}
+        p => ({ v: pct(p.captainWinRate),
+          meta: `${p.captainWins} of ${p.captainDecided} led${
+            p.captainGames > p.captainDecided
+              ? ` · ${p.captainGames - p.captainDecided} unscored` : ''}` }))}
       ${board('⚽ Goal Difference', 'per decided game', '',
         [...rated].sort((a, b) => b.gdPerGame - a.gdPerGame),
-        p => `${signed(p.gd)} <span class="hint">${signed(p.gdPerGame)}/g</span>`)}
+        // Ranked per game, so the per-game figure is the one in bold. Leading
+        // with the total while sorting by the rate put Rony's +19 below
+        // Praveen's +7 and read as a broken sort.
+        p => ({ v: `${signed(p.gdPerGame)}`,
+          meta: `${signed(p.gd)} over ${p.decided} games` }))}
     </div>`;
 
   slot('results-lb').querySelectorAll('[data-player]').forEach(d =>
