@@ -59,8 +59,20 @@ export const statsRepo = {
           known: true,
         };
       } else {
-        sc = normaliseScore(row.scoreline);
-        if (!sc.known && row.score) sc = normaliseScore(row.score);
+        // Only the readable text, never the scoreline.
+        //
+        // A game is created with scoreline "0-0" whether or not anyone entered a
+        // score, so an unplayed-out result is indistinguishable from a genuine
+        // nil-nil — and parsing it counted both as draws. Mon/Thu's 17 August
+        // and 10 September have no score at all, and every player who appeared
+        // in them was credited with a draw: Jeetu read 75% instead of 100%,
+        // Kartik 50% instead of 100%, and every rate on the contract was
+        // deflated by phantom draws.
+        //
+        // `score` is only ever non-empty because somebody wrote a result, so it
+        // carries no such ambiguity, and imported games have it while having no
+        // scoreline at all.
+        sc = normaliseScore(row.score);
       }
       const wt = winningTeam(sc.winner, teams);
       const decided = sc.known && (sc.winner === 'draw' || wt);

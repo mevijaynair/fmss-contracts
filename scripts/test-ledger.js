@@ -398,6 +398,30 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
 });
 
+test('a game nobody scored is unknown, not a nil-nil draw', () => {
+  // Every game is created with scoreline "0-0" whether or not a score was
+  // entered, so reading it as a result made "nobody recorded this" into a draw
+  // and deflated every win rate on the contract.
+  const a = player('Turned up'); const b = player('Also turned up');
+  const gw = playGame({ pitch: 0, teams_raw: 'Red / Blue', players: [
+    { player_id: a, amount: 0, team: 'Red' }, { player_id: b, amount: 0, team: 'Blue' },
+  ] });
+  const stored = db.prepare('SELECT score, scoreline FROM gameweeks WHERE id = ?').get(gw.id);
+  assert.equal(stored.score, '', 'no score was entered');
+
+  const r = statsRepo.matchRecord(a, CONTRACT);
+  assert.equal(r.draws, 0, 'an unscored game is not a draw');
+  assert.equal(r.unknown, 1, 'it is simply unknown');
+  assert.equal(r.winRate, null, 'and it cannot make a win rate');
+
+  // A real nil-nil, entered deliberately, still counts.
+  gameweeksRepo.updateMetadata(gw.id, { score: '0-0' });
+  const after = statsRepo.matchRecord(a, CONTRACT);
+  assert.equal(after.draws, 1, 'a recorded 0-0 is a draw');
+  assert.equal(after.unknown, 0);
+  assert.ok(stored.scoreline !== undefined);
+});
+
 test('a win is read from the result row, not re-parsed from the text', () => {
   // The bare scoreline "3-7" cannot say who scored seven, and every live game
   // has one — so reading `scoreline || score` meant no Mon/Thu game ever

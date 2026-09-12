@@ -676,7 +676,9 @@ r.get('/results', wrap((req) => {
         known: true,
         assumed: false,
       }
-      : normaliseScore(g.score || g.scoreline);
+      // Same reason as statsRepo: scoreline is "0-0" on any game nobody scored,
+      // so falling back to it turns "no result recorded" into a nil-nil draw.
+      : normaliseScore(g.score);
     return {
       ...g,
       charges,

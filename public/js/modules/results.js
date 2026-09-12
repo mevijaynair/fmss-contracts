@@ -128,12 +128,16 @@ function buildStats(gws) {
     const s = {
       id, name, games: games.length,
       wins: 0, draws: 0, losses: 0, unknown: 0,
-      gf: 0, ga: 0, captainGames: 0, captainWins: 0,
+      gf: 0, ga: 0, captainGames: 0, captainDecided: 0, captainWins: 0,
       first: games[0]?.date || null, last: games[games.length - 1]?.date || null,
     };
     for (const g of games) {
       if (g.captain) s.captainGames++;
       if (!g.outcome) { s.unknown++; continue; }
+      // Only games with a result can be won, so only those belong in the
+      // denominator of a win rate. Counting every captained game there — including
+      // ones with no score — quietly deflated every captain's record.
+      if (g.captain) s.captainDecided++;
       const w = Number(g.result.goalsWin) || 0;
       const l = Number(g.result.goalsLose) || 0;
       if (g.outcome === 'win') { s.wins++; s.gf += w; s.ga += l; if (g.captain) s.captainWins++; }
@@ -144,7 +148,8 @@ function buildStats(gws) {
     s.winRate = s.decided ? Math.round((s.wins / s.decided) * 100) : null;
     s.gd = s.gf - s.ga;
     s.gdPerGame = s.decided ? +(s.gd / s.decided).toFixed(2) : null;
-    s.captainWinRate = s.captainGames ? Math.round((s.captainWins / s.captainGames) * 100) : null;
+    s.captainWinRate = s.captainDecided
+      ? Math.round((s.captainWins / s.captainDecided) * 100) : null;
     Object.assign(s, streaks(games));
     s.form = form(games);
     out[id] = s;
