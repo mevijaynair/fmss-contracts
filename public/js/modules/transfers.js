@@ -178,8 +178,6 @@ export function initTransfers() {
     }
   }
 
-  // Listen for view changes to load transfers when the view is shown
-  window.addEventListener('fmss:view', (e) => {
-    if (e.detail === 'transfers') loadTransfers();
-  });
+  // No fmss:view listener here: main.js already routes that event through its
+  // LOADERS map to loadTransfers(). A second one just doubles every request.
 }

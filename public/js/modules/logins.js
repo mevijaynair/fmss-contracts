@@ -100,10 +100,9 @@ export function initLogins() {
         : 'Every player already has a login');
     } catch (e) { toast(e.message, true); }
   });
-  // Load table when this view is shown
-  window.addEventListener('fmss:view', (e) => {
-    if (e.detail === 'logins') load();
-  });
+  // No fmss:view listener here: main.js already routes that event through its
+  // LOADERS map to loadLogins(). Registering a second one fired two identical
+  // requests every time the view opened.
 }
 
 export function loadLogins() {

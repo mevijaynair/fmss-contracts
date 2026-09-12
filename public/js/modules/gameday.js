@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, today, contractSeg } from '../util.js';
 import { loadDashboard } from './dashboard.js';
+import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.js';
 
 let contractId = 'sat';
 let rows = [];                 // current preview rows (mutable amounts)
@@ -217,11 +218,6 @@ async function showUnmatchedMapping(unmatched) {
 
 // Mark unidentified/outside players inline via dropdown (removed dialog prompts)
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const dayOf = (iso) => DAYS[new Date(`${iso}T00:00:00Z`).getUTCDay()];
-const pretty = (iso) => `${dayOf(iso)} ${new Date(`${iso}T00:00:00Z`).getUTCDate()} ${
-  ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][new Date(`${iso}T00:00:00Z`).getUTCMonth()]}`;
-
 /**
  * Which fixture is being entered. The date box alone cannot answer "what do I
  * do next?", so this names the oldest date nothing has been said about and
@@ -233,10 +229,8 @@ const pretty = (iso) => `${dayOf(iso)} ${new Date(`${iso}T00:00:00Z`).getUTCDate
 async function renderFixture() {
   const host = $('gdFixture');
   if (!host) return;
-  let s;
-  try { s = await api.schedule(contractId); }
-  catch { host.innerHTML = ''; return; }
-  if (!s.game_days?.length) { host.innerHTML = ''; return; }
+  const s = await loadSchedule(contractId);
+  if (!s) { host.innerHTML = ''; return; }
 
   const missing = s.days.filter(d => d.state === 'missing');
   const skipped = s.days.filter(d => d.state === 'no_game');
@@ -247,8 +241,8 @@ async function renderFixture() {
   if (dateBox && !dateBox.dataset.touched) dateBox.value = next || today();
 
   const options = [
-    ...missing.map(d => `<option value="${d.date}" ${d.date === next ? 'selected' : ''}>${pretty(d.date)} — nothing recorded</option>`),
-    ...skipped.map(d => `<option value="${d.date}">${pretty(d.date)} — marked no game</option>`),
+    ...missing.map(d => `<option value="${d.date}" ${d.date === next ? 'selected' : ''}>${fixtureDate(d.date)} — nothing recorded</option>`),
+    ...skipped.map(d => `<option value="${d.date}">${fixtureDate(d.date)} — marked no game</option>`),
   ].join('');
 
   host.innerHTML = `
@@ -256,7 +250,7 @@ async function renderFixture() {
       ${next ? `
         <div class="gd-fixture-lead">
           <span class="hint">Next to account for</span>
-          <strong>${pretty(next)}</strong>
+          <strong>${fixtureDate(next)}</strong>
         </div>
         <div class="gd-fixture-actions">
           <button class="btn btn-secondary btn-sm" id="gdNoGame">No game that day</button>
@@ -274,13 +268,7 @@ async function renderFixture() {
     <p class="hint" data-gd-reopen style="margin:0.4rem 0 0.8rem"></p>`;
 
   $('gdNoGame')?.addEventListener('click', async () => {
-    const reason = prompt(`No game on ${pretty(next)}?\n\nWhy not? (optional)`);
-    if (reason === null) return;
-    try {
-      await api.markNoGame(contractId, next, reason.trim() || null);
-      toast(`${pretty(next)} marked as no game`);
-      renderFixture();
-    } catch (e) { toast(e.message, true); }
+    if (await markNoGame(contractId, next)) renderFixture();
   });
 
   $('gdFixturePick')?.addEventListener('change', (e) => {
@@ -291,7 +279,7 @@ async function renderFixture() {
     const wasSkipped = skipped.some(d => d.date === picked);
     if (note) {
       note.textContent = wasSkipped
-        ? `${pretty(picked)} was marked as no game — confirming a game here will undo that.`
+        ? `${fixtureDate(picked)} was marked as no game — confirming a game here will undo that.`
         : '';
     }
   });

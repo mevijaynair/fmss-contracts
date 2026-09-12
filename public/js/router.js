@@ -1,22 +1,27 @@
 // router.js — sidebar nav + single active view. Two-tier role-based nav.
+// Grouped by the job being done, not by what the screen is called. A flat list
+// of thirteen nouns made "which of these is about money?" a question you had to
+// answer by memory — nine of them are.
 const ADMIN_NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
+
+  { group: 'Match night' },
   { view: 'gameday',       label: 'Game Day',      title: 'Game Day — paste WhatsApp teams' },
+  { view: 'gameweeks',     label: 'Season',        title: 'Season — every fixture, result and settlement' },
   { view: 'results',       label: 'Results',       title: 'Match Results' },
+
+  { group: 'Money' },
   { view: 'players',       label: 'Players',       title: 'Player Ledger' },
   { view: 'report',        label: 'Standing',      title: 'Credit Tracking — the sheet players see' },
   { view: 'contributions', label: 'Contributions', title: 'Contributions' },
-  { view: 'gameweeks',     label: 'Game History',  title: 'Game History' },
   { view: 'kitty',         label: 'Kitty',         title: 'Club Kitty' },
-  { view: 'settings',      label: 'Settings',      title: 'Contract Settings & Admin' },
-];
-
-// Advanced/rarely-used admin items — collapsed into Settings
-const ADMIN_ADVANCED = [
   { view: 'events',        label: 'Programmes',    title: 'Programmes — events, tours and dinners' },
-  { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment' },
-  { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers' },
+
+  { group: 'Running it' },
+  { view: 'settings',      label: 'Settings',      title: 'Contract Settings & Admin' },
   { view: 'logins',        label: 'Player Logins', title: 'Player Logins' },
+  { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers' },
+  { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment' },
 ];
 
 const PLAYER_NAV = [
@@ -53,21 +58,16 @@ let current = null;
 let currentNav = ADMIN_NAV;
 
 export function buildNav(role = 'admin') {
-  const primary = role === 'player' ? PLAYER_NAV : ADMIN_NAV;
-  const advanced = role === 'player' ? [] : ADMIN_ADVANCED;
-  // ADMIN_ADVANCED used to be declared and never rendered, and showView refuses
-  // any view missing from currentNav — so Events, Sandbox, Transfers and Player
-  // Logins existed as built screens that nothing could open. They live under a
-  // divider now rather than in the main list, since they are occasional tools.
-  currentNav = [...primary, ...advanced];
+  const items = role === 'player' ? PLAYER_NAV : ADMIN_NAV;
+  // Headings are layout, not destinations — showView looks callers up in here,
+  // so they must not end up in it.
+  currentNav = items.filter(n => n.view);
 
-  const button = (n) =>
-    `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`;
   const nav = document.getElementById('nav');
-  nav.innerHTML = primary.map(button).join('')
-    + (advanced.length
-      ? `<div class="nav-divider" aria-hidden="true"></div>${advanced.map(button).join('')}`
-      : '');
+  nav.innerHTML = items.map(n => n.group
+    ? `<div class="nav-group">${n.group}</div>`
+    : `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`
+  ).join('');
   nav.querySelectorAll('button').forEach(b =>
     b.addEventListener('click', () => showView(b.dataset.view)));
 }

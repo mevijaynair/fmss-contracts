@@ -3,8 +3,14 @@
 async function req(method, path, body) {
   const opts = { method, headers: {} };
 
-  // Attach token for protected endpoints
-  if (!path.includes('/login')) {
+  // Attach the token to everything except the one endpoint that issues it.
+  //
+  // This tested `path.includes('/login')`, and every Player Logins admin route
+  // contains that substring — /admin/logins, /admin/logins/generate,
+  // /admin/logins/:id/reset. All of them went out unauthenticated, came back
+  // 401, and the handler below then cleared the token and reloaded. Opening
+  // that screen logged you straight out, which is why it never worked.
+  if (path !== '/login') {
     const token = localStorage.getItem('fmss_token');
     if (token) {
       opts.headers['Authorization'] = `Bearer ${token}`;

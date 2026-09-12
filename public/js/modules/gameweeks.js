@@ -2,10 +2,9 @@
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../util.js';
+import { fixtureDate, dayName, describeDays, loadSchedule, markNoGame, reopenDate } from '../schedule-ui.js';
 
 let contractId = 'sat';
-
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /**
  * The season as a run of fixture dates, so a week that was never entered is
@@ -16,11 +15,8 @@ async function renderSchedule() {
   const host = $('gwSchedule');
   if (!host) return;
 
-  let s;
-  try { s = await api.schedule(contractId); }
-  catch { host.innerHTML = ''; return; }
-
-  if (!s.game_days?.length) {
+  const s = await loadSchedule(contractId);
+  if (!s) {
     host.innerHTML = `<p class="hint" style="margin:0 0 1rem;">
       No fixture days set for this contract, so the season cannot be tracked.</p>`;
     return;
@@ -28,10 +24,10 @@ async function renderSchedule() {
 
   const { expected, played, no_game: noGame, missing } = s.counts;
   const pct = expected ? Math.round(((played + noGame) / expected) * 100) : 100;
-  const playsOn = s.game_days.map(d => DAY_NAMES[d]).join(' and ');
+  const playsOn = describeDays(s.game_days);
 
   const pill = (d) => {
-    const label = fmtDate(d.date);
+    const label = fixtureDate(d.date);
     if (d.state === 'played') {
       return `<button class="sched-pill is-played" data-open-gw="${d.gameweek_id}"
         title="Game recorded — ${d.num_players || 0} players. Click to open.">✓ ${label}</button>`;
@@ -49,7 +45,7 @@ async function renderSchedule() {
       <div class="sched-head">
         <div>
           <strong>Season so far</strong>
-          <span class="hint"> · plays ${esc(playsOn)} · from ${fmtDate(s.season_start)}</span>
+          <span class="hint"> · plays ${esc(playsOn)} · from ${fixtureDate(s.season_start)}</span>
         </div>
         <div class="hint">
           ${played} played · ${noGame} no game ·
@@ -61,8 +57,8 @@ async function renderSchedule() {
       </div>
       ${s.next_missing ? `
         <div class="sched-next">
-          <div>Next to account for: <strong>${fmtDate(s.next_missing)}</strong>
-            <span class="hint">(${DAY_NAMES[new Date(s.next_missing + 'T00:00:00Z').getUTCDay()]})</span></div>
+          <div>Next to account for: <strong>${fixtureDate(s.next_missing)}</strong>
+            <span class="hint">(${dayName(s.next_missing)})</span></div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
             <button class="btn btn-sm" data-enter="${s.next_missing}">Enter this game</button>
             <button class="btn btn-secondary btn-sm" data-nogame="${s.next_missing}">No game that day</button>
@@ -71,7 +67,7 @@ async function renderSchedule() {
         <p class="hint" style="margin:0.6rem 0 0;">Every fixture date up to today is accounted for.</p>`}
       <div class="sched-pills">${s.days.map(pill).join('')}</div>
       ${s.off_schedule.length ? `<p class="hint" style="margin:0.7rem 0 0;">
-        Also recorded off the usual days: ${s.off_schedule.map(g => fmtDate(g.date)).join(', ')}</p>` : ''}
+        Also recorded off the usual days: ${s.off_schedule.map(g => fixtureDate(g.date)).join(', ')}</p>` : ''}
     </div>`;
 
   const refresh = () => { renderSchedule(); render(); };
@@ -81,17 +77,12 @@ async function renderSchedule() {
 
   host.querySelectorAll('[data-nogame], [data-missing]').forEach(b =>
     b.addEventListener('click', async () => {
-      const date = b.dataset.nogame || b.dataset.missing;
-      const reason = prompt(`No game on ${fmtDate(date)}?\n\nWhy not? (optional — e.g. too few players, pitch unavailable)`);
-      if (reason === null) return;   // cancelled, as opposed to left blank
-      try { await api.markNoGame(contractId, date, reason.trim() || null); toast(`${fmtDate(date)} marked as no game`); refresh(); }
-      catch (e) { toast(e.message, true); }
+      if (await markNoGame(contractId, b.dataset.nogame || b.dataset.missing)) refresh();
     }));
 
   host.querySelectorAll('[data-undo-nogame]').forEach(b =>
     b.addEventListener('click', async () => {
-      try { await api.clearNoGame(contractId, b.dataset.undoNogame); toast('Back to unaccounted for'); refresh(); }
-      catch (e) { toast(e.message, true); }
+      if (await reopenDate(contractId, b.dataset.undoNogame)) refresh();
     }));
 
   host.querySelectorAll('[data-enter]').forEach(b =>
