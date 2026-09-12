@@ -7,6 +7,7 @@ import { playersRepo } from '../repos/players.js';
 import { ledgersRepo } from '../repos/ledgers.js';
 import { gameweeksRepo } from '../repos/gameweeks.js';
 import { scheduleRepo } from '../repos/schedule.js';
+import { periodReportRepo } from '../repos/period_report.js';
 import { contributionsRepo } from '../repos/contributions.js';
 import { pendingContributionsRepo } from '../repos/contributions_pending.js';
 import { kittyRepo } from '../repos/kitty.js';
@@ -240,6 +241,12 @@ r.post('/schedule/:contractId/no-game', wrap((req) => {
 r.delete('/schedule/:contractId/no-game/:date', wrap((req) => {
   requireAdmin(req);
   return scheduleRepo.clearNoGame(req.params.contractId, req.params.date);
+}));
+
+// ---- contract period report (the sheet that gets shared with players) ----
+r.get('/report/:contractId', wrap((req) => {
+  requireAdmin(req);
+  return periodReportRepo.report(req.params.contractId, { since: req.query.since || null });
 }));
 
 // ---- gameweeks ----

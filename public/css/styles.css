@@ -852,6 +852,32 @@ body.role-player .role-admin-only { display: none !important; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
 
+/* --- Standing report: built to be screenshotted and shared --- */
+.rep-summary { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-bottom: 1rem;
+  padding: 0.7rem 0.9rem; border-radius: 8px; background: var(--bg-subtle);
+  border: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-muted); }
+.rep-table { font-size: 0.86rem; }
+.rep-table th { vertical-align: bottom; line-height: 1.25; }
+.rep-table td { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+.rep-idx { color: var(--text-faint); width: 2rem; }
+.rep-na { color: var(--text-faint); }
+.rep-last { font-size: 0.8rem; white-space: nowrap; }
+.rep-bal, .rep-status { font-weight: 600; }
+.rep-status { white-space: nowrap; font-size: 0.8rem; }
+/* The three standings, coloured the way the sheet colours them: green settled,
+   amber worth a nudge, red needs chasing. */
+.rep-in { color: var(--success); }
+.rep-refill { color: var(--warning); }
+.rep-out { color: var(--danger); }
+td.rep-in { background: color-mix(in srgb, var(--success) 12%, transparent); }
+td.rep-refill { background: color-mix(in srgb, var(--warning) 14%, transparent); }
+td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+/* Captaincy share, shaded by how much of it there is. */
+.rep-capt.is-low { background: color-mix(in srgb, var(--sport) 8%, transparent); }
+.rep-capt.is-mid { background: color-mix(in srgb, var(--sport) 18%, transparent); }
+.rep-capt.is-high { background: color-mix(in srgb, var(--sport) 30%, transparent); font-weight: 600; }
+.rep-key { margin: 0.9rem 0 0; line-height: 1.5; }
+
 /* --- Season schedule panel (Game History) --- */
 .sched-panel { padding: 1rem; margin-bottom: 1.2rem; border-radius: 10px;
   background: var(--bg-subtle); border: 1px solid var(--border-color); }

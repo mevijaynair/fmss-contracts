@@ -101,6 +101,9 @@ export const api = {
   resetPin: (playerId) => req('POST', `/admin/logins/${playerId}/reset`, {}),
   setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
 
+  // ---- shareable period report ----
+  report: (contractId) => req('GET', `/report/${contractId}`),
+
   // ---- season schedule ----
   schedule: (contractId) => req('GET', `/schedule/${contractId}`),
   setSchedule: (contractId, patch) => req('PUT', `/schedule/${contractId}`, patch),
