@@ -405,11 +405,18 @@ async function renderMyContributions() {
 
 const KITTY = 'kitty';
 
+// The kitty is one pot with a share per contract, so each share is its own
+// party. That is what makes "the Mon/Thu kitty covers a Saturday drop-in" a
+// thing you can actually record: money leaves one share, lands in the other,
+// and the club's total is unchanged.
 function moveParties() {
   const roster = (store.players || []).filter(p => !p.is_sandbox)
     .sort((a, b) => a.name.localeCompare(b.name));
-  return [{ id: KITTY, name: '— The kitty —' },
-    ...roster.map(p => ({ id: p.id, name: p.name }))];
+  return [
+    { id: KITTY, name: '— Kitty: club-wide —' },
+    ...(store.contracts || []).map(c => ({ id: `${KITTY}:${c.id}`, name: `— Kitty: ${c.name} —` })),
+    ...roster.map(p => ({ id: p.id, name: p.name })),
+  ];
 }
 
 function fillMoveSelects() {
@@ -431,9 +438,18 @@ function fillMoveSelects() {
 function describeMove() {
   const note = $('mv_contract_note');
   if (!note) return;
+  const isKitty = (v) => v === KITTY || String(v).startsWith(`${KITTY}:`);
   const from = $('mv_from')?.value; const to = $('mv_to')?.value;
-  const betweenPlayers = from !== KITTY && to !== KITTY;
-  note.textContent = betweenPlayers
+  const field = $('mv_contract');
+
+  if (isKitty(from) && isKitty(to)) {
+    note.textContent = 'Not used — both ends are the kitty, so no balance moves. '
+      + "The club's total is unchanged; the cost just sits where it belongs.";
+    if (field) field.disabled = true;
+    return;
+  }
+  if (field) field.disabled = false;
+  note.textContent = !isKitty(from) && !isKitty(to)
     ? 'Required — a balance belongs to a contract.'
     : 'Leave blank to move real club money without touching any balance, '
       + "e.g. paying yourself back for something you bought. Name one and the player's balance moves too.";

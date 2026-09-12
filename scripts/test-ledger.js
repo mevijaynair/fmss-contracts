@@ -432,7 +432,7 @@ test('the pot can pay somebody, and it is one movement or none', () => {
   assert.equal(balanceOf(p), 620, 'and they are up');
 
   const mv = movementsRepo.all({ limit: 1 })[0];
-  assert.equal(mv.from_name, 'Kitty');
+  assert.equal(mv.from_name, 'the kitty');
   movementsRepo.remove(mv.id);
   assert.equal(kittyRepo.balance().balance, before, 'undone on both sides');
   assert.equal(balanceOf(p), 500);
@@ -455,6 +455,29 @@ test('money moved between players is moved, not created', () => {
   assert.equal(balanceOf(b), 175);
   assert.equal(balanceOf(a) + balanceOf(b), 400, 'the pair still holds what it started with');
   assert.equal(kittyRepo.balance().balance, potBefore, 'the pot is not involved');
+});
+
+test("one contract's pot can carry another's place", () => {
+  // A Mon/Thu regular turns up one odd Saturday and the Mon/Thu pot covers it.
+  // The club is no better or worse off; the cost simply sits where it belongs.
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('other','Other','{}',0,2)").run();
+  const before = kittyRepo.balance();
+  const shareOf = (b, c) => b.by_contract.find(r => r.contract_id === c)?.balance || 0;
+  const testcBefore = shareOf(before, CONTRACT);
+  const otherBefore = shareOf(before, 'other');
+
+  movementsRepo.create({ from: 'kitty:other', to: `kitty:${CONTRACT}`, amount: 40,
+    date: '2026-04-01', note: 'covering a drop-in' });
+
+  const after = kittyRepo.balance();
+  assert.equal(after.balance, before.balance, 'the club total cannot change');
+  assert.equal(shareOf(after, 'other'), round2(otherBefore - 40), "it left the other pot");
+  assert.equal(shareOf(after, CONTRACT), round2(testcBefore + 40), 'and landed in this one');
+
+  const mv = movementsRepo.all({ limit: 1 })[0];
+  assert.equal(mv.from_name, 'the Other kitty', 'named so it reads back plainly');
+  movementsRepo.remove(mv.id);
+  assert.equal(shareOf(kittyRepo.balance(), 'other'), otherBefore, 'undone on both sides');
 });
 
 test('a movement that would say nothing happened is refused', () => {

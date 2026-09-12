@@ -26,12 +26,40 @@ function nameOf(playerId) {
 }
 
 /**
- * Both sides of a movement, described the way a person would say it.
- * `from` and `to` are either a player id or the literal 'kitty'.
+ * Read one end of a movement.
+ *
+ * A party is a player id, or the kitty. The kitty is written 'kitty' for the
+ * club-wide pot and 'kitty:<contract>' for one contract's share — which is what
+ * makes "take it out of the Mon/Thu kitty" expressible, and what lets both ends
+ * of a movement be the kitty without being the same place.
  */
-function describe({ from, to, amount, contract_id: contractId, note }) {
-  const side = (x) => (x === KITTY ? 'the kitty' : nameOf(x));
-  const base = `${side(from)} → ${side(to)}`;
+function readParty(raw) {
+  const s = String(raw || '');
+  if (s === KITTY) return { kind: KITTY, contractId: null };
+  if (s.startsWith(`${KITTY}:`)) {
+    const contractId = s.slice(KITTY.length + 1);
+    if (!db.prepare('SELECT id FROM contracts WHERE id = ?').get(contractId)) {
+      throw new Error(`No such contract: ${contractId}`);
+    }
+    return { kind: KITTY, contractId };
+  }
+  if (!db.prepare('SELECT id FROM players WHERE id = ?').get(s)) {
+    throw new Error(`No such player: ${s}`);
+  }
+  return { kind: 'player', playerId: s };
+}
+
+function partyName(raw) {
+  const p = readParty(raw);
+  if (p.kind !== KITTY) return nameOf(p.playerId);
+  if (!p.contractId) return 'the kitty';
+  const c = db.prepare('SELECT name FROM contracts WHERE id = ?').get(p.contractId);
+  return `the ${c?.name || p.contractId} kitty`;
+}
+
+/** Both sides of a movement, described the way a person would say it. */
+function describe({ from, to, note }) {
+  const base = `${partyName(from)} → ${partyName(to)}`;
   return note ? `${base} — ${note}` : base;
 }
 
@@ -45,8 +73,8 @@ export const movementsRepo = {
                     ORDER BY date DESC, created_at DESC LIMIT ?`).all(limit);
     return rows.map(m => ({
       ...m,
-      from_name: m.from_party === KITTY ? 'Kitty' : nameOf(m.from_party),
-      to_name: m.to_party === KITTY ? 'Kitty' : nameOf(m.to_party),
+      from_name: partyName(m.from_party),
+      to_name: partyName(m.to_party),
     }));
   },
 
@@ -62,24 +90,23 @@ export const movementsRepo = {
     if (!Number.isFinite(amt) || amt <= 0) throw new Error('Amount must be more than zero');
     if (!from || !to) throw new Error('Both a source and a destination are required');
     if (from === to) throw new Error('Money cannot move to where it already is');
-    if (from !== KITTY && to !== KITTY && !contractId) {
+    const src = readParty(from);
+    const dst = readParty(to);
+    if (src.kind === 'player' && dst.kind === 'player' && !contractId) {
       throw new Error('A transfer between players needs a contract — balances are per contract');
-    }
-    for (const party of [from, to]) {
-      if (party === KITTY) continue;
-      if (!db.prepare('SELECT id FROM players WHERE id = ?').get(party)) {
-        throw new Error(`No such player: ${party}`);
-      }
     }
 
     const id = `mv_${Date.now()}`;
     const when = date || new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
-    const label = describe({ from, to, amount: amt, contract_id: contractId, note });
+    const label = describe({ from, to, note });
 
     const playerLeg = db.prepare(`INSERT INTO transactions
       (id, player_id, contract_id, type, amount, description, status, created_by, created_at, updated_at)
       VALUES (?,?,?,?,?,?,'approved',?,?,?)`);
+    const kittyLeg = db.prepare(`INSERT INTO kitty
+      (id,kind,label,amount,date,scope,contract_id,historical,created_at)
+      VALUES (?,?,?,?,?,?,?,0,?)`);
 
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -88,30 +115,29 @@ export const movementsRepo = {
         VALUES (?,?,?,?,?,?,?,?,?)`)
         .run(id, from, to, amt, contractId || null, when, note || '', created_by, now);
 
-      // A leg facing the kitty is a kitty row plus one player adjustment. A leg
-      // between two players is two adjustments and no kitty row — the pot is not
-      // involved, so it must not move.
-      if (from === KITTY || to === KITTY) {
-        const player = from === KITTY ? to : from;
-        const intoKitty = to === KITTY;
-        if (contractId) ledgersRepo.ensure(player, contractId);
-        db.prepare(`INSERT INTO kitty (id,kind,label,amount,date,scope,contract_id,historical,created_at)
-                    VALUES (?,?,?,?,?,?,?,0,?)`)
-          .run(`k_${id}`, intoKitty ? 'income' : 'expense', label, amt, when, id,
-            contractId || null, now);
-        // The player's side only reaches a balance when a contract is named — a
+      // Each end is written on its own terms, so any pairing works: pot to
+      // player, player to pot, one contract's pot to another's, player to
+      // player. Both ends being the kitty is how a Saturday place gets carried
+      // by the Mon/Thu pot — the money leaves one share and lands in the other,
+      // and the club's total is unchanged.
+      if (src.kind === KITTY) {
+        kittyLeg.run(`k_${id}_out`, 'expense', label, amt, when, id, src.contractId, now);
+      } else if (contractId) {
+        // A player's side only reaches a balance when a contract is named — a
         // transaction with no contract belongs to no ledger. Paying the cashier
         // out of the pot for a BBQ is exactly that case: real money leaves the
         // kitty and no contract balance should move.
-        if (contractId) {
-          playerLeg.run(`t_${id}`, player, contractId, 'adjustment',
-            intoKitty ? -amt : amt, label, created_by, now, now);
-        }
-      } else {
-        ledgersRepo.ensure(from, contractId);
-        ledgersRepo.ensure(to, contractId);
-        playerLeg.run(`t_${id}_out`, from, contractId, 'transfer_out', -amt, label, created_by, now, now);
-        playerLeg.run(`t_${id}_in`, to, contractId, 'transfer_in', amt, label, created_by, now, now);
+        ledgersRepo.ensure(src.playerId, contractId);
+        playerLeg.run(`t_${id}_out`, src.playerId, contractId,
+          dst.kind === KITTY ? 'adjustment' : 'transfer_out', -amt, label, created_by, now, now);
+      }
+
+      if (dst.kind === KITTY) {
+        kittyLeg.run(`k_${id}_in`, 'income', label, amt, when, id, dst.contractId, now);
+      } else if (contractId) {
+        ledgersRepo.ensure(dst.playerId, contractId);
+        playerLeg.run(`t_${id}_in`, dst.playerId, contractId,
+          src.kind === KITTY ? 'adjustment' : 'transfer_in', amt, label, created_by, now, now);
       }
       db.exec('COMMIT');
     } catch (e) {
@@ -128,8 +154,8 @@ export const movementsRepo = {
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare('DELETE FROM kitty WHERE scope = ?').run(id);
-      db.prepare('DELETE FROM transactions WHERE id IN (?,?,?)')
-        .run(`t_${id}`, `t_${id}_out`, `t_${id}_in`);
+      db.prepare('DELETE FROM transactions WHERE id IN (?,?)')
+        .run(`t_${id}_out`, `t_${id}_in`);
       db.prepare('DELETE FROM movements WHERE id = ?').run(id);
       db.exec('COMMIT');
     } catch (e) {
