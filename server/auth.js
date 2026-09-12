@@ -38,14 +38,19 @@ export const auth = {
 
     authUsersRepo.recordSuccessfulLogin(db, user.id);
 
+    // verifyPin already reduced the column to a boolean, so comparing it to the
+    // NUMBER 1 was false for everyone, always. The flag has therefore never once
+    // reached the browser — which is why nothing was built to act on it and why
+    // all 54 production logins still sit at requires_pin_change = 1, on the PIN
+    // they were handed.
     const payload = {
       userId: user.id,
       role: 'player',
       playerId: user.player_id,
-      requiresPinChange: requires_change === 1,
+      requiresPinChange: requires_change === true,
     };
     const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
-    return { token, expiresIn: TOKEN_EXPIRY, requiresPinChange: requires_change === 1 };
+    return { token, expiresIn: TOKEN_EXPIRY, requiresPinChange: requires_change === true };
   },
 
   // Admin login: password-only

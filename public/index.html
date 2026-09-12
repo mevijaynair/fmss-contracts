@@ -28,22 +28,29 @@
         <h1>FMSS</h1>
         <p>Contract Manager</p>
       </div>
+      <!-- Opens on the player sign-in, because that is who nearly everyone is:
+           sixty players and one admin. It used to present "Admin Password" first,
+           behind a tickbox saying "I'm a player" — so every player was asked to
+           declare they were not the administrator before they could begin, and
+           the existence of an admin password was advertised to anyone who
+           loaded the page. Admin is a quiet link at the bottom now. -->
       <form id="loginForm">
-        <label class="login-toggle">
-          <input type="checkbox" id="playerLoginToggle">
-          <span>I'm a player</span>
-        </label>
-        <div class="form-group" id="playerGroup" style="display:none;">
-          <label>Your name</label>
+        <div class="form-group" id="playerGroup">
+          <label for="loginPlayer">Your name</label>
           <select id="loginPlayer"><option value="">Select your name…</option></select>
         </div>
         <div class="form-group">
-          <label id="passwordLabel">Admin Password</label>
-          <input type="password" id="loginPassword" placeholder="Enter password" required
-            autocomplete="off" inputmode="text">
+          <label id="passwordLabel" for="loginPassword">PIN</label>
+          <input type="password" id="loginPassword" placeholder="Enter your PIN" required
+            autocomplete="off" inputmode="numeric">
         </div>
-        <button type="submit" class="btn">Login</button>
+        <button type="submit" class="btn">Sign in</button>
         <div id="loginError" class="login-error" style="display:none;"></div>
+        <p class="login-alt">
+          <button type="button" class="link-btn" id="loginModeToggle">Sign in as administrator</button>
+        </p>
+        <p class="hint login-help" id="loginHelp">
+          Your PIN comes from the club — ask for one if you have not been given it.</p>
       </form>
     </div>
   </section>

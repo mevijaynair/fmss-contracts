@@ -98,6 +98,8 @@ export const api = {
 
   // ---- two-tier (Phase 2) ----
   me: () => req('GET', '/me'),
+  setInitialPin: (new_pin) => req('POST', '/my/pin/set-initial', { new_pin }),
+  changePin: (old_pin, new_pin) => req('POST', '/my/pin/change', { old_pin, new_pin }),
   myLedgers: () => req('GET', '/my/ledgers'),
   myContributions: () => req('GET', '/my/contributions'),
   submitContribution: (c) => req('POST', '/my/contributions', c),
