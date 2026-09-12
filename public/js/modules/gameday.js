@@ -572,17 +572,18 @@ function recomputeKitty() {
   // guest paying cash on the day is not — it is owed until collected. Adding the
   // two together and calling the result profit puts money in the kitty that is
   // still in somebody's pocket, so they are counted separately.
-  const settles = (r) => rows.find(x => x.player_id === (r.charged_to || r.player_id)) || r;
-  // Cash still to collect. Money already in hand counts as collected, which is
-  // what the toggle on each row sets. This read the PAYER's paid flag rather
-  // than the row's, so marking a guest collected changed nothing.
-  const isCash = (r) => {
-    const payer = settles(r);
-    return (payer.player_type === 'outside' || payer.rate_type === 'noncontract') && !r.paid;
-  };
+  //
+  // settlementOf is the one place that decides which of those a charge is, and
+  // it is what each row's badge already shows. This used to keep a second copy
+  // that looked the payer up in `rows` alone: point a guest's charge at someone
+  // who is not playing that night and the lookup missed, fell back to the guest
+  // themselves, and went on calling it cash — so the badge said "Toby pays"
+  // while the kitty behind it had not moved at all.
   const amount = (r) => Number(r.amount) || 0;
-  const collected = rows.filter(r => !isCash(r)).reduce((s, r) => s + amount(r), 0);
-  const pending = rows.filter(isCash).reduce((s, r) => s + amount(r), 0);
+  const fates = rows.map(r => ({ r, s: settlementOf(r) }));
+  const sum = (f) => f.reduce((s, x) => s + amount(x.r), 0);
+  const collected = sum(fates.filter(f => !f.s.cash || f.s.collected));
+  const pending = sum(fates.filter(f => f.s.cash && !f.s.collected));
 
   const c = store.contracts.find(x => x.id === contractId);
   const pitch = Number(c?.cost_per_gw) || 0;

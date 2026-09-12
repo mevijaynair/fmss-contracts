@@ -308,6 +308,19 @@ test('water a player bought is owed back to them, not taken off the kitty twice'
   assert.equal(balanceOf(buyer), 500 - 40 - 40 + 15, 'they are credited for it instead');
 });
 
+test('a guest billed to someone who is not playing still counts as settled', () => {
+  // The member covering a guest need not be on the pitch that night. Deciding
+  // who settles by looking only at the other players in the game misses them.
+  const guest = player('Sikku'); makeOutside(guest);
+  const absent = player('Toby', 500);
+  const gw = playGame({ pitch: 20, players: [
+    { player_id: guest, amount: 35, charged_to: absent },
+  ] });
+  assert.equal(kittyOf(gw.id), 15, 'settled from a balance: 35 - 20, no cash pending');
+  assert.equal(balanceOf(absent), 465, 'and it comes off the absent payer');
+  assert.equal(gameweeksRepo.all(CONTRACT).find(g => g.id === gw.id).pending_amount, 0);
+});
+
 test('only a guest owes anything — a contract charge is settled on the night', () => {
   const guest = player('Guest'); makeOutside(guest);
   const a = player('Member A', 500); const b = player('Member B', 500);
