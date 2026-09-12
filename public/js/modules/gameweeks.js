@@ -287,23 +287,30 @@ async function detail(id) {
   // every row as an unticked "owes" box said the whole team still owed for a
   // game that was already paid for, and offered a tickbox that changed nothing.
   const settleCell = (c) => {
+    // An imported game was settled on the credit sheets before any of this
+    // existed, so none of the three modes describes it and saying "on balance"
+    // would claim a deduction that never happened.
+    if (g.historical) {
+      return `<span class="hint"
+               title="Played before this app tracked money. Settled on the credit sheets and already inside the opening balances.">settled in the sheets</span>`;
+    }
     if (c.settle_mode === 'kitty') {
-      return `<span class="hint" style="min-width:62px;white-space:nowrap"
-               title="The club pot carries this place: nobody is billed and nobody owes it.">kitty</span>`;
+      return `<span class="tag"
+               title="The club pot carries this place: nobody is billed and nobody owes it.">kitty covers it</span>`;
     }
     if (!c.is_cash) {
-      const who = c.settled_by === c.player_id
-        ? 'their own balance'
-        : `${c.settler_name || 'someone else'}'s balance`;
-      return `<span class="hint" style="min-width:62px;white-space:nowrap"
-               title="Came off ${esc(who)} when this game was recorded. Nothing to collect.">on balance</span>`;
+      const elsewhere = c.settled_by !== c.player_id;
+      return `<span class="hint"
+               title="Came off ${esc(elsewhere ? `${c.settler_name || 'someone else'}'s` : 'their own')} balance when this game was recorded. Nothing to collect.">${
+  elsewhere ? `${esc(c.settler_name || 'someone else')} pays` : 'on balance'}</span>`;
     }
-    return `<label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap;min-width:62px"
+    return `<label class="tag ${c.paid ? 'tag-paid' : 'tag-due'}"
+             style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer"
              title="${c.paid
     ? 'Cash collected' + (c.paid_method ? ' by ' + esc(c.paid_method) : '') + ' — untick to put it back to owed.'
     : 'Cash still to collect. Tick it once you have the money and the kitty tops up.'}">
         <input type="checkbox" class="ch-paid" data-charge="${c.id}" ${c.paid ? 'checked' : ''}>
-        ${c.paid ? 'collected' : 'owes'}
+        ${c.paid ? 'collected' : 'to collect'}
       </label>`;
   };
 
@@ -313,25 +320,42 @@ async function detail(id) {
     `<option value="" ${c.settled_by === c.player_id ? 'selected' : ''}>themselves</option>`
     + rosterOptions(store.players, c.settled_by, { includeGuests: false });
 
-  const rows = charges.map(c => `
-    <div class="panel-row" data-charge="${c.id}">
-      ${settleCell(c)}
-      <strong style="flex:1">${esc(c.player_name)}</strong>
-      <select class="ch-mode" data-charge="${c.id}" style="max-width:140px"
-              title="Off a contract balance, cash still to collect, or carried by the club pot">
-        <option value="balance" ${c.settle_mode === 'balance' ? 'selected' : ''}>off balance</option>
-        <option value="cash" ${c.settle_mode === 'cash' ? 'selected' : ''}>cash to collect</option>
-        <option value="kitty" ${c.settle_mode === 'kitty' ? 'selected' : ''}>kitty covers it</option>
-      </select>
-      <select class="ch-payer" data-charge="${c.id}" style="max-width:130px"
-              title="Whose money settles this charge">${payerOptions(c)}</select>
-      <select class="ch-team" data-charge="${c.id}" style="max-width:110px">${teamOptions(c.team)}</select>
-      <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
-        <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> C
-      </label>
-      <span class="hint" style="min-width:52px;text-align:right">${money(c.amount)}</span>
-      <button class="link-btn" data-remove="${c.id}" title="Remove from this game">✕</button>
-    </div>`).join('');
+  const rows = charges.map(c => {
+    const owing = c.is_cash && !c.paid;
+    // An imported game is an attendance record behind a closed baseline: its
+    // charges are all worth 0 and move nothing. Offering settlement controls on
+    // it invites edits that cannot mean anything, and printing "0.00" twelve
+    // times is noise standing in for information.
+    const readOnly = g.historical;
+    return `
+    <div class="charge-row${owing ? ' is-owing' : ''}" data-charge="${c.id}">
+      <div class="cr-who">
+        <span class="cr-name">${esc(c.player_name)}</span>
+        ${c.is_captain ? '<span class="tag">C</span>' : ''}
+        ${c.team ? `<span class="hint">${esc(c.team)}</span>` : ''}
+        ${settleCell(c)}
+      </div>
+      <div class="cr-amount">${readOnly && !c.amount
+    ? '<span class="hint">—</span>' : money(c.amount)}</div>
+      ${readOnly ? '' : `
+      <div class="cr-controls">
+        <select class="ch-mode" data-charge="${c.id}"
+                title="Off a contract balance, cash still to collect, or carried by the club pot">
+          <option value="balance" ${c.settle_mode === 'balance' ? 'selected' : ''}>off balance</option>
+          <option value="cash" ${c.settle_mode === 'cash' ? 'selected' : ''}>cash to collect</option>
+          <option value="kitty" ${c.settle_mode === 'kitty' ? 'selected' : ''}>kitty covers it</option>
+        </select>
+        <select class="ch-payer" data-charge="${c.id}"
+                title="Whose money settles this charge">${payerOptions(c)}</select>
+        <select class="ch-team" data-charge="${c.id}">${teamOptions(c.team)}</select>
+        <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
+          <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> captain
+        </label>
+        <span class="cr-spacer"></span>
+        <button class="link-btn" data-remove="${c.id}" title="Remove from this game">✕ remove</button>
+      </div>`}
+    </div>`;
+  }).join('');
 
   const players = (store.players || []).filter(p => !charges.some(c => c.player_id === p.id));
 
@@ -348,16 +372,25 @@ async function detail(id) {
         <div class="panel-body">${possiblyMissing.map(esc).join(' · ')}</div>
       </div>` : ''}
 
-    <h4 class="mini-h mt">Players (${charges.length}${total ? ` · ${money(total)} AED` : ' · no charges'})</h4>
-    ${toCollect > 0 ? `<p class="hint">${money(total - toCollect)} came off balances when this game was
-      recorded. <strong>${money(toCollect)}</strong> is guest cash still to collect.</p>` : ''}
+    <h4 class="mini-h mt">Players (${charges.length}${total ? ` · ${money(total)} AED` : ''})</h4>
+    ${g.historical
+    ? `<p class="hint">Imported from the results sheet — who played, not what it cost.
+        These games were settled on the credit sheets and are already inside the
+        opening balances, so there is nothing here to change.</p>`
+    : `${toCollect > 0
+      ? `<p class="hint">${money(total - toCollect)} came off balances when this game was
+          recorded. <strong>${money(toCollect)}</strong> is guest cash still to collect.</p>`
+      : ''}
+      <p class="hint">Every change here is saved the moment you make it — balances and
+        the kitty follow straight away. There is nothing to submit.</p>`}
     <div id="gwCharges">${rows || '<p class="hint">Nobody linked yet.</p>'}</div>
 
+    ${g.historical ? '' : `
     <h4 class="mini-h mt">Add a player</h4>
     <div class="quick-row">
       <select id="gwAddPlayer" style="flex:1 1 150px">
         <option value="">Select player…</option>
-        ${players.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+        ${rosterOptions(players)}
       </select>
       <select id="gwAddTeam" style="flex:0 1 110px">${teamOptions(teams[0] || '')}</select>
       <label class="hint" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="gwAddCapt"> Captain</label>
@@ -366,9 +399,17 @@ async function detail(id) {
     </div>
     <p class="hint">Amount 0 records the appearance without moving any balance.</p>
 
-    ${!g.historical ? `<button class="btn btn-secondary mt" onclick="window.editGameweekClick('${g.id}')">Edit amounts / result</button>` : ''}`);
+    <div class="quick-row mt">
+      <button class="btn btn-secondary" onclick="window.editGameweekClick('${g.id}')">Edit amounts / result</button>
+      <span class="cr-spacer"></span>
+      <button class="btn" data-gw-done>Done</button>
+    </div>`}`);
 
   const reopen = () => detail(id);
+
+  // Nothing to save — every control writes as it changes — but a panel with no
+  // way out but the ✕ reads as an unfinished form. Done just closes it.
+  document.querySelector('[data-gw-done]')?.addEventListener('click', closeModal);
 
   $('gwAddBtn')?.addEventListener('click', async () => {
     const pid = $('gwAddPlayer').value;

@@ -1014,6 +1014,28 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
 .panel-scroll { max-height: 220px; overflow-y: auto; margin-top: 0.7rem; }
 
+/* --- One player's charge inside a game panel ---
+   Six controls on one flex line collapsed each select to about forty pixels, so
+   every dropdown read as a single letter. Two lines instead: who and how much on
+   the first, the controls that change them on the second, wrapping rather than
+   shrinking. An imported game renders the first line only. */
+.charge-row { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 0.7rem;
+  padding: 0.6rem 0.7rem; border-radius: 8px; background: var(--bg-card);
+  border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem; }
+.charge-row .cr-who { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
+.charge-row .cr-name { font-weight: 600; }
+.charge-row .cr-amount { font-weight: 700; text-align: right; white-space: nowrap; }
+.charge-row .cr-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 0.45rem; padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color); }
+.charge-row .cr-controls select { width: auto; min-width: 8.5rem; flex: 0 1 auto;
+  font-size: 0.82rem; padding: 0.28rem 0.45rem; }
+.charge-row .cr-controls .cr-spacer { flex: 1 1 auto; }
+/* A place still owed is the only one that needs chasing, so it is the only one
+   that carries a colour. */
+.charge-row.is-owing { border-color: color-mix(in srgb, var(--danger) 40%, var(--border-color));
+  background: color-mix(in srgb, var(--danger) 7%, var(--bg-card)); }
+
 /* Quick-action row: preset buttons + free-text inputs (kitty Quick Withdraw). */
 .quick-row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-top: 0.8rem; }
 .quick-row .qw-amount { flex: 0 1 120px; }
