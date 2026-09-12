@@ -372,7 +372,8 @@ function formBlock(r, totalGames, billedGames, recordOnlyGames) {
   return `
     <div class="auto-grid" style="--col-min: 150px; margin-bottom: 1rem;">
       ${tile('Played', totalGames, '', `${billedGames} billed`)}
-      ${tile('Win rate', pct(r.winRate), 'var(--success)', r.decided ? `of ${r.decided} decided` : '')}
+      ${tile('Win rate', pct(r.winRate), 'var(--success)',
+    r.decided ? `of ${r.decided} games with a score` : '')}
       ${tile('Captained', r.captainGames || 0, 'var(--sport)',
     r.captainGames
       ? `won ${r.captainWins} of ${r.captainDecided || 0} played out${

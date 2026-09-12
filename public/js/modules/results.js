@@ -357,9 +357,10 @@ function showLeaderboards(stats) {
     <div class="auto-grid" style="--col-min: 250px;">
       ${board('🎮 Most Games', 'appearances', '',
         [...all].sort((a, b) => b.games - a.games), p => p.games)}
-      ${board('📈 Best Win Rate', 'of games with a result', 'is-win',
+      ${board('📈 Best Win Rate', 'games where a score was recorded', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
-        p => ({ v: pct(p.winRate), meta: `${p.wins} of ${p.decided} decided` }))}
+        p => ({ v: pct(p.winRate),
+          meta: `won ${p.wins} of ${p.decided} games with a score` }))}
       ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
         [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
         p => ({ v: p.longestWin, meta: `${esc(shortSpan(p.longestWinFrom, p.longestWinTo))}${
@@ -368,19 +369,19 @@ function showLeaderboards(stats) {
         [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
         p => ({ v: p.longestUnbeaten,
           meta: esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo)) }))}
-      ${board('👑 Best Captain Rate', 'wins as captain, of games with a result', 'is-capt',
+      ${board('👑 Best Captain Rate', 'games led where a score was recorded', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
         p => ({ v: pct(p.captainWinRate),
-          meta: `${p.captainWins} of ${p.captainDecided} led${
+          meta: `won ${p.captainWins} of ${p.captainDecided} led${
             p.captainGames > p.captainDecided
-              ? ` · ${p.captainGames - p.captainDecided} unscored` : ''}` }))}
-      ${board('⚽ Goal Difference', 'per decided game', '',
+              ? ` · ${p.captainGames - p.captainDecided} had no score` : ''}` }))}
+      ${board('⚽ Goal Difference', 'per game with a score', '',
         [...rated].sort((a, b) => b.gdPerGame - a.gdPerGame),
         // Ranked per game, so the per-game figure is the one in bold. Leading
         // with the total while sorting by the rate put Rony's +19 below
         // Praveen's +7 and read as a broken sort.
         p => ({ v: `${signed(p.gdPerGame)}`,
-          meta: `${signed(p.gd)} over ${p.decided} games` }))}
+          meta: `${signed(p.gd)} across ${p.decided} games` }))}
     </div>`;
 
   slot('results-lb').querySelectorAll('[data-player]').forEach(d =>
@@ -454,7 +455,8 @@ function showPlayerDetail(p) {
   openModal(esc(p.name), `
     <h4 class="mini-h">Record${period === 'all' ? '' : ` · ${esc(period)}`}</h4>
     ${row('🎮 Played', p.games)}
-    ${row('✅ Won', `${p.wins} (${pct(p.winRate)} of ${p.decided} decided)`, 'is-win')}
+    ${row('✅ Won', `${p.wins} <span class="hint">${pct(p.winRate)} of ${
+  p.decided} games with a score</span>`, 'is-win')}
     ${row('🤝 Drawn', p.draws)}
     ${row('❌ Lost', p.losses)}
     ${p.unknown ? row('❔ No result recorded', p.unknown) : ''}
@@ -473,8 +475,8 @@ function showPlayerDetail(p) {
     ${row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`, p.gd >= 0 ? 'is-win' : '')}
     <h4 class="mini-h mt">Captaincy</h4>
     ${row('👑 Games led', p.captainGames)}
-    ${row('Won as captain', `${p.captainWins} of ${p.captainDecided} played out (${
-  pct(p.captainWinRate)})`, 'is-win')}
+    ${row('Won as captain', `${p.captainWins} of ${p.captainDecided} <span class="hint">${
+  pct(p.captainWinRate)} · games with a score</span>`, 'is-win')}
     <h4 class="mini-h mt">Span</h4>
     ${row('First game', p.first ? fmtDate(p.first) : '—')}
     ${row('Latest game', p.last ? fmtDate(p.last) : '—')}`);
