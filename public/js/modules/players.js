@@ -113,6 +113,8 @@ async function render() {
   // after that correction is always nobody.
   const guestRows = ledgers.filter(l => l.player_type === 'outside');
   const owedById = Object.fromEntries((cashOwed || []).map(c => [c.player_id, c.owed]));
+  const hiddenIds = new Set((store.players || [])
+    .filter(p => p.hide_from_sheet).map(p => p.id));
   const guestsOwing = cashOwed.filter(c => c.owed > 0);
   const guestDebt = guestsOwing.reduce((a, c) => a + c.owed, 0);
 
@@ -202,6 +204,10 @@ async function render() {
         <button class="btn btn-sm" data-menu="${l.player_id}" title="More options" style="font-size: 1rem; padding: 0.3rem 0.4rem; min-width: auto;">⋮</button>
       </td>
       <td style="display: none;" data-actions="${l.player_id}">
+        <button class="btn btn-sm" data-sheet="${l.player_id}" data-hidden="${hiddenIds.has(l.player_id) ? 1 : 0}"
+          title="Whether they appear on the Standing sheet. Affects nothing but the sheet — no balance, no charge, no total."
+          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
+  hiddenIds.has(l.player_id) ? '👁 Show on sheet' : '🚫 Hide from sheet'}</button>
         <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
@@ -235,6 +241,19 @@ async function render() {
     btn.addEventListener('click', () => resetPlayerModal(btn.dataset.reset)));
   $('playersTable').querySelectorAll('[data-delete]').forEach(btn =>
     btn.addEventListener('click', () => deletePlayerModal(btn.dataset.delete)));
+
+  // Visibility only. No confirmation, because nothing about it is destructive —
+  // it moves no money and is one click to undo.
+  $('playersTable').querySelectorAll('[data-sheet]').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const hide = btn.dataset.hidden !== '1';
+      try {
+        await api.updatePlayer(btn.dataset.sheet, { hide_from_sheet: hide });
+        store.players = await api.players();
+        toast(hide ? 'Hidden from the Standing sheet' : 'Back on the Standing sheet');
+        render();
+      } catch (e) { toast(e.message, true); }
+    }));
 }
 
 // Player "My Ledger": their own balances across all contracts (read-only), and

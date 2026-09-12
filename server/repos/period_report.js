@@ -85,6 +85,9 @@ export const periodReportRepo = {
       ).all(contractId, contractId).map(r => [r.player_id, r])
     );
 
+    const hiddenIds = new Set(db.prepare(
+      'SELECT id FROM players WHERE hide_from_sheet = 1').all().map(p => p.id));
+
     const rows = ledgersRepo.forContract(contractId).map(l => {
       const a = activity.get(l.player_id);
       const played = a?.played || 0;
@@ -95,6 +98,7 @@ export const periodReportRepo = {
         player_id: l.player_id,
         name: l.player_name,
         player_type: l.player_type || 'regular',
+        hidden: !!hiddenIds.has(l.player_id),
         cash_owed: round2(l.cash_owed || 0),
         present_balance: round2(l.present_balance),
         status: statusFor(l.present_balance, gamesLeft ?? 0),
@@ -110,10 +114,15 @@ export const periodReportRepo = {
       };
     });
 
-    // A ledger row exists for every player on every contract, so most of them
-    // are dormant: nobody who has never played this contract and holds no money
-    // belongs on a sheet about who owes what. Keeping them would bury the
-    // eighteen names that matter under thirty that do not.
+    // This sheet answers one question: who is topped up, and who needs a refill.
+    // A row earns its place by having a credit position — money held, money
+    // owed, or a history of paying in. Having once turned out does not create
+    // one, and the old rule kept anyone with a single appearance, which is how
+    // Yash, Raj, Obaid and Aryansh ended up on it at exactly 0 having never paid
+    // anything in. Thirty-five names on Mon/Thu, most of them nothing to act on.
+    //
+    // hide_from_sheet is the manual override for what a rule cannot know — that
+    // someone holding a balance has left the club.
     //
     // Guests are held out for the same reason. This sheet is about contract
     // credit — who is topped up, who needs a refill, how many games they have
@@ -125,8 +134,10 @@ export const periodReportRepo = {
     const guests = rows.filter(r => r.player_type === 'outside');
     const squad = (includeDormant
       ? rows
-      : rows.filter(r => r.present_balance !== 0 || r.played > 0 || r.last_contribution_date))
-      .filter(r => r.player_type !== 'outside');
+      : rows.filter(r => r.present_balance !== 0
+          || r.cash_owed > 0
+          || r.last_contribution_date))
+      .filter(r => r.player_type !== 'outside' && !r.hidden);
     squad.sort((x, y) => x.name.localeCompare(y.name));
 
     return {

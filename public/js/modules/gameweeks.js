@@ -365,7 +365,20 @@ async function detail(id) {
   const players = (store.players || []).filter(p => !charges.some(c => c.player_id === p.id));
 
   openModal(`${fmtDate(g.date)} · ${esc(contract)}`, `
-    ${g.score ? `<p class="muted"><strong>Result:</strong> ${esc(g.score)}</p>` : ''}
+    ${g.historical
+    ? (g.score ? `<p class="muted"><strong>Result:</strong> ${esc(g.score)}</p>` : '')
+    : `
+    <!-- The score used to be two modals deep, in a form built for bulk charge
+         surgery. It is one short line of text about the game you already have
+         open, so it belongs here. -->
+    <div class="form-group">
+      <label for="gwScore">Result</label>
+      <input type="text" id="gwScore" value="${esc(g.score || '')}"
+             placeholder="7-5, or Blue win 7-5" autocomplete="off">
+      <p class="hint" id="gwScoreNote" style="margin:0.3rem 0 0">
+        Type the goals and it works the rest out. Naming the winner is optional —
+        "Blue win 7-5" and "7-5" both land. Empty clears the result.</p>
+    </div>`}
 
     <h4 class="mini-h mt">Original text</h4>
     <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
@@ -387,7 +400,12 @@ async function detail(id) {
           recorded. <strong>${money(toCollect)}</strong> is guest cash still to collect.</p>`
       : ''}
       <p class="hint">Every change here is saved the moment you make it — balances and
-        the kitty follow straight away. There is nothing to submit.</p>`}
+        the kitty follow straight away. There is nothing to submit.</p>
+      <p class="hint">Each player has three money controls: <strong>how</strong> it
+        settles (off a balance, cash you collect, or the kitty covering it),
+        <strong>whose</strong> money pays it, and <strong>which</strong> of their
+        balances it comes off — so a Mon/Thu regular playing one odd Saturday can
+        pay from their Mon/Thu credit.</p>`}
     <div id="gwCharges">${rows || '<p class="hint">Nobody linked yet.</p>'}</div>
 
     ${g.historical ? '' : `
@@ -405,7 +423,7 @@ async function detail(id) {
     <p class="hint">Amount 0 records the appearance without moving any balance.</p>
 
     <div class="quick-row mt">
-      <button class="btn btn-secondary" onclick="window.editGameweekClick('${g.id}')">Edit amounts / result</button>
+      <button class="btn btn-secondary" onclick="window.editGameweekClick('${g.id}')">Edit charge amounts</button>
       <span class="cr-spacer"></span>
       <button class="btn" data-gw-done>Done</button>
     </div>`}`);
@@ -415,6 +433,27 @@ async function detail(id) {
   // Nothing to save — every control writes as it changes — but a panel with no
   // way out but the ✕ reads as an unfinished form. Done just closes it.
   document.querySelector('[data-gw-done]')?.addEventListener('click', closeModal);
+
+  const scoreBox = $('gwScore');
+  if (scoreBox) {
+    const saveScore = async () => {
+      if (scoreBox.value === (g.score || '')) return;      // nothing typed
+      try {
+        const updated = await api.put(`/gameweeks/${id}`, { metadata: { score: scoreBox.value } });
+        // Echo back what the server made of it, so a typo shows up here rather
+        // than as silently missing analytics later.
+        const saved = updated?.score || '';
+        g.score = saved;
+        scoreBox.value = saved;
+        $('gwScoreNote').textContent = saved
+          ? `Saved as "${saved}".`
+          : 'Cleared — this game now has no recorded result.';
+        render();
+      } catch (e) { toast(e.message, true); }
+    };
+    scoreBox.addEventListener('change', saveScore);
+    scoreBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') scoreBox.blur(); });
+  }
 
   $('gwAddBtn')?.addEventListener('click', async () => {
     const pid = $('gwAddPlayer').value;

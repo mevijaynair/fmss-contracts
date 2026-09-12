@@ -284,6 +284,19 @@ export function initSchema() {
       try { db.prepare('SELECT settled_from_kitty FROM charges LIMIT 1').get(); }
       catch { db.exec('ALTER TABLE charges ADD COLUMN settled_from_kitty INTEGER NOT NULL DEFAULT 0'); }
     },
+    // players: keep someone off the Standing sheet by hand.
+    //
+    // The sheet's own rule covers the common case, but it cannot know that
+    // somebody holding a balance has left the club, or that a name is a
+    // duplicate being wound down. A flag is the escape hatch for exactly those,
+    // and it is about VISIBILITY only — it changes no balance, no charge and no
+    // total, so hiding somebody can never quietly move money.
+    () => {
+      try { db.prepare('SELECT hide_from_sheet FROM players LIMIT 1').get(); }
+      catch {
+        db.exec('ALTER TABLE players ADD COLUMN hide_from_sheet INTEGER NOT NULL DEFAULT 0');
+      }
+    },
     // charges: which contract's balance pays, when it is not the game's own.
     //
     // A Mon/Thu regular turning up for a Saturday was billed against a Saturday

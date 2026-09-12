@@ -464,7 +464,10 @@
           </div>
         </div>
         <div class="form-row mt">
-          <div class="form-group"><label>Score</label><input type="text" id="egScore" placeholder="e.g. Reds 7 - Blues 5"></div>
+          <div class="form-group"><label>Score</label>
+            <input type="text" id="egScore" placeholder="7-5, or Blue win 7-5">
+            <p class="hint" style="margin:0.3rem 0 0">Also editable straight from the
+              game panel, which is usually quicker.</p></div>
           <div class="form-group"><label>Comments</label><input type="text" id="egComments" placeholder="optional"></div>
         </div>
 
@@ -491,7 +494,10 @@
         <div class="form-row mt" style="align-items: center;">
           <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
             <input type="checkbox" id="egAutoRecalc" checked>
-            <span>Auto-recalculate balances</span>
+            <span>Let this change the players' balances
+              <span class="hint">— leave ticked. Unticking corrects only what this
+              game says it charged, and shifts each opening balance by the same
+              amount so nobody's balance actually moves.</span></span>
           </label>
           <button class="btn btn-secondary" id="egPreview">Calculate Impact</button>
           <button class="btn" id="egSave">Save &amp; Update</button>

@@ -32,6 +32,7 @@ const { periodReportRepo } = await import('../server/repos/period_report.js');
 const { movementsRepo } = await import('../server/repos/movements.js');
 const { kittyRepo } = await import('../server/repos/kitty.js');
 const { statsRepo } = await import('../server/repos/stats.js');
+const { playersRepo } = await import('../server/repos/players.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -632,6 +633,31 @@ test('editing a game keeps the fields the form did not send', () => {
   const g = db.prepare('SELECT teams_raw, comments FROM gameweeks WHERE id = ?').get(gw.id);
   assert.equal(g.teams_raw, 'Red: the original message', 'untouched fields stay untouched');
   assert.equal(g.comments, 'windy');
+});
+
+test('the Standing sheet is a credit position, not an attendance record', () => {
+  // It answers "who is topped up, who needs a refill". Turning out once does not
+  // create a credit position, and the old rule kept anyone with a single
+  // appearance — which put four people on the Mon/Thu sheet at exactly 0 having
+  // never paid anything in.
+  const holder = player('Holds credit', 300);
+  const oneOff = player('Played once, paid nothing', 0);
+  const gw = playGame({ pitch: 0, players: [{ player_id: oneOff, amount: 0 }] });
+  const names = () => periodReportRepo.report(CONTRACT, { since: '2000-01-01' })
+    .rows.map(r => r.player_id);
+
+  assert.ok(names().includes(holder), 'someone holding money is on it');
+  assert.ok(!names().includes(oneOff), 'someone at zero who has never paid in is not');
+
+  // And the manual override, for what a rule cannot know.
+  playersRepo.update(holder, { hide_from_sheet: true });
+  assert.ok(!names().includes(holder), 'hidden by hand');
+  assert.equal(balanceOf(holder), 300, 'hiding moves no money');
+  playersRepo.update(holder, { name: 'Holds credit' });
+  assert.ok(!names().includes(holder), 'and a rename does not clear the flag');
+  playersRepo.update(holder, { hide_from_sheet: false });
+  assert.ok(names().includes(holder), 'shown again');
+  assert.ok(gw.id);
 });
 
 test('the Standing sheet is the squad, not every guest who turned up once', () => {

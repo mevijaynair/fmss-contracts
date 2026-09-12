@@ -33,15 +33,27 @@ export const playersRepo = {
 
     return this.get(id);
   },
-  update(id, { name, aliases, special_role }) {
-    // special_role is only touched when the key is present, so callers that
-    // omit it (e.g. the rename modal) don't accidentally clear the cashier role.
-    if (special_role !== undefined) {
-      db.prepare('UPDATE players SET name=?, aliases=?, special_role=? WHERE id=?')
-        .run(name.trim(), JSON.stringify(aliases || []), special_role || null, id);
-    } else {
-      db.prepare('UPDATE players SET name=?, aliases=? WHERE id=?')
-        .run(name.trim(), JSON.stringify(aliases || []), id);
+  /**
+   * Only the fields the caller actually sent.
+   *
+   * special_role and hide_from_sheet are touched only when their key is present,
+   * so the rename modal cannot quietly clear the cashier role or un-hide
+   * somebody just by not mentioning them.
+   */
+  update(id, fields = {}) {
+    const { name, aliases } = fields;
+    const sets = [];
+    const values = [];
+    if (name !== undefined) { sets.push('name=?'); values.push(String(name).trim()); }
+    if (aliases !== undefined) { sets.push('aliases=?'); values.push(JSON.stringify(aliases || [])); }
+    if (fields.special_role !== undefined) {
+      sets.push('special_role=?'); values.push(fields.special_role || null);
+    }
+    if (fields.hide_from_sheet !== undefined) {
+      sets.push('hide_from_sheet=?'); values.push(fields.hide_from_sheet ? 1 : 0);
+    }
+    if (sets.length) {
+      db.prepare(`UPDATE players SET ${sets.join(', ')} WHERE id=?`).run(...values, id);
     }
     return this.get(id);
   },
