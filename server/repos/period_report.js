@@ -132,11 +132,15 @@ export const periodReportRepo = {
     // contract" status that mean nothing. What they owe is counted separately
     // and reported as guest_cash_owed.
     const guests = rows.filter(r => r.player_type === 'outside');
+    // Cash owed is deliberately NOT a reason to appear. It is a different kind
+    // of debt from a contract credit position, and it is already reported by
+    // name in three other places — the To collect column, Pending Collections,
+    // and guest_cash_owed below. Keeping it here put Raj, Kartik, Manish and
+    // Rohit on the sheet at a 0 balance, which is the crowding this is meant to
+    // remove and tells the reader nothing the sheet is for.
     const squad = (includeDormant
       ? rows
-      : rows.filter(r => r.present_balance !== 0
-          || r.cash_owed > 0
-          || r.last_contribution_date))
+      : rows.filter(r => r.present_balance !== 0 || r.last_contribution_date))
       .filter(r => r.player_type !== 'outside' && !r.hidden);
     squad.sort((x, y) => x.name.localeCompare(y.name));
 
