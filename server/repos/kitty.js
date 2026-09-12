@@ -17,11 +17,27 @@ export const kittyRepo = {
         COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) AS expense
       FROM kitty WHERE historical = 0`).get();
 
+    // Per contract as well as overall. There is one pot, but "dip into the
+    // Mon/Thu kitty for a Saturday guest" is a sentence about where the money
+    // came from, and until entries carried a contract it was a sentence the data
+    // could not answer. Entries that belong to the club as a whole — a BBQ, the
+    // annual day — carry no contract and show up under 'club'.
+    const byContract = db.prepare(`SELECT COALESCE(contract_id, 'club') AS contract_id,
+        COALESCE(SUM(CASE WHEN kind='income'  THEN amount ELSE 0 END),0) AS income,
+        COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) AS expense
+      FROM kitty WHERE historical = 0
+      GROUP BY COALESCE(contract_id, 'club')`).all()
+      .map(r => ({ ...r, balance: Math.round((r.income - r.expense) * 100) / 100 }));
+
     return {
       opening: opening(),
       income: live.income,
       expense: live.expense,
       balance: Math.round((opening() + live.income - live.expense) * 100) / 100,
+      // The opening balance belongs to no single contract, so these sum to the
+      // balance above only once it is added back. Said plainly rather than left
+      // for the reader to discover.
+      by_contract: byContract,
     };
   },
   create({ kind, label, amount, date, scope }) {

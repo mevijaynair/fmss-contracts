@@ -60,6 +60,9 @@ export const api = {
   createGameweek: (gameweek, charges) => req('POST', '/gameweeks', { gameweek, charges }),
   setChargeSettlement: (gwId, chargeId, body) =>
     req('PUT', `/gameweeks/${gwId}/charges/${chargeId}/settlement`, body),
+  movements: (contract) => req('GET', `/movements${contract ? `?contract=${contract}` : ''}`),
+  createMovement: (m) => req('POST', '/movements', m),
+  deleteMovement: (id) => req('DELETE', `/movements/${id}`),
   deleteGameweek: (id) => req('DELETE', `/gameweeks/${id}`),
   addCharge: (gwId, charge) => req('POST', `/gameweeks/${gwId}/charges`, charge),
   updateCharge: (gwId, chargeId, patch) => req('PUT', `/gameweeks/${gwId}/charges/${chargeId}`, patch),

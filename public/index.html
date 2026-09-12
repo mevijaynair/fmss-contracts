@@ -234,6 +234,31 @@
               <button type="submit" class="btn mt">Add contribution</button>
             </form>
           </div>
+          <!-- Money that moves without a game: the pot paying somebody, somebody
+               paying into it, or credit moved between two players. -->
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Move money</h3>
+              <span class="card-sub">Between a player and the kitty, or between two players</span></div>
+            <form id="moveForm">
+              <div class="form-row">
+                <div class="form-group"><label>From</label><select id="mv_from"></select></div>
+                <div class="form-group"><label>To</label><select id="mv_to"></select></div>
+              </div>
+              <div class="form-row mt">
+                <div class="form-group"><label>Amount (AED)</label>
+                  <input type="number" id="mv_amount" step="1" placeholder="120"></div>
+                <div class="form-group"><label>Date</label><input type="date" id="mv_date"></div>
+              </div>
+              <div class="form-row mt">
+                <div class="form-group"><label>Contract</label><select id="mv_contract"></select>
+                  <p class="hint" style="margin:0.3rem 0 0" id="mv_contract_note"></p></div>
+                <div class="form-group"><label>What for</label>
+                  <input type="text" id="mv_note" placeholder="e.g. reimbursed for the shirts"></div>
+              </div>
+              <button type="submit" class="btn mt">Move it</button>
+            </form>
+            <div id="mvLog" class="mt"></div>
+          </div>
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Contributions Log</h3>
               <div style="display:flex; gap:0.5rem; align-items:center;">

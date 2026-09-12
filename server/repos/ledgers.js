@@ -36,12 +36,23 @@ const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
 // control had been made to overwrite player_id instead, deleting the guest from
 // the game to move their cost.
 //
-// One rule for "this charge is cash, not a draw on a balance", used by both the
-// charge total and the owed total so they can never disagree about a row.
-// Either the person settling it keeps no contract balance at all, or this
-// particular game was marked cash — a regular player standing in as a guest for
-// one night, which Game Day offers and which used to be silently discarded.
-const CASH_CHARGE = `ch.settles_cash = 1 OR COALESCE(sp.player_type, 'regular') = 'outside'`;
+// A charge is settled exactly one of three ways, and these two predicates
+// decide which. Both are used by the balance and by the owed total, so the two
+// can never disagree about a row.
+//
+// KITTY_FUNDED — the club pot carries it. A Mon/Thu regular turning up one odd
+// Saturday, or their plus-one. Nobody is billed and nobody owes it, so it wins
+// over the other two and is invisible to balances and the collect list alike.
+//
+// CASH_CHARGE — settled in cash on the day. Either the settler keeps no contract
+// balance at all, or this particular game was marked cash: a regular player
+// standing in as a guest for one night, which Game Day offers.
+//
+// Neither — it comes off a contract balance, which is the ordinary case.
+const KITTY_FUNDED = 'ch.settled_from_kitty = 1';
+const NOT_KITTY_FUNDED = 'ch.settled_from_kitty = 0';
+const CASH_CHARGE = `${NOT_KITTY_FUNDED} AND (ch.settles_cash = 1
+  OR COALESCE(sp.player_type, 'regular') = 'outside')`;
 
 // Charges an outside player settles themselves are excluded outright, paid or
 // not. They keep no prepaid balance to draw on — they hand over cash on the day,
@@ -59,7 +70,7 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
     AND g.contract_id = l.contract_id AND g.historical = 0
-    AND NOT (${CASH_CHARGE})), 0)`;
+    AND ${NOT_KITTY_FUNDED} AND NOT (${CASH_CHARGE})), 0)`;
 // Cash the club is still waiting on: an outside player's own charges, unpaid.
 // Deliberately NOT part of present_balance — it is money owed to the club, not
 // money the club holds. Reported alongside so "do I still need to collect from

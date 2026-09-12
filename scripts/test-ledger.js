@@ -29,6 +29,8 @@ const { db, initSchema, DB_FILE } = await import('../server/db.js');
 const { ledgersRepo } = await import('../server/repos/ledgers.js');
 const { gameweeksRepo } = await import('../server/repos/gameweeks.js');
 const { periodReportRepo } = await import('../server/repos/period_report.js');
+const { movementsRepo } = await import('../server/repos/movements.js');
+const { kittyRepo } = await import('../server/repos/kitty.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -72,6 +74,7 @@ const txn = (pid, type, amount, status = 'approved', contractId = CONTRACT) =>
     .run(`t${++seq}`, pid, contractId, type, amount, status, new Date().toISOString(), new Date().toISOString());
 
 const balanceOf = (pid) => ledgersRepo.get(pid, CONTRACT).present_balance;
+const round2 = (n) => Math.round(n * 100) / 100;
 
 test('opening balance alone is the balance', () => {
   assert.equal(balanceOf(player('Opening only', 250)), 250);
@@ -391,6 +394,79 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(charge.paid, 0, 'collected is a question only cash can answer');
   assert.equal(balanceOf(p), 460, 'it comes off the balance instead');
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
+});
+
+// --- the pot carrying a place, and money moved without a game ----------------
+
+test('a place the kitty carries is billed to nobody and owed by nobody', () => {
+  const p = player('Odd Saturday', 500);
+  const gw = playGame({ pitch: 100, players: [{ player_id: p, amount: 40 }] });
+  assert.equal(kittyOf(gw.id), -60, 'while they are paying: 40 - 100');
+
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id, { mode: 'kitty' });
+  const r = ledgersRepo.get(p, CONTRACT);
+  assert.equal(r.present_balance, 500, 'their balance is untouched');
+  assert.equal(r.cash_owed, 0, 'and they owe nothing');
+  // The pot pays by collecting nothing, not by a second expense on top.
+  assert.equal(kittyOf(gw.id), -100, 'the pot is out the whole pitch cost');
+  assert.equal(gameweeksRepo.all(CONTRACT).find(g => g.id === gw.id).pending_amount, 0);
+  assert.equal(gameweeksRepo.get(gw.id).charges[0].settle_mode, 'kitty');
+});
+
+test('a kitty-carried place can be put back on a balance', () => {
+  const p = player('Changed mind', 500);
+  const gw = playGame({ pitch: 0, players: [{ player_id: p, amount: 40 }] });
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id, { mode: 'kitty' });
+  assert.equal(balanceOf(p), 500);
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id, { mode: 'balance' });
+  assert.equal(balanceOf(p), 460, 'back on their balance');
+  assert.equal(kittyOf(gw.id), 40, 'and back in the pot');
+});
+
+test('the pot can pay somebody, and it is one movement or none', () => {
+  const p = player('Bought the shirts', 500);
+  const before = kittyRepo.balance().balance;
+  movementsRepo.create({ from: 'kitty', to: p, amount: 120, contract_id: CONTRACT,
+    date: '2026-03-01', note: 'shirts' });
+  assert.equal(kittyRepo.balance().balance, round2(before - 120), 'the pot is down');
+  assert.equal(balanceOf(p), 620, 'and they are up');
+
+  const mv = movementsRepo.all({ limit: 1 })[0];
+  assert.equal(mv.from_name, 'Kitty');
+  movementsRepo.remove(mv.id);
+  assert.equal(kittyRepo.balance().balance, before, 'undone on both sides');
+  assert.equal(balanceOf(p), 500);
+});
+
+test('paying the cashier for a club expense moves no contract balance', () => {
+  const p = player('Cashier', 500);
+  const before = kittyRepo.balance().balance;
+  movementsRepo.create({ from: 'kitty', to: p, amount: 90, date: '2026-03-02', note: 'BBQ' });
+  assert.equal(kittyRepo.balance().balance, round2(before - 90), 'real money left the pot');
+  assert.equal(balanceOf(p), 500, 'naming no contract keeps it off a contract balance');
+});
+
+test('money moved between players is moved, not created', () => {
+  const a = player('Gives', 300);
+  const b = player('Gets', 100);
+  const potBefore = kittyRepo.balance().balance;
+  movementsRepo.create({ from: a, to: b, amount: 75, contract_id: CONTRACT, date: '2026-03-03' });
+  assert.equal(balanceOf(a), 225);
+  assert.equal(balanceOf(b), 175);
+  assert.equal(balanceOf(a) + balanceOf(b), 400, 'the pair still holds what it started with');
+  assert.equal(kittyRepo.balance().balance, potBefore, 'the pot is not involved');
+});
+
+test('a movement that would say nothing happened is refused', () => {
+  const a = player('Same', 100);
+  assert.throws(() => movementsRepo.create({ from: a, to: a, amount: 10, contract_id: CONTRACT }),
+    /cannot move to where it already is/);
+  assert.throws(() => movementsRepo.create({ from: 'kitty', to: a, amount: 0 }),
+    /more than zero/);
+  assert.throws(() => movementsRepo.create({ from: a, to: player('Other'), amount: 10 }),
+    /needs a contract/);
+  assert.throws(() => movementsRepo.create({ from: 'kitty', to: 'nobody', amount: 10 }),
+    /No such player/);
 });
 
 // --- editing a game afterwards ----------------------------------------------

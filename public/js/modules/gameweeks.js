@@ -287,6 +287,10 @@ async function detail(id) {
   // every row as an unticked "owes" box said the whole team still owed for a
   // game that was already paid for, and offered a tickbox that changed nothing.
   const settleCell = (c) => {
+    if (c.settle_mode === 'kitty') {
+      return `<span class="hint" style="min-width:62px;white-space:nowrap"
+               title="The club pot carries this place: nobody is billed and nobody owes it.">kitty</span>`;
+    }
     if (!c.is_cash) {
       const who = c.settled_by === c.player_id
         ? 'their own balance'
@@ -318,10 +322,11 @@ async function detail(id) {
     <div class="panel-row" data-charge="${c.id}">
       ${settleCell(c)}
       <strong style="flex:1">${esc(c.player_name)}</strong>
-      <select class="ch-mode" data-charge="${c.id}" style="max-width:120px"
-              title="Cash to collect, or taken off a contract balance">
-        <option value="balance" ${c.is_cash ? '' : 'selected'}>off balance</option>
-        <option value="cash" ${c.is_cash ? 'selected' : ''}>cash to collect</option>
+      <select class="ch-mode" data-charge="${c.id}" style="max-width:140px"
+              title="Off a contract balance, cash still to collect, or carried by the club pot">
+        <option value="balance" ${c.settle_mode === 'balance' ? 'selected' : ''}>off balance</option>
+        <option value="cash" ${c.settle_mode === 'cash' ? 'selected' : ''}>cash to collect</option>
+        <option value="kitty" ${c.settle_mode === 'kitty' ? 'selected' : ''}>kitty covers it</option>
       </select>
       <select class="ch-payer" data-charge="${c.id}" style="max-width:130px"
               title="Whose money settles this charge">${payerOptions(c)}</select>
@@ -418,10 +423,11 @@ async function detail(id) {
     const payer = document.querySelector(`.ch-payer[data-charge="${chargeId}"]`);
     try {
       await api.setChargeSettlement(id, chargeId, {
-        settles_cash: mode.value === 'cash',
+        mode: mode.value,
         charged_to: payer.value || null,
       });
-      toast(mode.value === 'cash' ? 'Now cash to collect' : 'Now settled off a balance');
+      toast({ cash: 'Now cash to collect', kitty: 'The kitty covers this place',
+        balance: 'Now settled off a balance' }[mode.value]);
     } catch (e) {
       toast(e.message, true);
     }

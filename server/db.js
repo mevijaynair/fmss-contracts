@@ -273,6 +273,55 @@ export function initSchema() {
       try { db.prepare('SELECT settles_cash FROM charges LIMIT 1').get(); }
       catch { db.exec('ALTER TABLE charges ADD COLUMN settles_cash INTEGER NOT NULL DEFAULT 0'); }
     },
+    // charges: paid for out of the club pot rather than by anybody.
+    //
+    // A Mon/Thu regular who turns up one odd Saturday, or their plus-one, can be
+    // carried by the kitty instead of being billed. The pot does not pay out a
+    // separate expense for this — it simply collects nothing for that player,
+    // which is exactly what excluding the charge from the game's income does.
+    // Nobody owes it, so it is not cash to collect either.
+    () => {
+      try { db.prepare('SELECT settled_from_kitty FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN settled_from_kitty INTEGER NOT NULL DEFAULT 0'); }
+    },
+    // kitty: which contract's pot this belongs to.
+    //
+    // There is one kitty table and it never recorded a contract, so "the Mon/Thu
+    // kitty" was not something the data could express — only a single undivided
+    // pot, while opening balances were being recorded per contract. Nullable,
+    // because entries that genuinely belong to the club as a whole (a BBQ, an
+    // annual day) belong to no contract.
+    () => {
+      try { db.prepare('SELECT contract_id FROM kitty LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE kitty ADD COLUMN contract_id TEXT REFERENCES contracts(id)'); }
+    },
+    // movements: money moved without a game — the pot paying somebody out, a
+    // player putting money in, credit moved between two players.
+    //
+    // The two legs of a movement live in the tables that already own them
+    // (kitty rows and transactions). This table is the statement of intent that
+    // ties them together, so reversing a movement reverses both halves and
+    // neither can survive alone. Doing these by hand — a contribution here, a
+    // kitty entry there — is how money got invented or lost with nothing to say
+    // what was meant.
+    () => {
+      try { db.prepare('SELECT id FROM movements LIMIT 1').get(); }
+      catch {
+        db.exec(`CREATE TABLE movements (
+          id          TEXT PRIMARY KEY,
+          from_party  TEXT NOT NULL,   -- a players.id, or the literal 'kitty'
+          to_party    TEXT NOT NULL,
+          amount      REAL NOT NULL,
+          contract_id TEXT REFERENCES contracts(id),
+          date        TEXT NOT NULL,
+          note        TEXT NOT NULL DEFAULT '',
+          created_by  TEXT,
+          created_at  TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_mv_date ON movements(date)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_mv_contract ON movements(contract_id)');
+      }
+    },
     // NOTE ON QUOTING: string literals in DDL must use SINGLE quotes. Double
     // quotes denote an IDENTIFIER in SQL; SQLite only accepts them as strings
     // via a deprecated fallback for unresolvable identifiers. That fallback is

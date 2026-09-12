@@ -396,9 +396,109 @@ async function renderMyContributions() {
 
 // ------------------------------------------------------------------- exports
 
+// --- money that moves without a game ----------------------------------------
+//
+// Paying somebody out of the pot, paying into it, or moving credit between two
+// players. All three used to be faked with a contribution on one side and a
+// hand-typed kitty entry on the other, with nothing tying the halves together —
+// so a half-finished move invented or destroyed money silently.
+
+const KITTY = 'kitty';
+
+function moveParties() {
+  const roster = (store.players || []).filter(p => !p.is_sandbox)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [{ id: KITTY, name: '— The kitty —' },
+    ...roster.map(p => ({ id: p.id, name: p.name }))];
+}
+
+function fillMoveSelects() {
+  const opts = moveParties()
+    .map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  const from = $('mv_from'); const to = $('mv_to');
+  if (!from || !to) return;
+  from.innerHTML = opts;
+  to.innerHTML = opts;
+  from.value = KITTY;
+  $('mv_contract').innerHTML = '<option value="">No contract — club money</option>'
+    + (store.contracts || []).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  if (!$('mv_date').value) $('mv_date').value = today();
+  describeMove();
+}
+
+// Say what naming a contract will and will not do, because the two cases look
+// identical on the form and behave completely differently.
+function describeMove() {
+  const note = $('mv_contract_note');
+  if (!note) return;
+  const from = $('mv_from')?.value; const to = $('mv_to')?.value;
+  const betweenPlayers = from !== KITTY && to !== KITTY;
+  note.textContent = betweenPlayers
+    ? 'Required — a balance belongs to a contract.'
+    : 'Leave blank to move real club money without touching any balance, '
+      + "e.g. paying yourself back for something you bought. Name one and the player's balance moves too.";
+}
+
+async function renderMovements() {
+  const host = $('mvLog');
+  if (!host) return;
+  let rows = [];
+  try { rows = await api.movements(); } catch { host.innerHTML = ''; return; }
+  if (!rows.length) { host.innerHTML = '<p class="hint">Nothing moved yet.</p>'; return; }
+  host.innerHTML = `
+    <table class="sams-table">
+      <thead><tr><th>Date</th><th>From</th><th>To</th><th class="num">Amount</th><th>What for</th><th></th></tr></thead>
+      <tbody>${rows.map(m => `
+        <tr>
+          <td>${esc(fmtDate(m.date))}</td>
+          <td>${esc(m.from_name)}</td>
+          <td>${esc(m.to_name)}</td>
+          <td class="num"><strong>${money(m.amount)}</strong></td>
+          <td>${esc(m.note || '—')}${m.contract_id
+    ? ` <span class="hint">(${esc(m.contract_id)})</span>`
+    : ' <span class="hint">(club money)</span>'}</td>
+          <td class="row-actions"><button class="link-btn" data-mv-del="${esc(m.id)}"
+            title="Undo this movement — both sides">✕</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+
+  host.querySelectorAll('[data-mv-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Undo this movement? Both sides of it are reversed.')) return;
+      try {
+        await api.deleteMovement(b.dataset.mvDel);
+        toast('Movement undone');
+        renderMovements();
+      } catch (e) { toast(e.message, true); }
+    }));
+}
+
+function initMoveMoney() {
+  const form = $('moveForm');
+  if (!form) return;
+  ['mv_from', 'mv_to'].forEach(id => $(id)?.addEventListener('change', describeMove));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api.createMovement({
+        from: $('mv_from').value,
+        to: $('mv_to').value,
+        amount: Number($('mv_amount').value),
+        contract_id: $('mv_contract').value || null,
+        date: $('mv_date').value || today(),
+        note: $('mv_note').value.trim(),
+      });
+      toast('Moved ✓');
+      $('mv_amount').value = ''; $('mv_note').value = '';
+      renderMovements();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 export function initContributions() {
   if (isPlayer()) return;   // player UI is built lazily on first load
   initAdmin();
+  initMoveMoney();
 }
 
 export function loadContributions() {
@@ -407,5 +507,6 @@ export function loadContributions() {
     return renderMyContributions();
   }
   fillSelects();
-  return Promise.all([renderPendingApprovals(), renderLog()]);
+  fillMoveSelects();
+  return Promise.all([renderPendingApprovals(), renderLog(), renderMovements()]);
 }

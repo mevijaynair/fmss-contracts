@@ -23,6 +23,7 @@ import { gameFinancingRepo } from '../repos/game_financing.js';
 import { playerRelationshipsRepo } from '../repos/player_relationships.js';
 import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
+import { movementsRepo } from '../repos/movements.js';
 import { parseTeams } from '../parser.js';
 import { parseResultsSheet, normaliseScore, winningTeam } from '../results_import.js';
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
@@ -582,6 +583,22 @@ r.post('/admin/contributions/:id/reject', wrap((req) => {
 
 // ---- kitty ----
 r.get('/kitty', wrap((req) => { requireAdmin(req); return { entries: kittyRepo.all(), ...kittyRepo.balance() }; }));
+
+// ---- money moved without a game ----
+// Paying somebody out of the pot, putting money into it, or moving credit from
+// one player to another. Both legs are written together or not at all.
+r.get('/movements', wrap((req) => {
+  requireAdmin(req);
+  return movementsRepo.all({ contractId: req.query.contract || null });
+}));
+r.post('/movements', wrap((req) => {
+  requireAdmin(req);
+  return movementsRepo.create({ ...req.body, created_by: req.user.id || 'admin' });
+}));
+r.delete('/movements/:id', wrap((req) => {
+  requireAdmin(req);
+  return movementsRepo.remove(req.params.id);
+}));
 r.post('/kitty', wrap((req) => { requireAdmin(req); return kittyRepo.create(req.body); }));
 r.delete('/kitty/:id', wrap((req) => { requireAdmin(req); kittyRepo.remove(req.params.id); return { ok: true }; }));
 
