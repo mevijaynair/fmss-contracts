@@ -11,7 +11,8 @@
     "reseed": "node server/db.js --reseed",
     "check:ui": "node scripts/check-ui-tokens.js",
     "test:ledger": "node scripts/test-ledger.js",
-    "test": "npm run check:ui && npm run test:ledger",
+    "test:deps": "node scripts/test-deps.js",
+    "test": "npm run check:ui && npm run test:deps && npm run test:ledger",
     "audit": "node scripts/audit.js",
     "verify": "node scripts/verify-balances.js",
     "verify:lock": "node scripts/verify-balances.js --lock"
@@ -22,5 +23,9 @@
   "dependencies": {
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.0"
+  },
+  "//overrides": "express and body-parser both pin qs to ~6.15.1, and every 6.15.x carries two moderate advisories (GHSA-x5fp-wj9c-mxmx array-limit bypass, GHSA-4mjr-xmp4-gh2g DoS via isBuffer). 6.16 is the fix and is API-compatible with what express asks of it. Same override the annual day app carries. Remove once express ships a release that widens the range itself.",
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }
