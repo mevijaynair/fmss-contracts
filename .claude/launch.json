@@ -7,6 +7,13 @@
       "runtimeArgs": ["server/index.js"],
       "port": 3100,
       "description": "FMSS football club contract fee management web app"
+    },
+    {
+      "name": "FMSS Annual Day",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Football_ai/fmss-annualday/server/index.js"],
+      "port": 3200,
+      "description": "Annual Day quiz + awards (separate repo; every path inside it is self-relative, so it runs fine from here)"
     }
   ]
 }
