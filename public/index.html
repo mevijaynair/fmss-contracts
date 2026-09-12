@@ -345,12 +345,10 @@
             <div class="quick-row">
               <button class="btn btn-secondary" data-goto="logins">Player Logins</button>
               <button class="btn btn-secondary" data-goto="transfers">Transfer approvals</button>
-              <button class="btn btn-secondary" data-goto="sandbox">Sandbox</button>
             </div>
             <p class="hint">Player Logins issues and resets PINs. Transfer approvals is where a
               player's request to send money to someone else is signed off — moving money yourself
-              is quicker from Contributions. Sandbox creates throwaway players in the live
-              database for testing; delete them when you are done.</p>
+              is quicker from Contributions.</p>
           </div>
         </section>
 
@@ -387,12 +385,6 @@
 
         <!-- OPENING BALANCES (admin) — import initial balances for a contract (1 Aug baseline) -->
         <!-- SANDBOX (admin only) — test players for safe balance testing -->
-        <section class="view" data-view="sandbox" hidden>
-            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="settings">← back to Settings</button></p>
-          <div class="sams-card">
-            <div id="sandboxContainer"></div>
-          </div>
-        </section>
 
         <!-- TRANSFERS (both) — player-to-player kitty transfers -->
         <section class="view" data-view="transfers" hidden>

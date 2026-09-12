@@ -35,7 +35,6 @@ import { initExternalEvents, loadExternalEvents } from './modules/external_event
 import { initReport, loadReport } from './modules/report.js';
 import { initTransfers, loadTransfers } from './modules/transfers.js';
 import { initOpeningBalances, loadOpeningBalances } from './modules/opening_balances.js';
-import { initSandbox, loadSandbox } from './modules/sandbox.js';
 
 const LOADERS = {
   dashboard: loadDashboard,
@@ -50,7 +49,6 @@ const LOADERS = {
   transfers: loadTransfers,
   logins: loadLogins,
   'opening-balances': loadOpeningBalances,
-  sandbox: loadSandbox,
   settings: loadSettings,
 };
 
@@ -78,7 +76,7 @@ async function start() {
   store.user = user;
 
   initReport(); initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
-  if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); initSandbox(); }
+  if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); }
   initTransfers();
 
   window.addEventListener('fmss:view', (e) => {
@@ -87,7 +85,7 @@ async function start() {
   });
 
   // Any button can send you to a view. The screens that are no longer in the
-  // sidebar — Standing, Player Logins, Transfers, Sandbox — are reached this
+  // sidebar — Standing, Player Logins, Transfer approvals — are reached this
   // way, from the screen each belongs to. Delegated, so buttons rendered later
   // work without being wired individually.
   document.addEventListener('click', (e) => {

@@ -17,7 +17,6 @@ import { auditRepo } from '../repos/audit.js';
 import { authUsersRepo } from '../repos/auth_users.js';
 import { externalEventsRepo } from '../repos/external_events.js';
 import { openingBalancesRepo } from '../repos/opening_balances.js';
-import { sandboxPlayersRepo } from '../repos/sandbox_players.js';
 import { gameResultsRepo } from '../repos/game_results.js';
 import { gameFinancingRepo } from '../repos/game_financing.js';
 import { playerRelationshipsRepo } from '../repos/player_relationships.js';
@@ -1161,24 +1160,14 @@ r.get('/admin/opening-balances/:contractId', wrap((req) => {
 }));
 
 // ---- Sandbox Players (test environment) ----
-// Admin: create a test player (sandboxed, can be safely deleted with all data)
-r.post('/admin/sandbox/players', wrap((req) => {
-  requireAdmin(req);
-  if (!req.body.name) throw new Error('name required');
-  return sandboxPlayersRepo.createSandbox(db, req.body.name);
-}));
-
-// Admin: list all test players
-r.get('/admin/sandbox/players', wrap((req) => {
-  requireAdmin(req);
-  return sandboxPlayersRepo.listSandbox(db);
-}));
-
-// Admin: delete a test player and cascade-clean all their data
-r.delete('/admin/sandbox/players/:playerId', wrap((req) => {
-  requireAdmin(req);
-  return sandboxPlayersRepo.deleteSandbox(db, req.params.playerId);
-}));
+// The sandbox routes that stood here are gone. They created real player rows in
+// the live database so that balance behaviour could be tried out — a test
+// harness pointed at production money. scripts/test-ledger.js does the same job
+// against a scratch database that is thrown away afterwards, and refuses to run
+// if it finds itself pointed at the real one.
+//
+// players.is_sandbox stays: nothing writes it any more, but the dashboard and
+// the pickers still read it, and dropping a column means rebuilding the table.
 
 // ---- player relationships (outside players, shared balances) ----
 

@@ -158,13 +158,6 @@ export const api = {
   getOpeningBalances: (contractId) =>
     req('GET', `/admin/opening-balances/${contractId}`),
 
-  // ---- sandbox players (test environment) ----
-  createSandboxPlayer: (name) =>
-    req('POST', '/admin/sandbox/players', { name }),
-  getSandboxPlayers: () =>
-    req('GET', '/admin/sandbox/players'),
-  deleteSandboxPlayer: (playerId) =>
-    req('DELETE', `/admin/sandbox/players/${playerId}`),
 
   // ---- bulk import ----
   bulkImportPlayersAndBalances: (contract_id, data) =>
