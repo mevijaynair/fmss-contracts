@@ -12,6 +12,7 @@
     "check:ui": "node scripts/check-ui-tokens.js",
     "test:ledger": "node scripts/test-ledger.js",
     "test": "npm run check:ui && npm run test:ledger",
+    "audit": "node scripts/audit.js",
     "verify": "node scripts/verify-balances.js",
     "verify:lock": "node scripts/verify-balances.js --lock"
   },
