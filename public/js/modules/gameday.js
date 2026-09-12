@@ -101,13 +101,21 @@ function getPresetRate(rateType, contractId) {
  * the server rule in parser.js: being outside the contract decides the rate
  * before captaincy does, because the captain rate is a contract benefit.
  */
+/**
+ * The rate column in force. Follows the headcount as rows come and go — the
+ * value captured at parse time goes stale the moment a duplicate is deleted —
+ * unless it has been set by hand, in which case the choice stands.
+ */
+function currentBucket(meta) {
+  if (meta?.bucketPinned) return meta.bucket;
+  const derived = rows.length >= 11 ? '12' : '10';
+  if (meta) meta.bucket = derived;
+  return derived;
+}
+
 function applyRate(r, meta) {
   const rates = rateCard(contractId);
-  // Always derive from the current live roster, not the bucket meta captured
-  // at parse time — meta.bucket goes stale the moment a row is added/removed
-  // (e.g. deleting a duplicate drops an 11-player game to 10), and this must
-  // match parser.js's own rule (numPlayers >= 11 ? '12' : '10').
-  const bucket = rows.length >= 11 ? '12' : '10';
+  const bucket = currentBucket(meta);
   const outside = r.player_type === 'outside';
 
   if (outside) {
@@ -209,14 +217,65 @@ async function showUnmatchedMapping(unmatched) {
 
 // Mark unidentified/outside players inline via dropdown (removed dialog prompts)
 
+/**
+ * What confirming will actually do to this row — the question the preview was
+ * silently not answering, since every row said "pending" whatever its fate.
+ *
+ * This is the same rule the ledger applies: the cost lands on whoever settles
+ * it, and if that person has no prepaid balance it is money to collect rather
+ * than money taken.
+ */
+function settlementOf(r) {
+  const payerId = r.charged_to || r.player_id;
+  const payer = rows.find(x => x.player_id === payerId)
+    || (store.players || []).find(p => p.id === payerId);
+  const payerName = payer?.display_name || payer?.name;
+  const paysCash = !payerId
+    || (payer?.player_type === 'outside')
+    || (payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract'));
+
+  if (paysCash) {
+    return {
+      cls: 'is-collect', label: 'to collect', cash: true,
+      why: payerId
+        ? `${payerName || 'They'} have no prepaid balance, so this stays owed until you collect it.`
+        : 'Nobody is prepaying this, so it stays owed until collected.',
+    };
+  }
+  return {
+    cls: 'is-balance', label: payerId === r.player_id ? 'from balance' : `${payerName} pays`,
+    cash: false,
+    why: payerId === r.player_id
+      ? 'Comes straight off their contract balance when you confirm.'
+      : `Comes off ${payerName}'s contract balance when you confirm.`,
+  };
+}
+
 function renderPreview(meta) {
   $('gdPreviewCard').hidden = false;
   const outsideCount = rows.filter(r => r.player_type === 'outside').length;
   const unmatchedCount = rows.filter(r => !r.matched).length;
-  let metaText = `${rows.length} players · ${meta.teams.join(' / ')} · ${meta.bucket}-player rate`;
+  // The rate column was inferred from headcount and only ever mentioned in
+  // passing, so a game priced off the wrong column looked identical to one
+  // priced correctly. It is now stated and changeable.
+  const bucket = currentBucket(meta);
+  let metaText = `${rows.length} players · ${meta.teams.join(' / ')}`;
   if (outsideCount) metaText += ` · ${outsideCount} outside`;
   if (unmatchedCount) metaText += ` · ${unmatchedCount} unidentified`;
-  $('gdMeta').textContent = metaText;
+  $('gdMeta').innerHTML = `${esc(metaText)}
+    · priced on the
+    <select id="gdBucket" style="width:auto; display:inline-block; padding:0.1rem 0.3rem; font-size:0.85rem;">
+      <option value="10" ${bucket === '10' ? 'selected' : ''}>10-a-side</option>
+      <option value="12" ${bucket === '12' ? 'selected' : ''}>12-a-side</option>
+    </select> card`;
+  $('gdBucket').addEventListener('change', (e) => {
+    meta.bucket = e.target.value;
+    meta.bucketPinned = true;   // a deliberate choice outranks the headcount
+    // Re-price everyone off the new column, keeping any hand-typed guest rate.
+    rows.forEach(r => applyRate(r, meta));
+    renderPreview(meta);
+    toast(`Re-priced on the ${meta.bucket}-a-side card`, false);
+  });
 
   $('gdTable').querySelector('tbody').innerHTML = rows.map((r, i) => {
     // Auto-populate preset amount if empty
@@ -235,15 +294,25 @@ function renderPreview(meta) {
         <option value="outside" ${isOutside ? 'selected' : ''}>Out of contract</option>
       </select>`;
 
-    // Allow reassigning charge to another player (for transfers)
-    // Selected by who settles the charge, not who played it — those differ the
-    // moment a guest is billed to the member who brought them.
-    const settlesId = r.charged_to || r.player_id;
-    const playerOptions = rows.map(p => `<option value="${p.player_id}" ${p.player_id === settlesId ? 'selected' : ''}>${esc(p.display_name)}</option>`).join('');
-    const chargedToControl = r.matched ? `
-      <select class="charged-to-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:140px;">
+    // Who settles this charge. Offered for EVERY row, including names the parser
+    // did not recognise — a guest nobody can identify is exactly the one most
+    // likely to need billing to the member who brought them, and this control
+    // used to be withheld from them.
+    //
+    // The list is every player, not only the ones in this game: whoever vouches
+    // for a guest is not always on the pitch that night.
+    const settlesId = r.charged_to || r.player_id || '';
+    const roster = (store.players || []).filter(p => !p.is_sandbox);
+    const playerOptions = roster
+      .map(p => `<option value="${p.id}" ${p.id === settlesId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+    const selfLabel = r.matched ? 'Themselves' : 'Themselves (new player)';
+    const chargedToControl = `
+      <select class="charged-to-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;">
+        <option value="" ${!r.charged_to ? 'selected' : ''}>${selfLabel}</option>
         ${playerOptions}
-      </select>` : '<span class="hint">—</span>';
+      </select>`;
+
+    const s = settlementOf(r);
 
     return `
     <tr>
@@ -256,7 +325,9 @@ function renderPreview(meta) {
       <td style="text-align:center; font-size:0.85rem;">
         <span class="hint">Charged to:</span><br>${chargedToControl}
       </td>
-      <td style="text-align:center; font-size:0.9rem;"><span class="pending-badge" data-i="${i}">pending</span></td>
+      <td style="text-align:center;">
+        <span class="settle-badge ${s.cls}" title="${esc(s.why)}">${s.label}</span>
+      </td>
       <td class="row-actions"><button class="link-btn" data-del="${i}" title="Remove">✕</button></td>
     </tr>`;
   }).join('');
@@ -280,12 +351,13 @@ function renderPreview(meta) {
   $('gdTable').querySelectorAll('.charged-to-select').forEach(sel =>
     sel.addEventListener('change', () => {
       const row = rows[sel.dataset.i];
-      const payerId = sel.value;
-      if (!payerId || payerId === (row.charged_to || row.player_id)) return;
-      row.charged_to = payerId;
-      const payer = rows.find(r => r.player_id === payerId)?.display_name
-        || store.players?.find(p => p.id === payerId)?.name || payerId;
-      toast(`${row.display_name} still plays — ${payer} pays for them`, false);
+      const payerId = sel.value;             // '' means they settle it themselves
+      if (payerId === (row.charged_to || '')) return;
+      row.charged_to = payerId || null;
+      const payer = store.players?.find(p => p.id === payerId)?.name;
+      toast(payerId
+        ? `${row.display_name} still plays — ${payer} pays for them`
+        : `${row.display_name} settles their own charge`, false);
       renderPreview(meta);
     }));
 
@@ -305,6 +377,22 @@ function recalcTotal() {
   $('gdVsCost').textContent = cost
     ? `pitch cost ${money(cost)} · ${diff >= 0 ? 'surplus' : 'short'} ${money(Math.abs(diff))}`
     : '';
+
+  // Say plainly what pressing Confirm will do, split the way the money actually
+  // splits: some comes off balances now, the rest is cash still to chase.
+  const summary = document.querySelector('[data-gd-summary]');
+  if (summary) {
+    const fates = rows.map(r => ({ r, s: settlementOf(r) }));
+    const fromBalance = fates.filter(f => !f.s.cash).reduce((s, f) => s + (Number(f.r.amount) || 0), 0);
+    const toCollect = fates.filter(f => f.s.cash).reduce((s, f) => s + (Number(f.r.amount) || 0), 0);
+    const collectNames = fates.filter(f => f.s.cash).map(f => f.r.display_name);
+    summary.innerHTML = rows.length ? `
+      <span><strong>${money(fromBalance)}</strong> off balances now
+        <span class="hint">(${fates.filter(f => !f.s.cash).length} player${fates.filter(f => !f.s.cash).length === 1 ? '' : 's'})</span></span>
+      ${toCollect ? `<span><strong>${money(toCollect)}</strong> to collect in cash
+        <span class="hint">(${collectNames.join(', ')})</span></span>` : ''}
+      <span>Total charged <strong>${money(tot)}</strong></span>` : '';
+  }
 
   // recalcTotal() takes no arguments and isn't nested inside renderPreview(),
   // so it has no `meta` in scope — this referenced a free `meta` identifier

@@ -114,6 +114,14 @@
           <div class="sams-card" id="gdPreviewCard" hidden>
             <div class="card-header"><h3 class="card-title">Charge Preview</h3>
               <span class="card-sub" id="gdMeta"></span></div>
+            <div style="overflow-x:auto; margin-top:1rem;">
+              <table class="sams-table" id="gdTable">
+                <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th style="text-align:center;">Charge</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <h4 class="mini-h" style="margin-top:1.6rem">Game details</h4>
+            <p class="hint" style="margin:0 0 0.8rem">Date, result and costs. These do not change what anyone is charged.</p>
             <div class="form-row">
               <div class="form-group"><label>Date</label><input type="date" id="gdDate"></div>
               <div class="form-group"><label>Contract # (optional)</label><input type="number" id="gdContractNo" min="0" placeholder="e.g. 8"></div>
@@ -152,15 +160,12 @@
               <div class="form-group"><label>Game Message (optional)</label><textarea id="gdGameMessage" placeholder="Store elaborate WhatsApp details..." style="font-size: 0.9rem; height: 3rem;"></textarea></div>
             </div>
 
-            <div style="overflow-x:auto; margin-top:1rem;">
-              <table class="sams-table" id="gdTable">
-                <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th style="text-align:center;">Charge</th><th></th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
             <div class="preview-foot">
-              <div><span class="muted">Total charge</span> &nbsp;<span class="tot" id="gdTotal">0</span> AED
-                &nbsp;·&nbsp; <span class="hint" id="gdVsCost"></span></div>
+              <div>
+                <div><span class="muted">Total charge</span> &nbsp;<span class="tot" id="gdTotal">0</span> AED
+                  &nbsp;·&nbsp; <span class="hint" id="gdVsCost"></span></div>
+                <div class="gd-summary" data-gd-summary></div>
+              </div>
               <button class="btn" id="gdConfirm">Confirm &amp; deduct balances</button>
             </div>
           </div>

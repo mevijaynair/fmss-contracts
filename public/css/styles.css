@@ -856,6 +856,18 @@ body.role-player .role-admin-only { display: none !important; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
 
+/* What confirming does to each row, so the two fates are distinguishable at a
+   glance instead of every row reading "pending". */
+.settle-badge { display: inline-block; font-size: 0.72rem; font-weight: 600;
+  padding: 0.2rem 0.5rem; border-radius: 999px; white-space: nowrap; cursor: help; }
+.settle-badge.is-balance { color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent); }
+.settle-badge.is-collect { color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.gd-summary { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem;
+  font-size: 0.85rem; color: var(--text-muted); }
+.gd-summary strong { color: var(--text-main); }
+
 /* --- Charts ---------------------------------------------------------------
    Marks are thin and grid/axes recessive, so the data is the loudest thing on
    the card. The win/draw/loss trio is a diverging scale: green and red either
