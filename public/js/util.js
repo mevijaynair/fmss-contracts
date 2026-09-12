@@ -47,6 +47,33 @@ export function contractSeg(host, contracts, active, onPick) {
 
 // Generic modal with keyboard support
 let modalEscapeListener = null;
+/**
+ * Options for a player picker, squad first and guests kept out of the way.
+ *
+ * Sixty-one names in one flat list is most of a season's walk-ups sitting on top
+ * of the twenty people you actually pick from. Guests go in their own group at
+ * the bottom, still reachable — hiding a guest outright would make it impossible
+ * to say who covered them — but never between two squad members.
+ *
+ * `players` is the roster (store.players). Sandbox rows never appear.
+ */
+export function rosterOptions(players, selectedId = '', { includeGuests = true } = {}) {
+  const usable = (players || []).filter(p => !p.is_sandbox);
+  const opt = (p) =>
+    `<option value="${esc(p.id)}"${p.id === selectedId ? ' selected' : ''}>${esc(p.name)}</option>`;
+  const byName = (a, b) => a.name.localeCompare(b.name);
+
+  const squad = usable.filter(p => (p.player_type || 'regular') !== 'outside').sort(byName);
+  const guests = usable.filter(p => (p.player_type || 'regular') === 'outside').sort(byName);
+  // A guest who is already the selected value must stay in the list even when
+  // guests are being withheld, or opening the control would silently change it.
+  const keptGuests = includeGuests ? guests : guests.filter(p => p.id === selectedId);
+
+  return squad.map(opt).join('')
+    + (keptGuests.length
+      ? `<optgroup label="Guests">${keptGuests.map(opt).join('')}</optgroup>` : '');
+}
+
 export function openModal(title, bodyHtml) {
   $('modalTitle').textContent = title;
   $('modalBody').innerHTML = bodyHtml;

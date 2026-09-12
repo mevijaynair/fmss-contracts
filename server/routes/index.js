@@ -228,6 +228,12 @@ r.get('/ledgers', wrap((req) => {
     };
   });
 }));
+// Cash still to collect, read from the charges rather than from ledger rows —
+// a guest who pays cash has no account, and should not need one to appear here.
+r.get('/cash-outstanding', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.cashOutstanding(req.query.contract || null);
+}));
 r.put('/ledgers/:playerId/:contractId/status', wrap((req) => {
   requireAdmin(req);
   ledgersRepo.setStatus(req.params.playerId, req.params.contractId, req.body.status || '');

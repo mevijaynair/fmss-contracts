@@ -188,6 +188,36 @@ export const ledgersRepo = {
       .get(playerId, contractId);
   },
   // Ensure a ledger row exists (opening 0) so a player can be charged in a contract.
+  /**
+   * Cash the club is still waiting on, read from the charges themselves.
+   *
+   * cash_owed on a ledger row answers the same question, but only for someone
+   * who HAS a ledger row — and a guest who pays cash has no balance, so giving
+   * them one was inventing an account nobody uses and putting them into every
+   * list built from ledgers. This reads the charges directly, so what a guest
+   * owes survives them not having an account at all.
+   */
+  cashOutstanding(contractId = null) {
+    const where = contractId ? 'AND g.contract_id = ?' : '';
+    const args = contractId ? [contractId] : [];
+    return db.prepare(`
+      SELECT COALESCE(ch.charged_to, ch.player_id) AS player_id,
+             p.name AS player_name,
+             g.contract_id,
+             COUNT(DISTINCT ch.gameweek_id) AS games,
+             COALESCE(SUM(ch.amount), 0)    AS owed,
+             MAX(g.date)                    AS last_game_date
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
+      WHERE g.historical = 0 AND ch.paid = 0 AND ch.settled_from_kitty = 0
+        AND (ch.settles_cash = 1 OR COALESCE(p.player_type,'regular') = 'outside')
+        ${where}
+      GROUP BY COALESCE(ch.charged_to, ch.player_id), g.contract_id
+      HAVING owed > 0
+      ORDER BY owed DESC`).all(...args);
+  },
+
   ensure(playerId, contractId) {
     db.prepare(`INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status)
                 VALUES (?,?,0,'')`).run(playerId, contractId);

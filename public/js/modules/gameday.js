@@ -1,7 +1,7 @@
 // gameday.js — paste WhatsApp teams → parse → editable preview → confirm & deduct.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, today, contractSeg } from '../util.js';
+import { $, esc, money, today, contractSeg, rosterOptions } from '../util.js';
 import { loadDashboard } from './dashboard.js';
 import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.js';
 
@@ -387,9 +387,9 @@ function renderPreview(meta) {
     const introducer = r.introduced_by
       ? (store.players || []).find(p => p.id === r.introduced_by)?.name
       : null;
-    const roster = (store.players || []).filter(p => !p.is_sandbox);
-    const playerOptions = roster
-      .map(p => `<option value="${p.id}" ${p.id === settlesId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+    // Squad first, guests in their own group — sixty names in one flat list was
+    // mostly walk-ups sitting on top of the twenty people you pick from.
+    const playerOptions = rosterOptions(store.players, settlesId);
     const selfLabel = r.matched ? 'Themselves' : 'Themselves (new player)';
     const introNote = introducer && settlesId === r.introduced_by
       ? `<span class="intro-note" title="Remembered from a previous game">usually ${esc(introducer)}</span>`

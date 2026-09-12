@@ -40,7 +40,12 @@ function statusFromBalance(balance, gamesLeft) {
 async function render() {
   if (isPlayer()) return renderPlayerLedger();
 
-  const ledgers = await api.ledgers(contractId);
+  // Guest debt comes from the charges, not from ledger rows: a guest who pays
+  // cash is given no account at all now, so there is no row of theirs to read.
+  const [ledgers, cashOwed] = await Promise.all([
+    api.ledgers(contractId),
+    api.cashOutstanding(contractId).catch(() => []),
+  ]);
   const roleOf = Object.fromEntries(store.players.map(p => [p.id, p.special_role]));
 
   // Filter
@@ -107,8 +112,9 @@ async function render() {
   // prepaid balance to go into the red. This counted negative balances, which
   // after that correction is always nobody.
   const guestRows = ledgers.filter(l => l.player_type === 'outside');
-  const guestsOwing = guestRows.filter(l => (l.cash_owed || 0) > 0);
-  const guestDebt = guestsOwing.reduce((a, l) => a + (l.cash_owed || 0), 0);
+  const owedById = Object.fromEntries((cashOwed || []).map(c => [c.player_id, c.owed]));
+  const guestsOwing = cashOwed.filter(c => c.owed > 0);
+  const guestDebt = guestsOwing.reduce((a, c) => a + c.owed, 0);
 
   const tableContainer = $('playersTable').parentElement;
 
@@ -166,7 +172,7 @@ async function render() {
 
     // A guest with cash still to collect is as much an alert as a member in the
     // red — it is just a different kind of money, so it is flagged on its own.
-    const owed = l.cash_owed || 0;
+    const owed = owedById[l.player_id] || 0;
 
     return `
     <tr class="${l.present_balance < 0 || owed > 0 ? 'row-alert' : ''}">

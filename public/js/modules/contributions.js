@@ -3,7 +3,7 @@
 //  • Player: self-service "Submit Contribution" (→ pending) + their own history.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, balCell, fmtDate, today } from '../util.js';
+import { $, esc, money, balCell, fmtDate, today, rosterOptions } from '../util.js';
 
 function contractName(id) {
   return store.contracts.find(c => c.id === id)?.name.split(' ')[0] || (id || '—');
@@ -40,10 +40,11 @@ export async function wireSplitNotes(root) {
 // ---------------------------------------------------------------- ADMIN view
 
 function fillSelects() {
-  const payable = store.players
-    .filter(p => p.special_role !== 'cashier')
-    .map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  const everyone = store.players.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  // A contribution tops up a contract balance, which is not a thing a guest has,
+  // so guests are left out of the picker rather than sitting among the squad.
+  const payable = rosterOptions(
+    store.players.filter(p => p.special_role !== 'cashier'), '', { includeGuests: false });
+  const everyone = rosterOptions(store.players);
   $('cf_player').innerHTML = '<option value="">— unassigned —</option>' + payable;
   $('cf_contract').innerHTML = store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $('contribFilter').innerHTML = '<option value="">All players</option>' + everyone;
@@ -409,19 +410,15 @@ const KITTY = 'kitty';
 // party. That is what makes "the Mon/Thu kitty covers a Saturday drop-in" a
 // thing you can actually record: money leaves one share, lands in the other,
 // and the club's total is unchanged.
-function moveParties() {
-  const roster = (store.players || []).filter(p => !p.is_sandbox)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  return [
-    { id: KITTY, name: '— Kitty: club-wide —' },
-    ...(store.contracts || []).map(c => ({ id: `${KITTY}:${c.id}`, name: `— Kitty: ${c.name} —` })),
-    ...roster.map(p => ({ id: p.id, name: p.name })),
-  ];
+function moveOptions() {
+  const pots = [{ id: KITTY, name: '— Kitty: club-wide —' },
+    ...(store.contracts || []).map(c => ({ id: `${KITTY}:${c.id}`, name: `— Kitty: ${c.name} —` }))];
+  return pots.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')
+    + rosterOptions(store.players);
 }
 
 function fillMoveSelects() {
-  const opts = moveParties()
-    .map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  const opts = moveOptions();
   const from = $('mv_from'); const to = $('mv_to');
   if (!from || !to) return;
   from.innerHTML = opts;

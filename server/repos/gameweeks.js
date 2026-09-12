@@ -288,7 +288,10 @@ export const gameweeksRepo = {
       throw new Error('That player is already in this game');
     }
 
-    ledgersRepo.ensure(player_id, gw.contract_id);
+    // Same rule as create(): an account only for someone whose balance moves.
+    const settlerType = db.prepare("SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?")
+      .get(player_id)?.t;
+    if (settlerType !== 'outside') ledgersRepo.ensure(player_id, gw.contract_id);
     db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount)
                 VALUES (?,?,?,?,?,?,?)`)
       .run(`c_add_${Date.now()}`, gameweekId, player_id, team,
@@ -466,15 +469,27 @@ export const gameweeksRepo = {
         (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash)
         VALUES (?,?,?,?,?,?,?,?,?,?)`);
       charges.forEach((ch, i) => {
-        ledgersRepo.ensure(ch.player_id, gw.contract_id);
         const settledBy = ch.charged_to || ch.player_id;
         // Whether this charge is cash is a fact about the night, not about the
         // person. Game Day offers it per row and used to throw the answer away,
         // so a regular player standing in as a guest was filed as settled from a
         // balance they were never going to draw on.
+        // The submitted player_type is only what the form believed; the players
+        // table is what is true. Trusting the payload alone meant any caller
+        // that did not send it — an import, a script, a test — produced a charge
+        // the server thought came off a balance.
+        const settlerType = db.prepare(
+          "SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?").get(settledBy)?.t;
         const cash = ch.settles_cash ? 1
-          : (ch.player_type === 'outside' || ch.rate_type === 'noncontract') && settledBy === ch.player_id
-            ? 1 : 0;
+          : (settlerType === 'outside'
+            || ((ch.player_type === 'outside' || ch.rate_type === 'noncontract')
+              && settledBy === ch.player_id)) ? 1 : 0;
+        // Only somebody whose balance this actually touches gets an account.
+        // Every charged player used to get a ledger row, so a guest paying cash
+        // once was handed a balance they will never use, on every contract, and
+        // then appeared in every list built from ledgers. What they owe is read
+        // from the charges instead, so nothing is lost by leaving them out.
+        if (!cash) ledgersRepo.ensure(settledBy, gw.contract_id);
         insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
           ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
           settledBy, ch.paid ? 1 : 0, cash);

@@ -396,6 +396,34 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
 });
 
+// --- guests do not get an account they will never use ------------------------
+
+test('a cash guest is given no ledger row, and still shows as owing', () => {
+  const host = player('Regular', 500);
+  // A guest with no ledger row of their own — only a players row for the name.
+  const seq2 = `guest${Date.now()}`;
+  db.prepare("INSERT INTO players (id,name,aliases,player_type,created_at) VALUES (?,?,'[]','outside',?)")
+    .run(seq2, 'Walk-up', new Date().toISOString());
+
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: host, amount: 32 }, { player_id: seq2, amount: 40 },
+  ] });
+
+  const row = db.prepare('SELECT COUNT(*) n FROM ledgers WHERE player_id = ?').get(seq2);
+  assert.equal(row.n, 0, 'no account is created for someone who keeps no balance');
+
+  // What they owe survives having no account, because it is read from charges.
+  const owing = ledgersRepo.cashOutstanding(CONTRACT).find(r => r.player_id === seq2);
+  assert.equal(owing.owed, 40);
+  assert.equal(owing.player_name, 'Walk-up');
+  assert.equal(gameweeksRepo.all(CONTRACT).find(g => g.id === gw.id).pending_amount, 40);
+
+  // And collecting it still reaches the pot.
+  gameweeksRepo.setChargePaid(gw.id, gw.charges.find(c => c.player_id === seq2).id, { paid: true });
+  assert.equal(kittyOf(gw.id), 72, '32 from the balance plus 40 collected');
+  assert.equal(ledgersRepo.cashOutstanding(CONTRACT).find(r => r.player_id === seq2), undefined);
+});
+
 // --- the pot carrying a place, and money moved without a game ----------------
 
 test('a place the kitty carries is billed to nobody and owed by nobody', () => {

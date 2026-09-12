@@ -135,7 +135,8 @@ export const periodReportRepo = {
       period_start: from,
       dormant_hidden: rows.length - guests.length - squad.length,
       guests_hidden: guests.filter(r => r.played > 0 || r.cash_owed > 0).length,
-      guest_cash_owed: round2(guests.reduce((s2, r) => s2 + r.cash_owed, 0)),
+      guest_cash_owed: round2(ledgersRepo.cashOutstanding(contractId)
+        .reduce((s2, r) => s2 + r.owed, 0)),
       generated_at: new Date().toISOString().slice(0, 10),
       rate,
       refill_below_games: REFILL_BELOW_GAMES,

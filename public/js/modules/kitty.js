@@ -134,15 +134,18 @@ Expenses&#9;-5512
 // cash_owed is what they actually owe.
 async function getPendingCollections() {
   try {
-    const ledgers = await api.ledgers();
-    const owing = ledgers
-      .map(l => ({
-        ...l,
-        owes: (l.cash_owed || 0) > 0 ? l.cash_owed : Math.max(0, -l.present_balance),
-        kind: (l.cash_owed || 0) > 0 ? 'cash' : 'topup',
-      }))
-      .filter(l => l.owes > 0);
-    return owing.sort((a, b) => b.owes - a.owes);   // most owed first
+    // Two sources, because the two kinds of debt live in different places. A
+    // member in the red is a ledger fact. Guest cash is a charge fact — and has
+    // to be, now that a guest who keeps no balance is given no ledger row at
+    // all. Reading only ledgers would have quietly lost them.
+    const [ledgers, cash] = await Promise.all([api.ledgers(), api.cashOutstanding()]);
+    const topups = (ledgers || [])
+      .filter(l => l.present_balance < 0 && l.player_type !== 'outside')
+      .map(l => ({ player_id: l.player_id, player_name: l.player_name,
+        owes: -l.present_balance, kind: 'topup' }));
+    const guests = (cash || []).map(c => ({ player_id: c.player_id,
+      player_name: c.player_name || 'Guest', owes: c.owed, kind: 'cash' }));
+    return [...topups, ...guests].sort((a, b) => b.owes - a.owes);
   } catch (e) {
     console.error('Failed to get pending collections:', e);
     return [];

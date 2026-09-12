@@ -53,6 +53,8 @@ export const api = {
   updatePlayer: (id, p) => req('PUT', `/players/${id}`, p),
 
   ledgers: (contract) => req('GET', `/ledgers${contract ? `?contract=${contract}` : ''}`),
+  cashOutstanding: (contract) =>
+    req('GET', `/cash-outstanding${contract ? `?contract=${contract}` : ''}`),
   setStatus: (pid, cid, status) => req('PUT', `/ledgers/${pid}/${cid}/status`, { status }),
 
   gameweeks: (contract) => req('GET', `/gameweeks${contract ? `?contract=${contract}` : ''}`),

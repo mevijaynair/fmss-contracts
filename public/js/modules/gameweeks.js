@@ -1,7 +1,7 @@
 // gameweeks.js — game history list + detail modal.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../util.js';
+import { $, esc, money, fmtDate, contractSeg, openModal, closeModal, rosterOptions } from '../util.js';
 import { fixtureDate, dayName, describeDays, loadSchedule, markNoGame, reopenDate } from '../schedule-ui.js';
 
 let contractId = 'sat';
@@ -309,14 +309,9 @@ async function detail(id) {
 
   // Who carries this charge. Anyone can, including someone who did not play —
   // a member covering a guest is usually not on the pitch that night.
-  const payerOptions = (c) => {
-    const opts = (store.players || [])
-      .filter(p => (p.player_type || 'regular') !== 'outside' || p.id === c.settled_by)
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(p => `<option value="${esc(p.id)}" ${p.id === c.settled_by ? 'selected' : ''}>${esc(p.name)}</option>`)
-      .join('');
-    return `<option value="" ${c.settled_by === c.player_id ? 'selected' : ''}>themselves</option>${opts}`;
-  };
+  const payerOptions = (c) =>
+    `<option value="" ${c.settled_by === c.player_id ? 'selected' : ''}>themselves</option>`
+    + rosterOptions(store.players, c.settled_by, { includeGuests: false });
 
   const rows = charges.map(c => `
     <div class="panel-row" data-charge="${c.id}">
