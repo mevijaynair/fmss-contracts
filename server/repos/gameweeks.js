@@ -138,14 +138,19 @@ export const gameweeksRepo = {
              COUNT(*) AS charges_count,
              COALESCE(SUM(ch.amount), 0) AS charged,
              COALESCE(SUM(CASE WHEN ${awaitingCash} THEN 0 ELSE 1 END), 0) AS paid_count,
-             COALESCE(SUM(CASE WHEN ${awaitingCash} THEN ch.amount ELSE 0 END), 0) AS pending_amount
+             COALESCE(SUM(CASE WHEN ${awaitingCash} THEN ch.amount ELSE 0 END), 0) AS pending_amount,
+             -- Who to go and ask. A total on its own tells you money is out
+             -- there without telling you whose pocket it is in, which is the
+             -- one thing needed to collect it. NULLs are skipped, so this is
+             -- empty for a game with nothing outstanding.
+             GROUP_CONCAT(CASE WHEN ${awaitingCash} THEN sp.name END, ', ') AS pending_names
       FROM charges ch
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
       WHERE ch.gameweek_id IN (${placeholders})
       GROUP BY ch.gameweek_id
     `).all(...ids);
     const statsById = new Map(stats.map(s => [s.gameweek_id, s]));
-    const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0 };
+    const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0, pending_names: null };
 
     // charges_count alongside the charged total: the stored num_players counts
     // everyone named in the message, including people who were never matched to

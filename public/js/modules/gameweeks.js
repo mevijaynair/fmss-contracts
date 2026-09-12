@@ -94,11 +94,62 @@ async function renderSchedule() {
     }));
 }
 
+/**
+ * Who still owes the club cash this season, and how much.
+ *
+ * Per-game rows say a night is 80 short; they do not say that the same two
+ * people are 40 short across four nights. cash_owed on the ledger already holds
+ * exactly this — a guest's unpaid charges, kept out of their balance because it
+ * is money owed TO the club — so this reads that rather than inventing a second
+ * way to work it out.
+ */
+async function renderOutstanding(rowsList) {
+  const host = document.querySelector('[data-gw-outstanding]');
+  if (!host) return;
+  let owing = [];
+  try {
+    const ledgers = await api.ledgers(contractId);
+    owing = (Array.isArray(ledgers) ? ledgers : [])
+      .filter(l => (l.cash_owed || 0) > 0)
+      .sort((a, b) => b.cash_owed - a.cash_owed);
+  } catch { host.innerHTML = ''; return; }
+
+  if (!owing.length) {
+    // Say so only when there were games to owe for, otherwise an empty season
+    // reads like a cleared debt.
+    const billed = rowsList.some(g => Number(g.charged) > 0 && !g.historical);
+    host.innerHTML = billed
+      ? '<div class="panel"><div class="panel-body">✓ Every guest has settled up.</div></div>'
+      : '';
+    return;
+  }
+
+  const total = owing.reduce((s, l) => s + l.cash_owed, 0);
+  host.innerHTML = `
+    <div class="panel panel-warn">
+      <div class="panel-title">Still to collect — ${money(total)}</div>
+      <div class="panel-body">Guest cash from games this season. Tick them off in the
+        game they played and the kitty tops up as each one comes in.</div>
+      <div class="panel-scroll">
+        ${owing.map(l => `
+          <div class="panel-row">
+            <strong>${esc(l.player_name)}</strong>
+            <span class="bal neg">${money(l.cash_owed)}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 async function render() {
   const rows = await api.gameweeks(contractId);
   const rowsList = Array.isArray(rows) ? rows : [];
   const gwTable = $('gwTable');
   if (!gwTable || !gwTable.querySelector('tbody')) return;
+
+  // Everything still out there this season, gathered per person rather than per
+  // game. One name usually owes across several nights, and chasing them once for
+  // the total beats chasing them once per fixture.
+  renderOutstanding(rowsList);
 
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
@@ -128,11 +179,18 @@ async function render() {
     const statusColor = !known || !billed ? 'var(--text-muted)'
       : pendingAmount === 0 ? 'var(--success)'
         : pendingAmount < totalCharged / 2 ? 'var(--warning)' : 'var(--danger)';
+    // Name who still owes. "80 pending" says money is out there without saying
+    // whose pocket it is in, which is the one thing you need in order to go and
+    // get it — and the names are already in the same row the total came from.
+    const owing = (g.pending_names || '').split(', ').filter(Boolean);
     const statusText = g.historical && !billed
       ? '<span title="Played before this app tracked money. Settled on the credit sheets, and already inside the opening balances.">settled in the sheets</span>'
       : !known ? '—'
         : !billed ? 'no charges'
-          : pendingAmount === 0 ? '✓ Collected' : `⏳ ${money(pendingAmount)} pending`;
+          : pendingAmount === 0 ? '✓ Collected'
+            : `⏳ ${money(pendingAmount)} pending${owing.length
+              ? `<br><span class="hint" style="font-weight:400">from ${esc(owing.join(', '))}</span>`
+              : ''}`;
 
     return `
       <tr data-gw="${g.id}" style="cursor:pointer;">

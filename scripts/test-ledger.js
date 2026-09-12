@@ -331,6 +331,7 @@ test('only a guest owes anything — a contract charge is settled on the night',
   assert.equal(row.charged, 115, 'everything billed');
   assert.equal(row.pending_amount, 35, "only the guest's cash is outstanding");
   assert.equal(row.paid_count, 2, 'both members count as settled, guest does not');
+  assert.equal(row.pending_names, 'Guest', 'and the list says who to go and ask');
 });
 
 test('the score is saved with the game, not in a second call that can be lost', () => {
