@@ -27,7 +27,9 @@ const HTML = path.join(ROOT, 'public/index.html');
 // Classes used purely as querySelector hooks — no styling intent, so a missing
 // CSS rule is correct, not a bug.
 const HOOK_CLASSES = new Set([
-  'participant-row', 'participant-check', 'participant-amount', 'participant-contract',
+  // The participant-* classes belonged to the old split-the-bill events panel,
+  // which the programmes rewrite replaced; att-* are its successors.
+  'att-tier', 'att-amt', 'att-method', 'att-paid',
   'player-type-select', 'charged-to-select', 'charge-delta',
   'ch-team', 'ch-capt', 'ch-paid', 'gw-pick',
 ]);

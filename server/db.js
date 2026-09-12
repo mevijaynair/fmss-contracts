@@ -632,6 +632,42 @@ export function initSchema() {
       }
     },
 
+    // opening_balances_snapshot.imported_by has the same flaw external_events
+    // had: NOT NULL REFERENCES auth_users(id), which an admin signed in with the
+    // shared password cannot satisfy. Nothing has ever written to this table,
+    // and that is why. Same treatment, same defensive wrapper.
+    () => {
+      const col = db.prepare('PRAGMA table_info(opening_balances_snapshot)').all()
+        .find(c => c.name === 'imported_by');
+      const fk = db.prepare('PRAGMA foreign_key_list(opening_balances_snapshot)').all();
+      if (!col || (col.notnull === 0 && fk.every(f => f.from !== 'imported_by'))) return;
+
+      try {
+        db.exec('PRAGMA foreign_keys = OFF;');
+        db.exec(`CREATE TABLE obs_new (
+          id TEXT PRIMARY KEY,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          player_id TEXT NOT NULL REFERENCES players(id),
+          opening_balance REAL NOT NULL,
+          imported_by TEXT,
+          import_batch TEXT NOT NULL,
+          locked_at TEXT NOT NULL,
+          notes TEXT)`);
+        db.exec(`INSERT INTO obs_new SELECT id, contract_id, player_id, opening_balance,
+                 imported_by, import_batch, locked_at, notes FROM opening_balances_snapshot`);
+        db.exec('DROP TABLE opening_balances_snapshot;');
+        db.exec('ALTER TABLE obs_new RENAME TO opening_balances_snapshot;');
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_contract_player ON opening_balances_snapshot(contract_id, player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_snapshot_batch ON opening_balances_snapshot(import_batch)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_snapshot_locked ON opening_balances_snapshot(locked_at)');
+      } catch (e) {
+        console.warn('[migrate] could not relax opening_balances_snapshot.imported_by:', e.message);
+        try { db.exec('DROP TABLE IF EXISTS obs_new;'); } catch { /* nothing to undo */ }
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON;');
+      }
+    },
+
     // event_attendees: one row per head, member or guest. A guest may hang off a
     // host member (a wife, kids) or stand alone if they settle directly, so
     // player_id and host_player_id are both nullable but never both absent

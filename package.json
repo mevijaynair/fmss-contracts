@@ -10,7 +10,10 @@
     "seed": "node server/db.js --seed",
     "reseed": "node server/db.js --reseed",
     "check:ui": "node scripts/check-ui-tokens.js",
-    "test": "npm run check:ui"
+    "test:ledger": "node scripts/test-ledger.js",
+    "test": "npm run check:ui && npm run test:ledger",
+    "verify": "node scripts/verify-balances.js",
+    "verify:lock": "node scripts/verify-balances.js --lock"
   },
   "engines": {
     "node": ">=22.5.0"

@@ -188,22 +188,54 @@ dig +short contracts.fmss.ae     # -> <your-server-ip>
 
 ## Updating after future changes
 
+This is what contracts.fmss.ae actually runs: pm2, from `/root/fmss-contracts`,
+on port 3100, as root. (Most of the rest of this file describes a different
+machine and should not be trusted — see the warning at the top.)
+
+**Before you deploy**, prove you know what the balances are:
+
 ```bash
-su - fmss
-cd /opt/fmss-contracts
+cd /root/fmss-contracts
+npm run verify
+node scripts/backup.js export
+```
+
+`verify` exits non-zero if any opening balance has drifted from its locked
+baseline, or if any present balance no longer equals its own parts. If it fails,
+stop and find out why before shipping anything on top.
+
+Then deploy:
+
+```bash
+cd /root/fmss-contracts
 git status -sb          # confirm you are on main, not a feature branch
-git pull
-npm ci --omit=dev
-exit
-systemctl restart fmss-contracts
+git pull --ff-only origin main
+pm2 restart npm --update-env
 ```
 
-Then confirm it actually came back up:
+**After it restarts**, prove you did not move anybody's money:
 
 ```bash
-systemctl status fmss-contracts --no-pager
-curl -fsS localhost:3002/api/health && echo
+curl -fsS -o /dev/null -w '%{http_code}\n' localhost:3100/
+npm test                # UI tokens + the ledger golden tests
+npm run verify          # same balances as before the deploy
 ```
+
+`npm run verify` is the important one. It is the automated form of the
+before-and-after balance comparison, and a clean run is the evidence that a
+migration or a change to the balance query left every figure untouched.
+
+### When a balance changes on purpose
+
+Re-lock the baseline, and say why:
+
+```bash
+npm run verify:lock -- --notes "Contract 9 opening balances from the 1 Aug sheet"
+```
+
+Only do this when you have deliberately changed a baseline. Locking to silence a
+failure you do not understand throws away the very thing that would have told you
+something was wrong.
 
 **If `git pull` says "Already up to date" but you expected changes**, the work is
 almost certainly still on an unmerged branch — a `git pull` on `main` fetches the
