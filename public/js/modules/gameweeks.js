@@ -200,8 +200,11 @@ async function render() {
   gwTable.querySelectorAll('[data-gw-edit]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const gw = rowsList.find(g => g.id === btn.dataset.gwEdit);
-      if (gw) editPayments(gw);
+      // Opens the same game panel the row itself opens. This used to open a
+      // separate Record Payments modal that was handed a LIST row — which
+      // carries no charges — so it bailed out with a toast every time and had
+      // been unreachable for as long as the list stopped returning them.
+      detail(btn.dataset.gwEdit);
     });
   });
 }
@@ -431,91 +434,15 @@ async function detail(id) {
     el.addEventListener('change', () => resettle(el.dataset.charge)));
 }
 
-// Edit payment status for players in this gameweek
-function editPayments(gw) {
-  const charges = gw.charges || [];
-  // Only a guest's cash is ever outstanding. A contract player's charge came out
-  // of a balance the club already holds, so listing them here as unpaid sent you
-  // chasing money that had already arrived.
-  const pending = charges.filter(c => !c.paid && c.is_cash);
-
-  if (pending.length === 0) {
-    toast('✓ Nothing left to collect for this game', false);
-    return;
-  }
-
-  const pendingHtml = pending.map((c, i) => `
-    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: var(--bg-subtle); border-radius: 6px; margin-bottom: 0.5rem;">
-      <div style="flex: 1;">
-        <input type="checkbox" id="sel_${c.id}" style="margin-right: 0.5rem;" data-player="${c.player_id}" data-amount="${c.amount}" data-contract="${gw.contract_id}">
-        <label for="sel_${c.id}" style="font-weight: 600; cursor: pointer;">${esc(c.player_name)} — ${money(c.amount)}</label>
-      </div>
-      <div style="display: flex; gap: 0.3rem;">
-        <button class="btn btn-sm" data-mark-paid="${c.id}" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">Mark Paid</button>
-      </div>
-    </div>
-  `).join('');
-
-  openModal(
-    `Record Payments — ${esc(fmtDate(gw.date))}`,
-    `<div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-subtle); border-radius: 6px;">
-      <div style="font-weight: 600; margin-bottom: 0.5rem;">💰 Quick Add to Ledger</div>
-      <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.8rem;">Select players who paid (by cash, transfer, etc.) → add to their balance</div>
-      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
-        <select id="payment_method" style="flex: 1; min-width: 150px; padding: 0.4rem; border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9rem;">
-          <option value="cash">💵 Cash</option>
-          <option value="transfer">🏦 Bank Transfer</option>
-          <option value="upi">📱 UPI/Online</option>
-          <option value="other">📝 Other</option>
-        </select>
-        <button class="btn" id="add_to_ledger" style="padding: 0.4rem 1rem; font-size: 0.9rem;">✓ Add to Ledger</button>
-      </div>
-    </div>
-    <div style="max-height: 50vh; overflow-y: auto; margin-bottom: 1rem;">
-      ${pendingHtml}
-    </div>`
-  );
-
-  // Add selected payments to ledger
-  const addBtn = document.getElementById('add_to_ledger');
-  if (addBtn) {
-    addBtn.addEventListener('click', async () => {
-      const selected = Array.from(document.querySelectorAll('input[id^="sel_"]:checked')).map(cb => ({
-        player_id: cb.dataset.player,
-        amount: Number(cb.dataset.amount),
-        contract_id: cb.dataset.contract,
-        method: document.getElementById('payment_method')?.value || 'cash'
-      }));
-
-      if (selected.length === 0) { toast('Select at least one player', true); return; }
-
-      try {
-        for (const payment of selected) {
-          await api.createContribution({
-            player_id: payment.player_id,
-            contract_id: payment.contract_id,
-            amount: payment.amount,
-            comments: `Paid by ${payment.method} on ${fmtDate(gw.date)}`
-          });
-        }
-        const total = selected.reduce((s, p) => s + p.amount, 0);
-        toast(`✓ Added ${money(total)} from ${selected.length} player(s) to ledger`, false);
-        setTimeout(() => render(), 1000);
-      } catch (e) {
-        toast(`Error: ${e.message}`, true);
-      }
-    });
-  }
-
-  // Mark individual as paid (legacy)
-  document.querySelectorAll('[data-mark-paid]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const chargeId = btn.dataset.markPaid;
-      toast('✓ Marked paid (use Quick Add for balance update)', false);
-      setTimeout(() => render(), 1000);
-    });
-  });
-}
+// The Record Payments modal that stood here is gone. Every part of it was
+// either dead or wrong: it read `charges` off a list row that has none, so it
+// never rendered; its "Mark Paid" button only raised a toast and changed
+// nothing; and its "Add to Ledger" wrote a CONTRIBUTION equal to the charge,
+// which for guest cash credited the guest's balance instead of putting the money
+// in the kitty — inventing a balance for someone who does not keep one.
+//
+// The game panel does all of it properly: collect a guest's cash, move a charge
+// between cash and a balance, change who settles it, and the kitty follows.
 
 // Edit gameweek — populate and show modal
 window.editGameweekClick = async (gameweekId) => {
