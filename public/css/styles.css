@@ -856,6 +856,14 @@ body.role-player .role-admin-only { display: none !important; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
 
+/* Marks a contribution as one leg of a larger payment, so a bank line can be
+   traced to the rows it became. */
+.split-note { display: inline-block; margin-left: 0.4rem; font-size: 0.72rem;
+  font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; cursor: pointer;
+  color: var(--sport); background: color-mix(in srgb, var(--sport) 14%, transparent);
+  white-space: nowrap; }
+.split-note:hover { background: color-mix(in srgb, var(--sport) 26%, transparent); }
+
 /* The fixture being entered, so the first question — which game is this? — is
    answered before the paste box rather than left to a bare date field. */
 .gd-fixture { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem;

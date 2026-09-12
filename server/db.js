@@ -659,6 +659,18 @@ export function initSchema() {
       }
     },
 
+    // One bank transfer can be split across contracts, which writes a row per
+    // contract. Without something joining them, two unrelated-looking entries
+    // are all that is left of a single payment — and reconciling them back to a
+    // statement means remembering that 1000 and 500 were once 1500.
+    () => {
+      const cols = db.prepare('PRAGMA table_info(contributions)').all().map(c => c.name);
+      if (!cols.includes('split_group')) {
+        db.exec('ALTER TABLE contributions ADD COLUMN split_group TEXT');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_contrib_split ON contributions(split_group)');
+      }
+    },
+
     // Games that predate the contract's baseline and never billed anybody were
     // tracked on the credit sheets, not in here. They carry a charge row per
     // player worth 0 — an attendance record — and the opening balance already

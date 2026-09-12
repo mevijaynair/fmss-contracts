@@ -529,6 +529,11 @@ r.get('/contributions', wrap((req) => {
   return contributionsRepo.all({ playerId: req.query.player_id, contractId: req.query.contract });
 }));
 r.post('/contributions', wrap((req) => { requireAdmin(req); return contributionsRepo.create(req.body); }));
+// The other legs of a split payment, for reconciling one bank line.
+r.get('/contributions/split/:groupId', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.splitSiblings(req.params.groupId);
+}));
 r.delete('/contributions/:id', wrap((req) => { requireAdmin(req); contributionsRepo.remove(req.params.id); return { ok: true }; }));
 
 // ---- player self-service: submit contribution for approval ----

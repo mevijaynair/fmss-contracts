@@ -4,6 +4,7 @@ import { store, toast } from '../store.js';
 import { $, esc, money, balCell, contractSeg, openModal, closeModal, today, fmtDate } from '../util.js';
 import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
+import { splitNote, wireSplitNotes } from './contributions.js';
 
 let contractId = 'sat';
 let currentDetailPlayerId = null;
@@ -592,7 +593,7 @@ async function renderPlayerDetail(player, stats, record) {
                   <td style="padding: 0.5rem;">${c.date || '—'}</td>
                   <td style="padding: 0.5rem; color: var(--text-muted);">${esc(store.contracts.find(x => x.id === c.contract_id)?.name || c.contract_id)}</td>
                   <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: ${c.amount > 0 ? 'var(--success)' : 'var(--danger)'};">${c.amount > 0 ? '+' : ''}${money(c.amount)}</td>
-                  <td style="padding: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">${esc(c.comments || '—')}</td>
+                  <td style="padding: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">${esc(c.comments || '—')}${splitNote(c)}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -645,6 +646,7 @@ async function renderPlayerDetail(player, stats, record) {
 
   $('playerStatsGrid').innerHTML = tabsHtml;
   wireCharts($('playerStatsGrid'));
+  wireSplitNotes($('playerStatsGrid'));
 
   // Tab switching
   $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(btn => {

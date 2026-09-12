@@ -66,6 +66,7 @@ export const api = {
     return req('GET', `/contributions${p ? `?${p}` : ''}`);
   },
   createContribution: (c) => req('POST', '/contributions', c),
+  splitSiblings: (groupId) => req('GET', `/contributions/split/${groupId}`),
   deleteContribution: (id) => req('DELETE', `/contributions/${id}`),
 
   kitty: () => req('GET', '/kitty'),

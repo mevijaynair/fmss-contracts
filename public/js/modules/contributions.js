@@ -11,6 +11,32 @@ function contractName(id) {
 
 function isPlayer() { return store.user?.role === 'player'; }
 
+/**
+ * Ties a split row back to the payment it came from. Without this a 1500 bank
+ * transfer shows up as an unrelated 1000 and 500, and reconciling the statement
+ * means remembering they were once one line.
+ */
+export function splitNote(c) {
+  if (!c.split_group || !c.split_total) return '';
+  return ` <span class="split-note" data-split-group="${esc(c.split_group)}"
+    title="One payment of ${money(c.split_total)} divided across ${c.split_parts} contracts. Click to see the other part${c.split_parts === 2 ? '' : 's'}.">
+    ${money(c.amount)} of ${money(c.split_total)} split ${c.split_parts} ways</span>`;
+}
+
+/** Show the other legs of the payment, so a bank line can be reconciled whole. */
+export async function wireSplitNotes(root) {
+  root.querySelectorAll('[data-split-group]').forEach(el => {
+    el.addEventListener('click', async () => {
+      try {
+        const parts = await api.splitSiblings(el.dataset.splitGroup);
+        const total = parts.reduce((s, p) => s + p.amount, 0);
+        toast(`${money(total)} on ${parts[0]?.date}: ${
+          parts.map(p => `${money(p.amount)} to ${p.contract_name || p.contract_id}`).join(' + ')}`);
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
 // ---------------------------------------------------------------- ADMIN view
 
 function fillSelects() {
@@ -32,10 +58,12 @@ async function renderLog() {
       <td>${esc(c.player_name || c.name_raw || '—')}</td>
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
-      <td>${esc(c.comments || '')}</td>
+      <td>${esc(c.comments || '')}${splitNote(c)}</td>
       <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);">📋 Seed</span>'
         : `<button class="link-btn" data-del="${c.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
+
+  wireSplitNotes($('contribTable'));
 
   $('contribTable').querySelectorAll('[data-del]').forEach(b =>
     b.addEventListener('click', async () => {
@@ -174,15 +202,19 @@ function initAdmin() {
           return;
         }
 
+        // One id shared by every leg, so the rows stay provably the same bank
+        // payment. The relationship is data now, not a phrase in a comment that
+        // an edit could lose — and the comment stays the user's own words.
+        const group = `sp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
         for (const split of splits) {
           await api.createContribution({
             player_id: playerId,
             contract_id: split.contract_id,
             amount: split.amount,
-            date, comments: comments ? `${comments} (split from total)` : 'Split contribution',
+            date, comments, split_group: group,
           });
         }
-        toast(`Split across ${splits.length} contracts ✓`);
+        toast(`${money(totalAmount)} split across ${splits.length} contracts ✓`);
         $('cf_amount').value = ''; $('cf_comments').value = '';
         renderLog();
       } catch (err) { toast(err.message, true); }
