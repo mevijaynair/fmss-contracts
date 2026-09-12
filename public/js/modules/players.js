@@ -1,7 +1,8 @@
 // players.js — per-contract ledger table + add player + timeline & stats detail.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, balCell, contractSeg, openModal, closeModal, today } from '../util.js';
+import { $, esc, money, balCell, contractSeg, openModal, closeModal, today, fmtDate } from '../util.js';
+import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 
 let contractId = 'sat';
@@ -266,6 +267,79 @@ window.showPlayerDetail = async (playerId) => {
 // game could not be scored rather than reporting a misleading 0%: seeded
 // historical games carry no team on their charges, so they can never be won or
 // lost, only imported or parsed ones can.
+function tile(label, value, colour = '', sub = '') {
+  return `
+    <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
+      <div style="color: var(--text-muted); font-size: 0.9rem;">${label}</div>
+      <div style="font-size: 1.8rem; font-weight: 700;${colour ? ` color: ${colour};` : ''}">${value}</div>
+      ${sub ? `<div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">${sub}</div>` : ''}
+    </div>`;
+}
+
+/**
+ * Playing record only — no money. Win rate and captaincy share are single
+ * numbers and stay as numbers; the two genuine compositions get a divided bar,
+ * because "12 / 3 / 11" makes the reader do the arithmetic that a bar does for
+ * them.
+ */
+function formBlock(r, totalGames, billedGames, recordOnlyGames) {
+  const pct = (v) => (v === null || v === undefined ? '—' : v + '%');
+  const caveat = [];
+  if (r?.no_score) caveat.push(`${r.no_score} with no result recorded`);
+  if (r?.no_team) caveat.push(`${r.no_team} with no team recorded`);
+
+  const played = `
+    <div class="pd-chart-card">
+      <h5>Games played</h5>
+      <p class="hint" style="margin:0">Billed games cost them money; the rest are attendance records from the imported seasons.</p>
+      ${dividedBar([
+    { label: 'Billed', value: billedGames, cls: 'ch-accent' },
+    { label: 'Record only', value: recordOnlyGames, cls: 'ch-muted' },
+  ])}
+    </div>`;
+
+  if (!r || !r.games) {
+    return `<div class="auto-grid" style="--col-min: 240px;">${played}</div>`;
+  }
+
+  const results = `
+    <div class="pd-chart-card">
+      <h5>Results</h5>
+      <p class="hint" style="margin:0">${r.decided
+      ? `Across the ${r.decided} game${r.decided === 1 ? '' : 's'} with a usable result.`
+      : 'None of these games can be won or lost yet.'}</p>
+      ${dividedBar([
+        { label: 'Won', value: r.wins, cls: 'ch-win' },
+        { label: 'Drawn', value: r.draws, cls: 'ch-draw' },
+        { label: 'Lost', value: r.losses, cls: 'ch-loss' },
+      ])}
+    </div>`;
+
+  const goals = `
+    <div class="pd-chart-card">
+      <h5>Goals</h5>
+      <p class="hint" style="margin:0">Scored by their team while they were on it, against conceded.</p>
+      ${pairedBars([
+        { label: 'For', value: r.gf, cls: 'ch-win' },
+        { label: 'Against', value: r.ga, cls: 'ch-loss' },
+      ])}
+      <p class="hint" style="margin:0.6rem 0 0">Goal difference
+        <strong>${r.gd > 0 ? '+' : ''}${r.gd}</strong></p>
+    </div>`;
+
+  return `
+    <div class="auto-grid" style="--col-min: 150px; margin-bottom: 1rem;">
+      ${tile('Played', totalGames, '', `${billedGames} billed`)}
+      ${tile('Win rate', pct(r.winRate), 'var(--success)', r.decided ? `of ${r.decided} decided` : '')}
+      ${tile('Captained', r.captainGames || 0, 'var(--sport)',
+    r.captainGames
+      ? `won ${r.captainWins} of them${r.captainWinRate === null ? '' : ` · ${r.captainWinRate}%`}`
+      : 'never worn the armband')}
+    </div>
+    <div class="auto-grid" style="--col-min: 240px;">${results}${goals}${played}</div>
+    ${caveat.length ? `<p class="hint" style="margin-top:0.8rem">Excluded: ${caveat.join(', ')}.</p>` : ''}`;
+}
+
 function matchRecordBlock(r) {
   if (!r || !r.games) return '';
   const pct = (v) => (v === null || v === undefined ? '—' : v + '%');
@@ -434,6 +508,27 @@ async function renderPlayerDetail(player, stats, record) {
   const perContract = allLedgers
     .map(l => `${l.contract_id} ${money(l.present_balance)}`).join(' · ');
 
+  // Running balance for the chart. Timeline is per-contract, so plot the one
+  // they are most active on rather than summing two unrelated running totals
+  // into a line that means nothing.
+  let timelinePoints = [];
+  let timelineNote = '';
+  const busiest = [...allLedgers].sort((a, b) => (b.games || 0) - (a.games || 0))[0];
+  if (busiest) {
+    try {
+      const { timeline: t } = await api.playerStats(player.id, busiest.contract_id);
+      const live = (t?.events || []).filter(e => e.date);
+      timelinePoints = [
+        { label: 'Opening', balance: t.opening },
+        ...live.map(e => ({
+          label: `${fmtDate(e.date)} · ${e.type === 'contribution' ? 'paid in' : 'game'}`,
+          balance: e.runningBalance,
+        })),
+      ];
+      timelineNote = `${busiest.contract_id} · ${live.length} movement${live.length === 1 ? '' : 's'} since the opening balance`;
+    } catch { timelinePoints = []; }
+  }
+
   // Build modular tabs
   let tabsHtml = `
     <div class="tab-bar">
@@ -444,32 +539,34 @@ async function renderPlayerDetail(player, stats, record) {
       <button class="tab-btn" data-tab="contracts">By Contract</button>
     </div>
 
-    <!-- OVERVIEW TAB -->
+    <!-- OVERVIEW TAB — money and form kept apart, because they answer different
+         questions and mixing them made "Games Played" sit beside a balance as
+         though one explained the other. -->
     <div class="tab-content" data-tab="overview">
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Games Played</div>
-          <div style="font-size: 1.8rem; font-weight: 700; color: var(--sport);">${totalGames}</div>
-          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">
-            ${billedGames} billed · ${recordOnlyGames} record only</div>
+      <section class="pd-section">
+        <div class="pd-section-head">
+          <h4>Money</h4><span class="hint">what they hold and what they have paid in</span>
         </div>
-        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Balance, both contracts</div>
-          <div style="font-size: 1.8rem; font-weight: 700; color: ${totalBalance > 0 ? 'var(--success)' : 'var(--danger)'};">${money(totalBalance)}</div>
-          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">${esc(perContract)}</div>
+        <div class="auto-grid" style="--col-min: 150px;">
+          ${tile('Balance, both contracts', money(totalBalance),
+      totalBalance < 0 ? 'var(--danger)' : 'var(--success)', esc(perContract))}
+          ${tile('Paid in, both contracts', `+${money(totalContributions)}`, 'var(--success)',
+        `${allContributions.length} payment${allContributions.length === 1 ? '' : 's'}`)}
+          ${tile('Contracts', allLedgers.length, '', perContract ? 'active on both' : '')}
         </div>
-        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Contributions, both contracts</div>
-          <div style="font-size: 1.8rem; font-weight: 700; color: var(--success);">+${money(totalContributions)}</div>
-          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">
-            ${allContributions.length} payment${allContributions.length === 1 ? '' : 's'} in</div>
+        <div class="pd-chart-card" style="margin-top: 1rem;">
+          <h5>Balance over time</h5>
+          <p class="hint" style="margin:0">${esc(timelineNote)}</p>
+          ${balanceLine(timelinePoints)}
         </div>
-        <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Contracts</div>
-          <div style="font-size: 1.8rem; font-weight: 700;">${allLedgers.length}</div>
+      </section>
+
+      <section class="pd-section">
+        <div class="pd-section-head">
+          <h4>Form</h4><span class="hint">how they have played, independent of what they owe</span>
         </div>
-      </div>
-      ${matchRecordBlock(record)}
+        ${formBlock(record, totalGames, billedGames, recordOnlyGames)}
+      </section>
     </div>
 
     <!-- AUDIT TRAIL TAB (all transactions: contributions + external events + charges) -->
@@ -547,6 +644,7 @@ async function renderPlayerDetail(player, stats, record) {
   `;
 
   $('playerStatsGrid').innerHTML = tabsHtml;
+  wireCharts($('playerStatsGrid'));
 
   // Tab switching
   $('playerStatsGrid').querySelectorAll('.tab-btn').forEach(btn => {

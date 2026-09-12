@@ -607,6 +607,10 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 .timeline-balance { font-weight: 600; color: var(--sport); }
 
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+/* The player detail panel holds a tabbed document, not a row of stat cards, so
+   it lays out as one flowing column — inside the auto-fit grid it was squeezed
+   into a single track with the rest of the row left empty. */
+#playerStatsGrid { display: block; }
 .stat-card { padding: 1rem; background: var(--bg-inset); border-radius: 8px; }
 .stat-label { font-size: 0.85rem; color: var(--text-faint); margin-bottom: 0.4rem; }
 .stat-value { font-size: 1.5rem; font-weight: 600; color: var(--sport); }
@@ -851,6 +855,59 @@ body.role-player .role-admin-only { display: none !important; }
   flex: 0 0 auto; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
+
+/* --- Charts ---------------------------------------------------------------
+   Marks are thin and grid/axes recessive, so the data is the loudest thing on
+   the card. The win/draw/loss trio is a diverging scale: green and red either
+   side of a neutral grey, because those two are nearly identical under
+   deuteranopia and need both the separation and the direct labels below. */
+.ch-wrap { position: relative; margin-top: 0.5rem; }
+.ch-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.ch-line { fill: none; stroke: var(--sport); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ch-area { fill: var(--sport); opacity: 0.10; stroke: none; }
+.ch-zero { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.ch-axis { fill: var(--text-faint); font-size: 10px; }
+.ch-cross { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; transition: opacity 0.1s; }
+.ch-hot { cursor: crosshair; }
+.ch-tip { position: absolute; top: -0.2rem; transform: translateX(-50%);
+  background: var(--toast-bg); color: var(--text-main); font-size: 0.75rem;
+  padding: 0.25rem 0.5rem; border-radius: 6px; white-space: nowrap;
+  pointer-events: none; box-shadow: var(--shadow-sm); }
+
+/* A 2px surface gap between segments keeps adjacent fills legible without a
+   border, which would thicken the mark. */
+.ch-bar { display: flex; gap: 2px; margin-top: 0.6rem; border-radius: 6px; overflow: hidden; }
+.ch-seg { display: flex; align-items: center; justify-content: center; min-width: 2px; transition: width 0.3s; }
+.ch-seg-label { font-size: 0.72rem; font-weight: 700; color: var(--bg-card); }
+.ch-key { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-top: 0.5rem;
+  font-size: 0.8rem; color: var(--text-muted); }
+.ch-key-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.ch-dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+
+.ch-rows { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.6rem; }
+.ch-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.82rem; }
+.ch-row-label { width: 68px; color: var(--text-muted); flex: none; }
+.ch-row-track { flex: 1; height: 8px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+.ch-row-fill { display: block; height: 100%; border-radius: 999px; }
+.ch-row-value { width: 40px; text-align: right; flex: none; }
+
+/* The diverging trio, plus the accent for single-series marks. */
+.ch-win, .ch-dot.ch-win, .ch-row-fill.ch-win { background: var(--success); }
+.ch-draw, .ch-dot.ch-draw, .ch-row-fill.ch-draw { background: var(--text-faint); }
+.ch-loss, .ch-dot.ch-loss, .ch-row-fill.ch-loss { background: var(--danger); }
+.ch-accent, .ch-dot.ch-accent, .ch-row-fill.ch-accent { background: var(--sport); }
+.ch-muted, .ch-dot.ch-muted, .ch-row-fill.ch-muted { background: var(--border-strong); }
+
+/* Section headings that keep money and form apart. */
+.pd-section { margin-top: 1.6rem; }
+.pd-section:first-of-type { margin-top: 0.4rem; }
+.pd-section-head { display: flex; align-items: baseline; gap: 0.6rem;
+  padding-bottom: 0.5rem; margin-bottom: 0.9rem; border-bottom: 2px solid var(--border-color); }
+.pd-section-head h4 { margin: 0; font-size: 0.82rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-main); }
+.pd-chart-card { padding: 1rem; background: var(--bg-subtle); border-radius: 8px;
+  border: 1px solid var(--border-color); }
+.pd-chart-card > h5 { margin: 0 0 0.2rem; font-size: 0.85rem; color: var(--text-main); }
 
 /* --- Standing report: built to be screenshotted and shared --- */
 .rep-summary { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-bottom: 1rem;
