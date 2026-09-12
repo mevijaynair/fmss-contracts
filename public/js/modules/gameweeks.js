@@ -247,6 +247,9 @@ async function detail(id) {
   const charges = g.charges || [];
   const teams = [...new Set(charges.map(c => c.team).filter(Boolean))];
   const total = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const toCollect = charges
+    .filter(c => c.settler_type === 'outside' && !c.paid)
+    .reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
   // Which names in the raw text have no linked player? Rough, but it is the
   // whole point of showing the raw text — it points at what to add.
@@ -261,13 +264,31 @@ async function detail(id) {
     .filter((t, i, a) => a.indexOf(t) === i)
     .map(t => `<option value="${esc(t)}" ${t === sel ? 'selected' : ''}>${esc(t || '—')}</option>`).join('');
 
+  // Only a guest settling their own charge has anything to collect. A contract
+  // player's charge came off a balance the club already holds the moment the
+  // game was saved, and their `paid` flag is never set by anything — so showing
+  // every row as an unticked "owes" box said the whole team still owed for a
+  // game that was already paid for, and offered a tickbox that changed nothing.
+  const settleCell = (c) => {
+    if (c.settler_type !== 'outside') {
+      const who = c.settled_by === c.player_id
+        ? 'their own balance'
+        : `${c.settler_name || 'someone else'}'s balance`;
+      return `<span class="hint" style="min-width:62px;white-space:nowrap"
+               title="Came off ${esc(who)} when this game was recorded. Nothing to collect.">on balance</span>`;
+    }
+    return `<label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap;min-width:62px"
+             title="${c.paid
+    ? 'Cash collected' + (c.paid_method ? ' by ' + esc(c.paid_method) : '') + ' — untick to put it back to owed.'
+    : 'Cash still to collect. Tick it once you have the money and the kitty tops up.'}">
+        <input type="checkbox" class="ch-paid" data-charge="${c.id}" ${c.paid ? 'checked' : ''}>
+        ${c.paid ? 'collected' : 'owes'}
+      </label>`;
+  };
+
   const rows = charges.map(c => `
     <div class="panel-row" data-charge="${c.id}">
-      <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap"
-             title="${c.paid ? 'Paid' + (c.paid_method ? ' by ' + esc(c.paid_method) : '') : 'Not yet paid'}">
-        <input type="checkbox" class="ch-paid" data-charge="${c.id}" ${c.paid ? 'checked' : ''}>
-        ${c.paid ? 'paid' : 'owes'}
-      </label>
+      ${settleCell(c)}
       <strong style="flex:1">${esc(c.player_name)}${
         c.charged_to && c.charged_to !== c.player_id
           ? ` <span class="hint">→ billed to ${esc((store.players.find(p => p.id === c.charged_to) || {}).name || c.charged_to)}</span>`
@@ -296,6 +317,8 @@ async function detail(id) {
       </div>` : ''}
 
     <h4 class="mini-h mt">Players (${charges.length}${total ? ` · ${money(total)} AED` : ' · no charges'})</h4>
+    ${toCollect > 0 ? `<p class="hint">${money(total - toCollect)} came off balances when this game was
+      recorded. <strong>${money(toCollect)}</strong> is guest cash still to collect.</p>` : ''}
     <div id="gwCharges">${rows || '<p class="hint">Nobody linked yet.</p>'}</div>
 
     <h4 class="mini-h mt">Add a player</h4>
