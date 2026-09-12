@@ -59,9 +59,11 @@ function game(historical = 0) {
     .run(id, CONTRACT, ++seq, 0, '2026-01-01', historical, new Date().toISOString());
   return id;
 }
-const charge = (gid, pid, amount) =>
-  db.prepare('INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid) VALUES (?,?,?,\'\',0,\'\',?,?,0)')
-    .run(`ch${++seq}`, gid, pid, amount, pid);
+const charge = (gid, pid, amount, { chargedTo = null, paid = 0 } = {}) =>
+  db.prepare('INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid) VALUES (?,?,?,\'\',0,\'\',?,?,?)')
+    .run(`ch${++seq}`, gid, pid, amount, chargedTo ?? pid, paid);
+const makeOutside = (pid) =>
+  db.prepare("UPDATE players SET player_type = 'outside' WHERE id = ?").run(pid);
 const txn = (pid, type, amount, status = 'approved', contractId = CONTRACT) =>
   db.prepare(`INSERT INTO transactions (id,player_id,contract_id,type,amount,description,status,created_at,updated_at)
               VALUES (?,?,?,?,?,'test',?,?,?)`)
@@ -120,6 +122,35 @@ test('every term together, and the signs are right', () => {
   txn(p, 'adjustment', 30);
   // 200 + 300 - 120 + (-60 + 30)
   assert.equal(balanceOf(p), 350);
+});
+
+test('a charge lands on whoever settles it, not whoever played it', () => {
+  const guest = player('Guest of', 0);
+  const host = player('The host', 200);
+  charge(game(), guest, 40, { chargedTo: host });
+  assert.equal(balanceOf(host), 160, "the host pays for their guest");
+  assert.equal(balanceOf(guest), 0, 'the guest who played is not billed themselves');
+});
+
+test('an outside player paying cash is not billed until the cash is collected', () => {
+  const cash = player('Pays cash', 0);
+  makeOutside(cash);
+  const g = game();
+  charge(g, cash, 40);
+  assert.equal(balanceOf(cash), 0, 'owed to the club, not taken from a balance');
+
+  db.prepare("UPDATE charges SET paid = 1 WHERE gameweek_id = ? AND player_id = ?").run(g, cash);
+  assert.equal(balanceOf(cash), -40, 'once collected it lands like any other charge');
+});
+
+test('a guest billed to a contract member hits that member immediately', () => {
+  const guest = player('Outside guest', 0);
+  makeOutside(guest);
+  const member = player('Contract member', 300);
+  // Unpaid, but settled by someone who prepaid — so it applies at once.
+  charge(game(), guest, 40, { chargedTo: member });
+  assert.equal(balanceOf(member), 260);
+  assert.equal(balanceOf(guest), 0);
 });
 
 test('the identity holds for every row the repo returns', () => {

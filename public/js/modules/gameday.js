@@ -236,7 +236,10 @@ function renderPreview(meta) {
       </select>`;
 
     // Allow reassigning charge to another player (for transfers)
-    const playerOptions = rows.map(p => `<option value="${p.player_id}" ${p.player_id === r.player_id ? 'selected' : ''}>${esc(p.display_name)}</option>`).join('');
+    // Selected by who settles the charge, not who played it — those differ the
+    // moment a guest is billed to the member who brought them.
+    const settlesId = r.charged_to || r.player_id;
+    const playerOptions = rows.map(p => `<option value="${p.player_id}" ${p.player_id === settlesId ? 'selected' : ''}>${esc(p.display_name)}</option>`).join('');
     const chargedToControl = r.matched ? `
       <select class="charged-to-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:140px;">
         ${playerOptions}
@@ -270,15 +273,20 @@ function renderPreview(meta) {
     }));
 
   // Handle charge reassignment to different player
+  // Who SETTLES the charge, which is not the same as who played it. This used to
+  // assign the chosen id to row.player_id, replacing the player themselves: point
+  // Sikku's charge at Toby and Sikku left the game entirely, leaving two Toby
+  // rows that the once-per-gameweek guard then rejected on confirm.
   $('gdTable').querySelectorAll('.charged-to-select').forEach(sel =>
     sel.addEventListener('change', () => {
-      const newPlayerId = sel.value;
-      if (newPlayerId && newPlayerId !== rows[sel.dataset.i].player_id) {
-        const origPlayer = rows[sel.dataset.i].display_name;
-        rows[sel.dataset.i].player_id = newPlayerId;
-        const newPlayer = rows.find(r => r.player_id === newPlayerId)?.display_name || newPlayerId;
-        toast(`${origPlayer}'s charge reassigned to ${newPlayer}`, false);
-      }
+      const row = rows[sel.dataset.i];
+      const payerId = sel.value;
+      if (!payerId || payerId === (row.charged_to || row.player_id)) return;
+      row.charged_to = payerId;
+      const payer = rows.find(r => r.player_id === payerId)?.display_name
+        || store.players?.find(p => p.id === payerId)?.name || payerId;
+      toast(`${row.display_name} still plays — ${payer} pays for them`, false);
+      renderPreview(meta);
     }));
 
   $('gdTable').querySelectorAll('.amt-input').forEach(inp =>
@@ -356,18 +364,40 @@ function recomputeKitty() {
   if (!el) return;
   if (el.dataset.override === '1') return;      // user typed their own figure
 
-  const charged = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  // A charge settled from a prepaid balance is money the club already holds. A
+  // guest paying cash on the day is not — it is owed until collected. Adding the
+  // two together and calling the result profit puts money in the kitty that is
+  // still in somebody's pocket, so they are counted separately.
+  const settles = (r) => rows.find(x => x.player_id === (r.charged_to || r.player_id)) || r;
+  const isCash = (r) => {
+    const payer = settles(r);
+    return (payer.player_type === 'outside' || payer.rate_type === 'noncontract') && !payer.paid;
+  };
+  const amount = (r) => Number(r.amount) || 0;
+  const collected = rows.filter(r => !isCash(r)).reduce((s, r) => s + amount(r), 0);
+  const pending = rows.filter(isCash).reduce((s, r) => s + amount(r), 0);
+
   const c = store.contracts.find(x => x.id === contractId);
   const pitch = Number(c?.cost_per_gw) || 0;
   const water = Number($('gdGameCost')?.value) || 0;
-  const profit = Math.round((charged - pitch - water) * 100) / 100;
+  const round = (n) => Math.round(n * 100) / 100;
+  const inHand = round(collected - pitch - water);
+  const expected = round(collected + pending - pitch - water);
 
-  el.value = profit;
+  // Only what is actually in hand is banked. The rest arrives as each guest is
+  // marked paid from Game History, which credits the kitty then.
+  el.value = inHand;
   const note = document.querySelector('[data-gd-kittynote]');
   if (note) {
-    note.innerHTML = `charged ${money(charged)} &minus; pitch ${money(pitch)}
-      &minus; water ${money(water)} = <strong>${money(profit)}</strong>
-      <button type="button" class="link-btn" id="gdKittyReset">reset</button>`;
+    note.innerHTML = pending
+      ? `In hand: collected ${money(collected)} &minus; pitch ${money(pitch)} &minus; water ${money(water)}
+         = <strong>${money(inHand)}</strong><br>
+         Once the ${money(pending)} of guest cash is collected: <strong>${money(expected)}</strong>.
+         Mark each guest paid in Game History and the kitty tops up then.
+         <button type="button" class="link-btn" id="gdKittyReset">reset</button>`
+      : `charged ${money(collected)} &minus; pitch ${money(pitch)}
+         &minus; water ${money(water)} = <strong>${money(inHand)}</strong>
+         <button type="button" class="link-btn" id="gdKittyReset">reset</button>`;
     $('gdKittyReset')?.addEventListener('click', () => {
       el.dataset.override = '0'; recomputeKitty();
     });

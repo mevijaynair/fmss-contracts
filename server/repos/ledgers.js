@@ -29,9 +29,22 @@ const ADJUSTED = `COALESCE((SELECT SUM(t.amount) FROM transactions t
 
 const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
   WHERE q.player_id = l.player_id AND q.contract_id = l.contract_id AND q.historical = 0), 0)`;
+// A charge lands on whoever SETTLES it, which is not always who played it: a
+// guest is billed to the member who brought them, so charged_to carries the cost
+// and player_id only says who was on the pitch. This keyed on player_id, so
+// reassigning who pays changed nothing at all — which is why the Game Day
+// control had been made to overwrite player_id instead, deleting the guest from
+// the game to move their cost.
+//
+// Unpaid charges settled by an outside player are excluded. They have no prepaid
+// balance to draw on — they hand over cash on the day — so the charge is money
+// owed to the club, not money already taken, until it is marked collected.
 const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
-  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id AND g.historical = 0), 0)`;
+  LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+  WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
+    AND g.contract_id = l.contract_id AND g.historical = 0
+    AND (COALESCE(sp.player_type, 'regular') <> 'outside' OR ch.paid = 1)), 0)`;
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
