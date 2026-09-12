@@ -262,7 +262,7 @@ async function detail(id) {
   const teams = [...new Set(charges.map(c => c.team).filter(Boolean))];
   const total = charges.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const toCollect = charges
-    .filter(c => c.settler_type === 'outside' && !c.paid)
+    .filter(c => c.is_cash && !c.paid)
     .reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
   // Which names in the raw text have no linked player? Rough, but it is the
@@ -284,7 +284,7 @@ async function detail(id) {
   // every row as an unticked "owes" box said the whole team still owed for a
   // game that was already paid for, and offered a tickbox that changed nothing.
   const settleCell = (c) => {
-    if (c.settler_type !== 'outside') {
+    if (!c.is_cash) {
       const who = c.settled_by === c.player_id
         ? 'their own balance'
         : `${c.settler_name || 'someone else'}'s balance`;
@@ -300,13 +300,28 @@ async function detail(id) {
       </label>`;
   };
 
+  // Who carries this charge. Anyone can, including someone who did not play —
+  // a member covering a guest is usually not on the pitch that night.
+  const payerOptions = (c) => {
+    const opts = (store.players || [])
+      .filter(p => (p.player_type || 'regular') !== 'outside' || p.id === c.settled_by)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(p => `<option value="${esc(p.id)}" ${p.id === c.settled_by ? 'selected' : ''}>${esc(p.name)}</option>`)
+      .join('');
+    return `<option value="" ${c.settled_by === c.player_id ? 'selected' : ''}>themselves</option>${opts}`;
+  };
+
   const rows = charges.map(c => `
     <div class="panel-row" data-charge="${c.id}">
       ${settleCell(c)}
-      <strong style="flex:1">${esc(c.player_name)}${
-        c.charged_to && c.charged_to !== c.player_id
-          ? ` <span class="hint">→ billed to ${esc((store.players.find(p => p.id === c.charged_to) || {}).name || c.charged_to)}</span>`
-          : ''}</strong>
+      <strong style="flex:1">${esc(c.player_name)}</strong>
+      <select class="ch-mode" data-charge="${c.id}" style="max-width:120px"
+              title="Cash to collect, or taken off a contract balance">
+        <option value="balance" ${c.is_cash ? '' : 'selected'}>off balance</option>
+        <option value="cash" ${c.is_cash ? 'selected' : ''}>cash to collect</option>
+      </select>
+      <select class="ch-payer" data-charge="${c.id}" style="max-width:130px"
+              title="Whose money settles this charge">${payerOptions(c)}</select>
       <select class="ch-team" data-charge="${c.id}" style="max-width:110px">${teamOptions(c.team)}</select>
       <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
         <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> C
@@ -391,6 +406,29 @@ async function detail(id) {
     el.addEventListener('change', () => patch(el.dataset.charge)));
   document.querySelectorAll('.ch-capt').forEach(el =>
     el.addEventListener('change', () => patch(el.dataset.charge)));
+
+  // Both corrections go through one call, because they are one decision: how
+  // this charge is settled. Sending them separately would briefly leave the
+  // charge in a state neither control asked for.
+  const resettle = async (chargeId) => {
+    const mode = document.querySelector(`.ch-mode[data-charge="${chargeId}"]`);
+    const payer = document.querySelector(`.ch-payer[data-charge="${chargeId}"]`);
+    try {
+      await api.setChargeSettlement(id, chargeId, {
+        settles_cash: mode.value === 'cash',
+        charged_to: payer.value || null,
+      });
+      toast(mode.value === 'cash' ? 'Now cash to collect' : 'Now settled off a balance');
+    } catch (e) {
+      toast(e.message, true);
+    }
+    // Re-read either way. On success the balances and the kitty have moved; on
+    // failure the controls must go back to what the server actually holds
+    // rather than sit there showing a change it refused.
+    reopen(); render();
+  };
+  document.querySelectorAll('.ch-mode, .ch-payer').forEach(el =>
+    el.addEventListener('change', () => resettle(el.dataset.charge)));
 }
 
 // Edit payment status for players in this gameweek
@@ -399,7 +437,7 @@ function editPayments(gw) {
   // Only a guest's cash is ever outstanding. A contract player's charge came out
   // of a balance the club already holds, so listing them here as unpaid sent you
   // chasing money that had already arrived.
-  const pending = charges.filter(c => !c.paid && c.settler_type === 'outside');
+  const pending = charges.filter(c => !c.paid && c.is_cash);
 
   if (pending.length === 0) {
     toast('✓ Nothing left to collect for this game', false);

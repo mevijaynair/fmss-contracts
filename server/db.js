@@ -258,6 +258,21 @@ export function initSchema() {
       try { db.prepare('SELECT charged_to FROM charges LIMIT 1').get(); }
       catch { db.exec('ALTER TABLE charges ADD COLUMN charged_to TEXT'); }
     },
+    // charges: settled in cash rather than off a balance, decided per game.
+    //
+    // Whether a charge was cash used to be read only from players.player_type.
+    // Game Day lets you mark someone a cash player for a single night and the
+    // preview honoured it, but nothing carried that choice to the server — the
+    // moment the game saved they reverted to whatever their player record said,
+    // and a charge the club still had to collect was filed as already settled.
+    // A one-off guest should not require editing a person's permanent record.
+    //
+    // Additive only: a charge is cash when this flag is set OR the settler is an
+    // outside player, so nothing that behaved as cash before stops doing so.
+    () => {
+      try { db.prepare('SELECT settles_cash FROM charges LIMIT 1').get(); }
+      catch { db.exec('ALTER TABLE charges ADD COLUMN settles_cash INTEGER NOT NULL DEFAULT 0'); }
+    },
     // NOTE ON QUOTING: string literals in DDL must use SINGLE quotes. Double
     // quotes denote an IDENTIFIER in SQL; SQLite only accepts them as strings
     // via a deprecated fallback for unresolvable identifiers. That fallback is

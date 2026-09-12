@@ -743,6 +743,11 @@ async function doConfirm() {
     // Who actually settles this charge. Usually the player, but an outside guest
     // is billed to the contracted player who brought them.
     charged_to: r.charged_to || r.player_id,
+    // Whether this one is cash is decided here, on the night, and must travel
+    // with the charge. It used to be inferred server-side from the player's
+    // permanent record, so marking a regular player as a cash guest for one game
+    // was honoured in this preview and then silently dropped on save.
+    settles_cash: settlementOf(r).cash ? 1 : 0,
     // Payments often arrive after the game is entered, so a charge starts unpaid
     // and is settled later from Game History.
     paid: r.paid ? 1 : 0,

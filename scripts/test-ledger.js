@@ -336,6 +336,62 @@ test('only a guest owes anything — a contract charge is settled on the night',
   assert.equal(row.pending_names, 'Guest|35.0', 'and the list says who to ask, and for how much');
 });
 
+// --- correcting how a charge settles ----------------------------------------
+// Marking a regular player a cash guest for one night used to be honoured in the
+// Game Day preview and then dropped on save, so a charge the club still had to
+// collect was filed as already settled off a balance nobody was going to draw on.
+
+test('a regular player can be a cash guest for one night', () => {
+  const p = player('Yash', 500);
+  const gw = playGame({ pitch: 20, players: [{ player_id: p, amount: 40, settles_cash: 1 }] });
+  const r = ledgersRepo.get(p, CONTRACT);
+  assert.equal(r.present_balance, 500, 'their balance is not touched');
+  assert.equal(r.cash_owed, 40, 'the club is waiting on the cash');
+  assert.equal(kittyOf(gw.id), -20, 'and the pot has not banked it yet');
+
+  gameweeksRepo.setChargePaid(gw.id, gw.charges[0].id, { paid: true });
+  assert.equal(kittyOf(gw.id), 20, 'collected: -20 + 40');
+  assert.equal(ledgersRepo.get(p, CONTRACT).cash_owed, 0);
+});
+
+test('a charge filed the wrong way can be switched to cash after the fact', () => {
+  const p = player('Wrongly billed', 500);
+  const gw = playGame({ pitch: 0, players: [{ player_id: p, amount: 40 }] });
+  assert.equal(balanceOf(p), 460, 'started off their balance');
+  assert.equal(kittyOf(gw.id), 40);
+
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id, { settles_cash: true });
+  const r = ledgersRepo.get(p, CONTRACT);
+  assert.equal(r.present_balance, 500, 'the balance is given back');
+  assert.equal(r.cash_owed, 40, 'and it becomes cash to collect');
+  assert.equal(kittyOf(gw.id), 0, 'the pot gives it back until the cash arrives');
+});
+
+test('a charge can be moved onto somebody else to settle', () => {
+  const guest = player('Guest'); makeOutside(guest);
+  const host = player('Host', 500);
+  const gw = playGame({ pitch: 0, players: [{ player_id: guest, amount: 35 }] });
+  assert.equal(ledgersRepo.get(guest, CONTRACT).cash_owed, 35, 'theirs to pay at first');
+
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id,
+    { settles_cash: false, charged_to: host });
+  assert.equal(balanceOf(host), 465, 'the host carries it now');
+  assert.equal(ledgersRepo.get(guest, CONTRACT).cash_owed, 0, 'nothing left to collect');
+  assert.equal(kittyOf(gw.id), 35, 'and it is money the club already holds');
+});
+
+test('switching a collected charge back to a balance does not leave it looking paid', () => {
+  const p = player('Collected then corrected', 500);
+  const gw = playGame({ pitch: 0, players: [{ player_id: p, amount: 40, settles_cash: 1, paid: 1 }] });
+  assert.equal(kittyOf(gw.id), 40, 'banked as cash');
+
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id, { settles_cash: false });
+  const charge = gameweeksRepo.get(gw.id).charges[0];
+  assert.equal(charge.paid, 0, 'collected is a question only cash can answer');
+  assert.equal(balanceOf(p), 460, 'it comes off the balance instead');
+  assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
+});
+
 test('the score is saved with the game, not in a second call that can be lost', () => {
   const a = player('Scorer');
   const gw = playGame({ pitch: 10, players: [{ player_id: a, amount: 40 }],

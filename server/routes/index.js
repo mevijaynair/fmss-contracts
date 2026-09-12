@@ -293,6 +293,15 @@ r.put('/gameweeks/:id/charges/:chargeId/paid', wrap((req) => {
     method: req.body?.method || null,
   });
 }));
+// Correct how a charge settles after the fact: cash to collect vs off a balance,
+// and whose balance. Both are decided on the night and sometimes decided wrong.
+r.put('/gameweeks/:id/charges/:chargeId/settlement', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.setChargeSettlement(req.params.id, req.params.chargeId, {
+    settles_cash: req.body?.settles_cash,
+    charged_to: req.body?.charged_to,
+  });
+}));
 r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {
   requireAdmin(req);
   return gameweeksRepo.removeCharge(req.params.id, req.params.chargeId);

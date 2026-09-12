@@ -36,6 +36,13 @@ const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
 // control had been made to overwrite player_id instead, deleting the guest from
 // the game to move their cost.
 //
+// One rule for "this charge is cash, not a draw on a balance", used by both the
+// charge total and the owed total so they can never disagree about a row.
+// Either the person settling it keeps no contract balance at all, or this
+// particular game was marked cash — a regular player standing in as a guest for
+// one night, which Game Day offers and which used to be silently discarded.
+const CASH_CHARGE = `ch.settles_cash = 1 OR COALESCE(sp.player_type, 'regular') = 'outside'`;
+
 // Charges an outside player settles themselves are excluded outright, paid or
 // not. They keep no prepaid balance to draw on — they hand over cash on the day,
 // and that cash goes to the kitty, not through a ledger. This used to count the
@@ -52,7 +59,7 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
     AND g.contract_id = l.contract_id AND g.historical = 0
-    AND COALESCE(sp.player_type, 'regular') <> 'outside'), 0)`;
+    AND NOT (${CASH_CHARGE})), 0)`;
 // Cash the club is still waiting on: an outside player's own charges, unpaid.
 // Deliberately NOT part of present_balance — it is money owed to the club, not
 // money the club holds. Reported alongside so "do I still need to collect from
@@ -62,7 +69,7 @@ const CASH_OWED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
     AND g.contract_id = l.contract_id AND g.historical = 0
-    AND COALESCE(sp.player_type, 'regular') = 'outside' AND ch.paid = 0), 0)`;
+    AND (${CASH_CHARGE}) AND ch.paid = 0), 0)`;
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
@@ -124,6 +131,7 @@ export const ledgersRepo = {
       contributed: ledgers.reduce((s, l) => s + l.contributed, 0),
       charged: ledgers.reduce((s, l) => s + l.charged, 0),
       adjusted: ledgers.reduce((s, l) => s + l.adjusted, 0),
+      cash_owed: ledgers.reduce((s, l) => s + (l.cash_owed || 0), 0),
       games: ledgers.reduce((s, l) => s + l.games, 0),
       games_billed: ledgers.reduce((s, l) => s + l.games_billed, 0),
       present_balance: Math.round(ledgers.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,

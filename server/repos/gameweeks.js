@@ -43,7 +43,10 @@ function writeKittyRow(id, net, label, date, scope) {
  */
 function syncGuestCashToKitty(chargeId) {
   const row = db.prepare(`SELECT ch.*, g.date AS game_date, g.historical,
-      COALESCE(p.player_type,'regular') AS payer_type, p.name AS payer_name
+      p.name AS payer_name,
+      CASE WHEN ch.settles_cash = 1
+             OR COALESCE(p.player_type,'regular') = 'outside'
+           THEN 1 ELSE 0 END AS is_cash
     FROM charges ch
     JOIN gameweeks g ON g.id = ch.gameweek_id
     LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
@@ -51,7 +54,7 @@ function syncGuestCashToKitty(chargeId) {
   const kittyId = `k_charge_${chargeId}`;
   if (!row) { db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId); return; }
 
-  const amount = row.historical || !row.paid || row.payer_type !== 'outside'
+  const amount = row.historical || !row.paid || !row.is_cash
     ? 0 : Number(row.amount) || 0;
   writeKittyRow(kittyId, amount,
     `${row.payer_name || 'Guest'} paid for the game on ${row.game_date}`,
@@ -81,14 +84,21 @@ function recomputeGameKitty(gameweekId) {
   if (!gw) return;
 
   const charges = db.prepare(`SELECT ch.id, ch.amount,
-      COALESCE(p.player_type,'regular') AS payer_type
+      CASE WHEN ch.settles_cash = 1
+             OR COALESCE(p.player_type,'regular') = 'outside'
+           THEN 1 ELSE 0 END AS is_cash
     FROM charges ch LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
     WHERE ch.gameweek_id = ?`).all(gameweekId);
 
   let contracted = 0;
   for (const ch of charges) {
-    if (ch.payer_type === 'outside') syncGuestCashToKitty(ch.id);
-    else contracted += Number(ch.amount) || 0;
+    // Every charge, not only the cash ones. syncGuestCashToKitty writes the row
+    // or clears it, so calling it unconditionally is what removes the entry from
+    // a charge that has stopped being cash — corrected to come off a balance, or
+    // reassigned to a member. Calling it only for cash charges left the old row
+    // standing beside the new balance figure, counting the same money twice.
+    syncGuestCashToKitty(ch.id);
+    if (!ch.is_cash) contracted += Number(ch.amount) || 0;
   }
   // A game that becomes historical — pulled behind a closed baseline — must give
   // its entry back rather than keep it. Writing zero is how that row is removed,
@@ -132,7 +142,8 @@ export const gameweeksRepo = {
     // — nothing ever sets it. Counting those as unpaid made a normal game read
     // "400 pending, 0% collected" when the only money actually outstanding was
     // the guest cash.
-    const awaitingCash = `COALESCE(sp.player_type,'regular') = 'outside' AND ch.paid = 0`;
+    const awaitingCash = `(ch.settles_cash = 1
+      OR COALESCE(sp.player_type,'regular') = 'outside') AND ch.paid = 0`;
     const stats = db.prepare(`
       SELECT ch.gameweek_id,
              COUNT(*) AS charges_count,
@@ -217,6 +228,43 @@ export const gameweeksRepo = {
     return this.get(gameweekId);
   },
 
+  /**
+   * Change how one charge is settled, after the game was recorded.
+   *
+   * Two things get decided on the night and sometimes decided wrong: whether a
+   * charge comes off a balance or is cash to collect, and whose balance it comes
+   * off. Both were fixable only by deleting the game and entering it again,
+   * which is a poor trade for a mistyped guest.
+   *
+   * `settles_cash` flips between the two; `charged_to` moves the cost to another
+   * player (null puts it back on whoever played). Switching to a balance clears
+   * the paid flag, because "collected" is a question that only applies to cash —
+   * leaving it set would make the charge look settled twice over.
+   */
+  setChargeSettlement(gameweekId, chargeId, { settles_cash, charged_to } = {}) {
+    const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
+      .get(chargeId, gameweekId);
+    if (!row) throw new Error('Charge not found');
+
+    const cash = settles_cash === undefined ? row.settles_cash : (settles_cash ? 1 : 0);
+    let payer = charged_to === undefined ? row.charged_to : (charged_to || null);
+    if (payer) {
+      const exists = db.prepare('SELECT id FROM players WHERE id = ?').get(payer);
+      if (!exists) throw new Error('No such player to bill this to');
+      const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
+      ledgersRepo.ensure(payer, gw.contract_id);
+    } else {
+      payer = row.player_id;
+    }
+
+    db.prepare('UPDATE charges SET settles_cash = ?, charged_to = ?, paid = ?, paid_at = ?, paid_method = ? WHERE id = ?')
+      .run(cash, payer, cash ? row.paid : 0,
+        cash ? row.paid_at : null, cash ? row.paid_method : null, chargeId);
+
+    recomputeGameKitty(gameweekId);
+    return this.get(gameweekId);
+  },
+
   removeCharge(gameweekId, chargeId) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
@@ -249,7 +297,10 @@ export const gameweeksRepo = {
     g.charges = db.prepare(`SELECT ch.*, p.name AS player_name,
         COALESCE(ch.charged_to, ch.player_id) AS settled_by,
         sp.name AS settler_name,
-        COALESCE(sp.player_type, 'regular') AS settler_type
+        COALESCE(sp.player_type, 'regular') AS settler_type,
+        CASE WHEN ch.settles_cash = 1
+               OR COALESCE(sp.player_type,'regular') = 'outside'
+             THEN 1 ELSE 0 END AS is_cash
       FROM charges ch
       JOIN players p ON p.id = ch.player_id
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
@@ -310,14 +361,21 @@ export const gameweeksRepo = {
         gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
 
       const insCharge = db.prepare(`INSERT INTO charges
-        (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
-        VALUES (?,?,?,?,?,?,?,?,?)`);
+        (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`);
       charges.forEach((ch, i) => {
         ledgersRepo.ensure(ch.player_id, gw.contract_id);
         const settledBy = ch.charged_to || ch.player_id;
+        // Whether this charge is cash is a fact about the night, not about the
+        // person. Game Day offers it per row and used to throw the answer away,
+        // so a regular player standing in as a guest was filed as settled from a
+        // balance they were never going to draw on.
+        const cash = ch.settles_cash ? 1
+          : (ch.player_type === 'outside' || ch.rate_type === 'noncontract') && settledBy === ch.player_id
+            ? 1 : 0;
         insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
           ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
-          settledBy, ch.paid ? 1 : 0);
+          settledBy, ch.paid ? 1 : 0, cash);
 
         // Remember who covered a guest, so the next game can suggest them
         // rather than asking again — losing that link is losing who came from
