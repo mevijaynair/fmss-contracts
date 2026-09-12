@@ -31,6 +31,7 @@ const { gameweeksRepo } = await import('../server/repos/gameweeks.js');
 const { periodReportRepo } = await import('../server/repos/period_report.js');
 const { movementsRepo } = await import('../server/repos/movements.js');
 const { kittyRepo } = await import('../server/repos/kitty.js');
+const { statsRepo } = await import('../server/repos/stats.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -394,6 +395,26 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(charge.paid, 0, 'collected is a question only cash can answer');
   assert.equal(balanceOf(p), 460, 'it comes off the balance instead');
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
+});
+
+test('a win is read from the result row, not re-parsed from the text', () => {
+  // The bare scoreline "3-7" cannot say who scored seven, and every live game
+  // has one — so reading `scoreline || score` meant no Mon/Thu game ever
+  // resolved a winner and the analytics were empty. Blanking the readable text
+  // here proves the result row alone is enough.
+  const red = player('Red shirt'); const blue = player('Blue shirt');
+  const gw = playGame({ pitch: 0, teams_raw: 'Red / Blue',
+    result: { team_a_name: 'Red', team_b_name: 'Blue', goals_team_a: 3, goals_team_b: 7 },
+    players: [{ player_id: red, amount: 0, team: 'Red' },
+      { player_id: blue, amount: 0, team: 'Blue' }] });
+  db.prepare("UPDATE gameweeks SET score = '' WHERE id = ?").run(gw.id);
+
+  const r = statsRepo.matchRecord(red, CONTRACT);
+  assert.equal(r.unknown, 0, 'the game is decided');
+  assert.equal(r.losses, 1);
+  assert.equal(r.gf, 3);
+  assert.equal(r.ga, 7);
+  assert.equal(statsRepo.matchRecord(blue, CONTRACT).wins, 1);
 });
 
 // --- paying for one contract's game out of another's balance -----------------

@@ -24,6 +24,8 @@ export const statsRepo = {
 
     const teamsOf = db.prepare(
       'SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND team != \'\'');
+    const resultOf = db.prepare(`SELECT team_a_name, team_b_name, goals_team_a,
+      goals_team_b, result FROM game_results WHERE gameweek_id = ?`);
 
     const r = {
       games: rows.length, wins: 0, draws: 0, losses: 0, unknown: 0,
