@@ -95,7 +95,9 @@ async function render() {
       <p class="hint rep-key">
         Capt Subsidy is the share of this period's games the player captained — NA until they have played.
         Status follows runway at ${money(data.rate)} a game: under one game is out of contract,
-        under ${data.refill_below_games} needs a refill.
+        under ${data.refill_below_games} needs a refill.${data.dormant_hidden
+      ? ` ${data.dormant_hidden} dormant player${data.dormant_hidden === 1 ? '' : 's'} with no balance and no games this period ${data.dormant_hidden === 1 ? 'is' : 'are'} not listed.`
+      : ''}
       </p>
     </div>`;
 

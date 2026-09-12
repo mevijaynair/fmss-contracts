@@ -54,7 +54,7 @@ export const periodReportRepo = {
    * a stake, most recently active first is NOT what the sheet does — it keeps a
    * stable roster order, so sort by name and let the reader scan.
    */
-  report(contractId, { since = null } = {}) {
+  report(contractId, { since = null, includeDormant = false } = {}) {
     const c = db.prepare('SELECT id, name, season_start FROM contracts WHERE id = ?').get(contractId);
     if (!c) throw new Error('Contract not found');
     const from = since || c.season_start || '0000-01-01';
@@ -108,24 +108,32 @@ export const periodReportRepo = {
       };
     });
 
-    rows.sort((x, y) => x.name.localeCompare(y.name));
+    // A ledger row exists for every player on every contract, so most of them
+    // are dormant: nobody who has never played this contract and holds no money
+    // belongs on a sheet about who owes what. Keeping them would bury the
+    // eighteen names that matter under thirty that do not.
+    const squad = includeDormant
+      ? rows
+      : rows.filter(r => r.present_balance !== 0 || r.played > 0 || r.last_contribution_date);
+    squad.sort((x, y) => x.name.localeCompare(y.name));
 
     return {
       contract_id: contractId,
       contract_name: c.name,
       period_start: from,
+      dormant_hidden: rows.length - squad.length,
       generated_at: new Date().toISOString().slice(0, 10),
       rate,
       refill_below_games: REFILL_BELOW_GAMES,
-      rows,
+      rows: squad,
       totals: {
-        players: rows.length,
-        played: rows.reduce((s, r) => s + r.played, 0),
-        deducted: round2(rows.reduce((s, r) => s + r.deducted, 0)),
-        balance: round2(rows.reduce((s, r) => s + r.present_balance, 0)),
-        in_contract: rows.filter(r => r.status === 'In contract').length,
-        refill: rows.filter(r => r.status === 'Refill needed - No priority').length,
-        out: rows.filter(r => r.status === 'Out of contract').length,
+        players: squad.length,
+        played: squad.reduce((s, r) => s + r.played, 0),
+        deducted: round2(squad.reduce((s, r) => s + r.deducted, 0)),
+        balance: round2(squad.reduce((s, r) => s + r.present_balance, 0)),
+        in_contract: squad.filter(r => r.status === 'In contract').length,
+        refill: squad.filter(r => r.status === 'Refill needed - No priority').length,
+        out: squad.filter(r => r.status === 'Out of contract').length,
       },
     };
   },

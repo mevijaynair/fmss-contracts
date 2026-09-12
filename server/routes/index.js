@@ -246,7 +246,7 @@ r.delete('/schedule/:contractId/no-game/:date', wrap((req) => {
 // ---- contract period report (the sheet that gets shared with players) ----
 r.get('/report/:contractId', wrap((req) => {
   requireAdmin(req);
-  return periodReportRepo.report(req.params.contractId, { since: req.query.since || null });
+  return periodReportRepo.report(req.params.contractId, { since: req.query.since || null, includeDormant: req.query.all === '1' });
 }));
 
 // ---- gameweeks ----
