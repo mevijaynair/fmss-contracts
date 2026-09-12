@@ -984,8 +984,18 @@ r.post('/admin/events/:eventId/post-to-kitty', wrap((req) => {
 r.post('/my/transfers', wrap((req) => {
   if (req.user.role !== 'player') throw new Error('Players only');
   const { to_player_id, contract_id, amount, notes } = req.body;
-  if (!to_player_id || !amount || amount <= 0) {
+  // contract_id was named in this message but never actually checked, so a
+  // transfer without one got as far as the insert and failed with a bind error.
+  // It matters beyond the error text: a transaction naming no contract belongs
+  // to no ledger (see repos/ledgers.js), so the money would have moved nowhere.
+  if (!to_player_id || !contract_id || !amount || amount <= 0) {
     throw new Error('to_player_id, contract_id, and amount (positive) required');
+  }
+  if (!db.prepare('SELECT 1 FROM contracts WHERE id = ?').get(contract_id)) {
+    throw new Error(`No such contract: ${contract_id}`);
+  }
+  if (!db.prepare('SELECT 1 FROM players WHERE id = ?').get(to_player_id)) {
+    throw new Error('No such player to transfer to');
   }
   if (to_player_id === req.user.playerId) {
     throw new Error('Cannot transfer to yourself');
