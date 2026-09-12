@@ -306,6 +306,7 @@ r.put('/gameweeks/:id/charges/:chargeId/settlement', wrap((req) => {
   return gameweeksRepo.setChargeSettlement(req.params.id, req.params.chargeId, {
     settles_cash: req.body?.settles_cash,
     charged_to: req.body?.charged_to,
+    settle_contract_id: req.body?.settle_contract_id,
   });
 }));
 r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {
@@ -652,10 +653,30 @@ r.get('/results', wrap((req) => {
   return games.map(g => {
     const charges = gameweeksRepo.get(g.id).charges || [];
     const teams = [...new Set(charges.map(c => c.team).filter(Boolean))];
-    // Resolve the result to concrete goals and an actual winning TEAM. Without
-    // this the client had only free text, so it credited a win to everyone who
-    // played rather than to the side that won.
-    const score = normaliseScore(g.scoreline || g.score);
+
+    // A game_results row is the authoritative answer: it names both teams, both
+    // goal counts and who won. Use it whenever there is one.
+    //
+    // This read `g.scoreline || g.score` and parsed the text. scoreline is a
+    // bare "13-14", which cannot say who scored 14 — normaliseScore returns
+    // winner:null for it — and since scoreline is set on every live game, the
+    // readable "Blue win 13-14" behind the `||` was never reached. Every Mon/Thu
+    // game therefore had no winner and no analytics. Saturday only looked fine
+    // because its imported games carry no scoreline, so they fell through to the
+    // text that does name a winner.
+    const row = gameResultsRepo.getByGameweekId(db, g.id);
+    const score = row
+      ? {
+        text: `${row.goals_team_a}-${row.goals_team_b}`,
+        winner: row.result === 'draw' ? 'draw'
+          : (row.result === 'a_wins' ? row.team_a_name : row.team_b_name),
+        margin: Math.abs(row.goals_team_a - row.goals_team_b),
+        goalsWin: Math.max(row.goals_team_a, row.goals_team_b),
+        goalsLose: Math.min(row.goals_team_a, row.goals_team_b),
+        known: true,
+        assumed: false,
+      }
+      : normaliseScore(g.score || g.scoreline);
     return {
       ...g,
       charges,
@@ -767,9 +788,21 @@ r.get('/dashboard', wrap((req) => {
   const round2 = (n) => Math.round(n * 100) / 100;
   const LOW_RUNWAY_GAMES = 2;      // fewer than this and a top-up is due
 
+  // The cashier funds the contracts out of their own pocket and takes the fees
+  // back in, so they are deliberately blocked from contributing — which means
+  // their balance only ever falls as they play. That is not a debt to chase: it
+  // is the club's float, and the club owes THEM, not the reverse. Counting it in
+  // "owed to club" overstated the figure by everything Vijay had played.
+  const cashiers = new Set(playersRepo.all()
+    .filter(p => p.special_role === 'cashier').map(p => p.id));
+
   const contracts = contractsRepo.all();
   const perContract = contracts.map((c) => {
-    const ledgers = ledgersRepo.forContract(c.id);
+    const all = ledgersRepo.forContract(c.id);
+    const ledgers = all.filter(l => !cashiers.has(l.player_id));
+    const cashierFloat = round2(Math.abs(all
+      .filter(l => cashiers.has(l.player_id) && l.present_balance < 0)
+      .reduce((s, l) => s + l.present_balance, 0)));
     // contractsRepo already parses this into an object; only a raw DB row is text.
     const rates = typeof c.rates === 'string'
       ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
@@ -815,6 +848,8 @@ r.get('/dashboard', wrap((req) => {
       net: round2(ledgers.reduce((s, l) => s + l.present_balance, 0)),
       credit: round2(credit),
       debt: round2(debt),
+      // Reported on its own so it is visible rather than silently dropped.
+      cashier_float: cashierFloat,
       games: games.length,
       last_game: lastGame,
       games_30d: games.filter(g => String(g.date) >= cutoff).length,

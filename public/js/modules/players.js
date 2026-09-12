@@ -157,7 +157,12 @@ async function render() {
   // Render as clean card grid instead of cluttered table
   const cardsHtml = filtered.map(l => {
     const isCashier = roleOf[l.player_id] === 'cashier';
-    const status = statusFromBalance(l.present_balance, l.games_left);
+    // The cashier funds the contracts up front and takes the fees back in, so
+    // they never contribute and their balance only falls as they play. Painting
+    // that red says they owe the club money, when it is the other way round.
+    const status = isCashier
+      ? { text: '💰 Club float', cls: 'tag-cashier' }
+      : statusFromBalance(l.present_balance, l.games_left);
     const lastTxn = lastTransactionMap[l.player_id];
     let lastTxnHtml = '<span class="hint">—</span>';
     if (lastTxn) {
@@ -175,7 +180,7 @@ async function render() {
     const owed = owedById[l.player_id] || 0;
 
     return `
-    <tr class="${l.present_balance < 0 || owed > 0 ? 'row-alert' : ''}">
+    <tr class="${!isCashier && (l.present_balance < 0 || owed > 0) ? 'row-alert' : ''}">
       <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}${
         l.player_type === 'outside' ? ' <span class="tag tag-due" title="Guest — not on a contract">Guest</span>' : ''}${
         owed > 0 ? ` <span class="tag tag-due" title="Cash still to collect">to collect ${money(owed)}</span>` : ''}${
@@ -185,8 +190,11 @@ async function render() {
       <td class="num">${money(l.contributed)}</td>
       <td class="num"><span class="charged-cell ${l.charged > 0 ? 'is-charged' : ''}">-${money(l.charged)}</span></td>
       <td class="num">${l.games ?? 0}</td>
-      <td class="num">${balCell(l.present_balance)}</td>
-      <td class="num">${l.games_left === null || l.games_left === undefined ? '<span class="hint">—</span>'
+      <td class="num">${isCashier
+    ? `<span class="bal zero" title="Money put in up front to run the contracts, drawn down as they play. The club owes this, not the other way round.">${money(l.present_balance)}</span>`
+    : balCell(l.present_balance)}</td>
+      <td class="num">${isCashier ? '<span class="hint">—</span>'
+    : l.games_left === null || l.games_left === undefined ? '<span class="hint">—</span>'
         : `<span class="${l.games_left < 1 ? 'charged-cell is-charged' : 'hint'}">${l.games_left}</span>`}</td>
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'

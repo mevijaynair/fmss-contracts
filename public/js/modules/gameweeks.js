@@ -347,6 +347,11 @@ async function detail(id) {
         </select>
         <select class="ch-payer" data-charge="${c.id}"
                 title="Whose money settles this charge">${payerOptions(c)}</select>
+        <select class="ch-fund" data-charge="${c.id}" ${c.settle_mode === 'balance' ? '' : 'disabled'}
+                title="Which of their balances it comes off — a Mon/Thu regular playing one odd Saturday can pay from their Mon/Thu credit">
+          ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
+  ct.id === c.settle_contract_id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
+        </select>
         <select class="ch-team" data-charge="${c.id}">${teamOptions(c.team)}</select>
         <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
           <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> captain
@@ -457,10 +462,14 @@ async function detail(id) {
   const resettle = async (chargeId) => {
     const mode = document.querySelector(`.ch-mode[data-charge="${chargeId}"]`);
     const payer = document.querySelector(`.ch-payer[data-charge="${chargeId}"]`);
+    const fund = document.querySelector(`.ch-fund[data-charge="${chargeId}"]`);
     try {
       await api.setChargeSettlement(id, chargeId, {
         mode: mode.value,
         charged_to: payer.value || null,
+        // Only send it when it differs from the game's own contract, so an
+        // ordinary charge keeps a NULL and behaves exactly as before.
+        settle_contract_id: fund && fund.value !== g.contract_id ? fund.value : null,
       });
       toast({ cash: 'Now cash to collect', kitty: 'The kitty covers this place',
         balance: 'Now settled off a balance' }[mode.value]);
@@ -472,7 +481,7 @@ async function detail(id) {
     // rather than sit there showing a change it refused.
     reopen(); render();
   };
-  document.querySelectorAll('.ch-mode, .ch-payer').forEach(el =>
+  document.querySelectorAll('.ch-mode, .ch-payer, .ch-fund').forEach(el =>
     el.addEventListener('change', () => resettle(el.dataset.charge)));
 }
 

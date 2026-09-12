@@ -31,7 +31,7 @@ const HOOK_CLASSES = new Set([
   // which the programmes rewrite replaced; att-* are its successors.
   'att-tier', 'att-amt', 'att-method', 'att-paid',
   'player-type-select', 'charged-to-select', 'charge-delta',
-  'ch-team', 'ch-capt', 'ch-paid', 'ch-mode', 'ch-payer', 'gw-pick',
+  'ch-team', 'ch-capt', 'ch-paid', 'ch-mode', 'ch-payer', 'ch-fund', 'gw-pick',
 ]);
 
 // A line carrying this marker is allowed a raw colour (domain data, e.g. kit colours).

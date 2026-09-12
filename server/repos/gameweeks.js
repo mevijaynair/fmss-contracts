@@ -331,10 +331,14 @@ export const gameweeksRepo = {
    * applies to cash — leaving it set would make the charge look settled twice
    * over.
    *
+   * `settle_contract_id` names WHICH balance pays, when it is not the game's own
+   * — a Mon/Thu regular playing one odd Saturday settles it from the Mon/Thu
+   * credit they actually hold. Pass null to put it back on the game's contract.
+   *
    * `settles_cash` is still accepted as a boolean for callers that only know the
    * older two-way choice.
    */
-  setChargeSettlement(gameweekId, chargeId, { mode, settles_cash, charged_to } = {}) {
+  setChargeSettlement(gameweekId, chargeId, { mode, settles_cash, charged_to, settle_contract_id } = {}) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
     if (!row) throw new Error('Charge not found');
@@ -347,18 +351,27 @@ export const gameweeksRepo = {
       ? (mode === 'cash' ? 1 : 0)
       : (settles_cash === undefined ? row.settles_cash : (settles_cash ? 1 : 0));
     let payer = charged_to === undefined ? row.charged_to : (charged_to || null);
+    const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
+    const settleContract = settle_contract_id === undefined
+      ? row.settle_contract_id
+      : (settle_contract_id || null);
+    if (settleContract
+        && !db.prepare('SELECT id FROM contracts WHERE id = ?').get(settleContract)) {
+      throw new Error(`No such contract: ${settleContract}`);
+    }
     if (payer) {
       const exists = db.prepare('SELECT id FROM players WHERE id = ?').get(payer);
       if (!exists) throw new Error('No such player to bill this to');
-      const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
-      ledgersRepo.ensure(payer, gw.contract_id);
     } else {
       payer = row.player_id;
     }
+    // The account has to exist on whichever contract actually pays, or the
+    // charge lands nowhere.
+    if (!cash && !fromKitty) ledgersRepo.ensure(payer, settleContract || gw.contract_id);
 
     db.prepare(`UPDATE charges SET settles_cash = ?, settled_from_kitty = ?, charged_to = ?,
-                paid = ?, paid_at = ?, paid_method = ? WHERE id = ?`)
-      .run(cash, fromKitty, payer, cash ? row.paid : 0,
+                settle_contract_id = ?, paid = ?, paid_at = ?, paid_method = ? WHERE id = ?`)
+      .run(cash, fromKitty, payer, settleContract, cash ? row.paid : 0,
         cash ? row.paid_at : null, cash ? row.paid_method : null, chargeId);
 
     recomputeGameKitty(gameweekId);
@@ -402,11 +415,13 @@ export const gameweeksRepo = {
                AND (ch.settles_cash = 1
                     OR COALESCE(sp.player_type,'regular') = 'outside')
              THEN 1 ELSE 0 END AS is_cash,
+        COALESCE(ch.settle_contract_id, g.contract_id) AS settle_contract_id,
         CASE WHEN ch.settled_from_kitty = 1 THEN 'kitty'
              WHEN ch.settles_cash = 1
                OR COALESCE(sp.player_type,'regular') = 'outside' THEN 'cash'
              ELSE 'balance' END AS settle_mode
       FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
       JOIN players p ON p.id = ch.player_id
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
       WHERE ch.gameweek_id = ?

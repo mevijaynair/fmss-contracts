@@ -1,8 +1,28 @@
 // transfers.js — player-to-player kitty transfers with admin approval
 import { api } from '../api.js';
 import { toast } from '../store.js';
-import { $, esc } from '../util.js';
+import { $, esc, money } from '../util.js';
 import { store } from '../store.js';
+
+// Who a player can send to, and what they have to send.
+//
+// `store.players` is not it: the /players endpoint returns ONLY the signed-in
+// player to a player, so filtering out yourself left an empty dropdown with just
+// "Select player…" in it — the form looked broken because there was nobody to
+// pick. Names come from the public sign-in list instead, which is the same set
+// of names a player already sees on Results.
+let transferPeople = [];
+let myLedgers = [];
+
+async function loadTransferOptions() {
+  const user = JSON.parse(localStorage.getItem('fmss_user') || '{}');
+  const [people, ledgers] = await Promise.all([
+    api.get('/login/players').catch(() => []),
+    api.myLedgers().catch(() => []),
+  ]);
+  transferPeople = (people || []).filter(p => p.id !== user.playerId);
+  myLedgers = ledgers || [];
+}
 
 function renderPlayerTransferForm() {
   const user = JSON.parse(localStorage.getItem('fmss_user') || '{}');
@@ -10,22 +30,28 @@ function renderPlayerTransferForm() {
 
   if (!isPlayer) return '';
 
+  // Only contracts they actually hold a balance on, with the balance shown. A
+  // "Both / General" option used to sit at the top sending contract_id '' — and
+  // a transaction naming no contract belongs to no ledger, so it moved nothing
+  // at all while reporting success.
+  const fundable = myLedgers.filter(l => l.present_balance > 0);
+  const contractName = (id) => store.contracts.find(c => c.id === id)?.name || id;
+
   return `
     <div class="form-group">
       <label>Send money to</label>
       <select id="transferToPlayer" required>
         <option value="">Select player…</option>
-        ${store.players
-          .filter(p => p.id !== user.playerId && p.special_role !== 'cashier')
-          .map(p => `<option value="${p.id}">${esc(p.name)}</option>`)
-          .join('')}
+        ${transferPeople.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
-      <label>Contract</label>
-      <select id="transferContract">
-        <option value="">Both / General</option>
-        ${store.contracts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+      <label>From which of your balances</label>
+      <select id="transferContract" required>
+        ${fundable.length
+    ? fundable.map(l => `<option value="${esc(l.contract_id)}">${
+      esc(contractName(l.contract_id))} — you have ${money(l.present_balance)}</option>`).join('')
+    : '<option value="">You have no balance to send from</option>'}
       </select>
     </div>
     <div class="form-group">
@@ -142,12 +168,13 @@ export async function loadTransfers() {
   }
 }
 
-export function initTransfers() {
+export async function initTransfers() {
   const user = JSON.parse(localStorage.getItem('fmss_user') || '{}');
 
   if (user.role === 'player') {
     const formContainer = $('transferFormContainer');
     if (formContainer) {
+      await loadTransferOptions();
       formContainer.innerHTML = renderPlayerTransferForm();
     }
 
@@ -163,6 +190,16 @@ export function initTransfers() {
 
         if (!to_player_id || !amount || amount <= 0) {
           toast('Select player and enter amount', true);
+          return;
+        }
+        if (!contract_id) {
+          toast('Pick which balance it comes from', true);
+          return;
+        }
+        // Stop the obvious mistake before an admin has to reject it.
+        const from = myLedgers.find(l => l.contract_id === contract_id);
+        if (from && amount > from.present_balance) {
+          toast(`That is more than your ${money(from.present_balance)} balance`, true);
           return;
         }
 

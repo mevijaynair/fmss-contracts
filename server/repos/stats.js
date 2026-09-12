@@ -38,12 +38,28 @@ export const statsRepo = {
     for (const row of rows) {
       if (row.is_captain) r.captainGames++;
       const teams = teamsOf.all(row.gw).map(t => t.team);
-      // scoreline is bare goals ("7-5"), which says nothing about who won;
-      // score carries the side ("Red win 7-5"). Taking the first truthy one
-      // meant a game with both recorded counted as having no readable result.
-      // Try each and keep whichever actually resolves.
-      let sc = normaliseScore(row.scoreline);
-      if (!sc.known && row.score) sc = normaliseScore(row.score);
+      // The game_results row is the authoritative answer — it names both sides
+      // and who won — so prefer it over re-reading the text. The fallback below
+      // stays for imported games, which have no result row.
+      //
+      // scoreline is bare goals ("7-5"), which says nothing about who won; score
+      // carries the side ("Red win 7-5"). Taking the first truthy one meant a
+      // game with both recorded counted as having no readable result, so each is
+      // tried and whichever resolves is kept.
+      const gr = resultOf.get(row.gw);
+      let sc;
+      if (gr) {
+        sc = {
+          winner: gr.result === 'draw' ? 'draw'
+            : (gr.result === 'a_wins' ? gr.team_a_name : gr.team_b_name),
+          goalsWin: Math.max(gr.goals_team_a, gr.goals_team_b),
+          goalsLose: Math.min(gr.goals_team_a, gr.goals_team_b),
+          known: true,
+        };
+      } else {
+        sc = normaliseScore(row.scoreline);
+        if (!sc.known && row.score) sc = normaliseScore(row.score);
+      }
       const wt = winningTeam(sc.winner, teams);
       const decided = sc.known && (sc.winner === 'draw' || wt);
       if (!decided) {

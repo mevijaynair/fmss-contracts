@@ -49,6 +49,12 @@ const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
 // standing in as a guest for one night, which Game Day offers.
 //
 // Neither — it comes off a contract balance, which is the ordinary case.
+//
+// WHICH balance is a separate question. Normally the game's own contract, but a
+// charge can name another: a Mon/Thu regular playing one odd Saturday settles it
+// from the Mon/Thu credit they actually hold, rather than opening a Saturday
+// account at zero and going straight into the red.
+const SETTLE_CONTRACT = 'COALESCE(ch.settle_contract_id, g.contract_id)';
 const KITTY_FUNDED = 'ch.settled_from_kitty = 1';
 const NOT_KITTY_FUNDED = 'ch.settled_from_kitty = 0';
 const CASH_CHARGE = `${NOT_KITTY_FUNDED} AND (ch.settles_cash = 1
@@ -69,7 +75,7 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
-    AND g.contract_id = l.contract_id AND g.historical = 0
+    AND ${SETTLE_CONTRACT} = l.contract_id AND g.historical = 0
     AND ${NOT_KITTY_FUNDED} AND NOT (${CASH_CHARGE})), 0)`;
 // Cash the club is still waiting on: an outside player's own charges, unpaid.
 // Deliberately NOT part of present_balance — it is money owed to the club, not
@@ -79,7 +85,7 @@ const CASH_OWED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
-    AND g.contract_id = l.contract_id AND g.historical = 0
+    AND ${SETTLE_CONTRACT} = l.contract_id AND g.historical = 0
     AND (${CASH_CHARGE}) AND ch.paid = 0), 0)`;
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
@@ -198,12 +204,13 @@ export const ledgersRepo = {
    * owes survives them not having an account at all.
    */
   cashOutstanding(contractId = null) {
-    const where = contractId ? 'AND g.contract_id = ?' : '';
+    const where = contractId
+      ? 'AND COALESCE(ch.settle_contract_id, g.contract_id) = ?' : '';
     const args = contractId ? [contractId] : [];
     return db.prepare(`
       SELECT COALESCE(ch.charged_to, ch.player_id) AS player_id,
              p.name AS player_name,
-             g.contract_id,
+             COALESCE(ch.settle_contract_id, g.contract_id) AS contract_id,
              COUNT(DISTINCT ch.gameweek_id) AS games,
              COALESCE(SUM(ch.amount), 0)    AS owed,
              MAX(g.date)                    AS last_game_date
@@ -213,7 +220,8 @@ export const ledgersRepo = {
       WHERE g.historical = 0 AND ch.paid = 0 AND ch.settled_from_kitty = 0
         AND (ch.settles_cash = 1 OR COALESCE(p.player_type,'regular') = 'outside')
         ${where}
-      GROUP BY COALESCE(ch.charged_to, ch.player_id), g.contract_id
+      GROUP BY COALESCE(ch.charged_to, ch.player_id),
+               COALESCE(ch.settle_contract_id, g.contract_id)
       HAVING owed > 0
       ORDER BY owed DESC`).all(...args);
   },

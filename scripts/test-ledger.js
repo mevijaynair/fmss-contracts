@@ -396,6 +396,56 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
 });
 
+// --- paying for one contract's game out of another's balance -----------------
+
+test("a charge can be settled from the player's other contract", () => {
+  // A Mon/Thu regular turning up one odd Saturday. Their money is on Mon/Thu;
+  // billing the Saturday game against a Saturday balance they never paid into
+  // opens an account at zero and drives it straight into the red.
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('away','Away','{}',0,3)").run();
+  const p = player('Cross dipper', 400);
+  db.prepare("INSERT INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,'away',0,'')").run(p);
+
+  const gw = gameweeksRepo.create({ contract_id: 'away', date: '2026-05-01', cost_per_gw: 0 },
+    [{ player_id: p, amount: 40 }]);
+  assert.equal(ledgersRepo.get(p, 'away').present_balance, -40, 'billed where they have nothing');
+  assert.equal(balanceOf(p), 400, 'and their real balance untouched');
+
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id,
+    { mode: 'balance', settle_contract_id: CONTRACT });
+  assert.equal(ledgersRepo.get(p, 'away').present_balance, 0, 'the away account is clear');
+  assert.equal(balanceOf(p), 360, 'it came off the contract they actually pay into');
+
+  // And it can be put back.
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id,
+    { mode: 'balance', settle_contract_id: null });
+  assert.equal(ledgersRepo.get(p, 'away').present_balance, -40);
+  assert.equal(balanceOf(p), 400);
+});
+
+test('a guest can be settled from their host\'s other contract too', () => {
+  // "Could be for any player or their plus ones" — charged_to and
+  // settle_contract_id compose: whose money, and which of their balances.
+  const host = player('Host', 400);
+  const guest = player('Their plus one'); makeOutside(guest);
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('away','Away','{}',0,3)").run();
+  db.prepare("INSERT INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,'away',0,'')").run(host);
+
+  const gw = gameweeksRepo.create({ contract_id: 'away', date: '2026-05-02', cost_per_gw: 0 },
+    [{ player_id: guest, amount: 35 }]);
+  gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id,
+    { mode: 'balance', charged_to: host, settle_contract_id: CONTRACT });
+  assert.equal(balanceOf(host), 365, "off the host's main balance");
+  assert.equal(ledgersRepo.get(guest, CONTRACT).cash_owed, 0, 'and nothing left to collect');
+});
+
+test('a settling contract that does not exist is refused', () => {
+  const p = player('Bad contract', 100);
+  const gw = playGame({ pitch: 0, players: [{ player_id: p, amount: 10 }] });
+  assert.throws(() => gameweeksRepo.setChargeSettlement(gw.id, gw.charges[0].id,
+    { mode: 'balance', settle_contract_id: 'nope' }), /No such contract/);
+});
+
 // --- guests do not get an account they will never use ------------------------
 
 test('a cash guest is given no ledger row, and still shows as owing', () => {

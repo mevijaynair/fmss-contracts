@@ -284,6 +284,22 @@ export function initSchema() {
       try { db.prepare('SELECT settled_from_kitty FROM charges LIMIT 1').get(); }
       catch { db.exec('ALTER TABLE charges ADD COLUMN settled_from_kitty INTEGER NOT NULL DEFAULT 0'); }
     },
+    // charges: which contract's balance pays, when it is not the game's own.
+    //
+    // A Mon/Thu regular turning up for a Saturday was billed against a Saturday
+    // balance they do not keep, so the charge opened an account at zero and
+    // pushed it straight into the red — Jules and Praveen both sat at -95 and
+    // -64 on a contract they had never paid into, while holding credit on the
+    // one they actually play. Their money is on Mon/Thu; the charge should come
+    // off it.
+    //
+    // NULL means the game's own contract, so every existing charge is unchanged.
+    () => {
+      try { db.prepare('SELECT settle_contract_id FROM charges LIMIT 1').get(); }
+      catch {
+        db.exec('ALTER TABLE charges ADD COLUMN settle_contract_id TEXT REFERENCES contracts(id)');
+      }
+    },
     // kitty: which contract's pot this belongs to.
     //
     // There is one kitty table and it never recorded a contract, so "the Mon/Thu
