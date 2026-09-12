@@ -560,6 +560,9 @@ function showRateWarning(meta, total) {
 // the pitch and water costs. It was a free-text box that defaulted to 0, so the
 // figure only ever reflected what someone remembered to type. Editing it still
 // works — a manual value is kept and marked as an override.
+const payerName = (id) =>
+  store.players?.find(p => p.id === id)?.name || 'whoever bought it';
+
 function recomputeKitty() {
   const el = $('gdKittyEarned');
   if (!el) return;
@@ -583,7 +586,13 @@ function recomputeKitty() {
 
   const c = store.contracts.find(x => x.id === contractId);
   const pitch = Number(c?.cost_per_gw) || 0;
-  const water = Number($('gdGameCost')?.value) || 0;
+  // Only water the club itself bought comes off the pot. When a player buys it
+  // they are credited for it instead, so the cash never left the kitty — this
+  // subtracted it either way, which charged the club twice and made the figure
+  // sit still while the payer changed underneath it.
+  const waterCost = Number($('gdGameCost')?.value) || 0;
+  const waterPayer = $('gdCostPaidBy')?.value || 'self';
+  const water = waterPayer === 'self' ? waterCost : 0;
   const round = (n) => Math.round(n * 100) / 100;
   const inHand = round(collected - pitch - water);
   const expected = round(collected + pending - pitch - water);
@@ -593,14 +602,21 @@ function recomputeKitty() {
   el.value = inHand;
   const note = document.querySelector('[data-gd-kittynote]');
   if (note) {
+    // Say why the water is or is not in the sum, so changing the payer visibly
+    // changes the arithmetic rather than leaving the number looking stuck.
+    const waterBit = water
+      ? ` &minus; water ${money(water)}`
+      : (waterCost
+        ? ` <span class="hint">(water ${money(waterCost)} credited to ${esc(payerName(waterPayer))}, not taken from the kitty)</span>`
+        : '');
     note.innerHTML = pending
-      ? `In hand: collected ${money(collected)} &minus; pitch ${money(pitch)} &minus; water ${money(water)}
+      ? `In hand: collected ${money(collected)} &minus; pitch ${money(pitch)}${waterBit}
          = <strong>${money(inHand)}</strong><br>
          Once the ${money(pending)} of guest cash is collected: <strong>${money(expected)}</strong>.
          Mark each guest paid in Game History and the kitty tops up then.
          <button type="button" class="link-btn" id="gdKittyReset">reset</button>`
-      : `charged ${money(collected)} &minus; pitch ${money(pitch)}
-         &minus; water ${money(water)} = <strong>${money(inHand)}</strong>
+      : `charged ${money(collected)} &minus; pitch ${money(pitch)}${waterBit}
+         = <strong>${money(inHand)}</strong>
          <button type="button" class="link-btn" id="gdKittyReset">reset</button>`;
     $('gdKittyReset')?.addEventListener('click', () => {
       el.dataset.override = '0'; recomputeKitty();
@@ -814,6 +830,9 @@ export function initGameday() {
   });
   // The water cost feeds the profit, so a change to it should flow through.
   $('gdGameCost')?.addEventListener('input', () => recomputeKitty());
+  // Who bought the water decides whether its cost comes off the pot or is owed
+  // back to a player, so the figure has to move when the payer does.
+  $('gdCostPaidBy')?.addEventListener('change', () => recomputeKitty());
 
   $('gdScore').addEventListener('input', showScoreNote);
   // A date the user set themselves must not be overwritten by the next fixture.

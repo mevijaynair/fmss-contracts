@@ -294,6 +294,32 @@ test('an imported results sheet moves no money, so it credits no kitty', () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 0);
 });
 
+test('water a player bought is owed back to them, not taken off the kitty twice', () => {
+  const a = player('Plays', 500); const buyer = player('Bought the water', 500);
+  const club = playGame({ pitch: 100, water: 15, players: [
+    { player_id: a, amount: 40 }, { player_id: buyer, amount: 40 },
+  ] });
+  assert.equal(kittyOf(club.id), -35, 'the club bought it, so the pot paid: 80 - 100 - 15');
+
+  const byPlayer = playGame({ pitch: 100, water: 15, game_cost_paid_by: buyer, players: [
+    { player_id: a, amount: 40 }, { player_id: buyer, amount: 40 },
+  ] });
+  assert.equal(kittyOf(byPlayer.id), -20, 'no cash left the pot: 80 - 100');
+  assert.equal(balanceOf(buyer), 500 - 40 - 40 + 15, 'they are credited for it instead');
+});
+
+test('only a guest owes anything — a contract charge is settled on the night', () => {
+  const guest = player('Guest'); makeOutside(guest);
+  const a = player('Member A', 500); const b = player('Member B', 500);
+  const gw = playGame({ pitch: 100, players: [
+    { player_id: a, amount: 40 }, { player_id: b, amount: 40 }, { player_id: guest, amount: 35 },
+  ] });
+  const row = gameweeksRepo.all(CONTRACT).find(g => g.id === gw.id);
+  assert.equal(row.charged, 115, 'everything billed');
+  assert.equal(row.pending_amount, 35, "only the guest's cash is outstanding");
+  assert.equal(row.paid_count, 2, 'both members count as settled, guest does not');
+});
+
 test('the score is saved with the game, not in a second call that can be lost', () => {
   const a = player('Scorer');
   const gw = playGame({ pitch: 10, players: [{ player_id: a, amount: 40 }],

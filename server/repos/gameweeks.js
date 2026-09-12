@@ -94,7 +94,13 @@ function recomputeGameKitty(gameweekId) {
   // its entry back rather than keep it. Writing zero is how that row is removed,
   // so the check lands here and not as an early return that leaves it standing.
   const pitch = Number(gw.cost_per_gw) || 0;
-  const water = Number(gw.game_cost) || 0;
+  // Water comes off the pot only when the pot bought it. When a player buys it
+  // they are credited a contribution for the same amount — the club owes them
+  // instead — so taking it off the kitty as well would charge the club twice for
+  // one bottle run: once in cash that never left, and again as a debt to the
+  // player. Who paid changes where the cost lands, not how much it was.
+  const payer = gw.game_cost_paid_by || 'self';
+  const water = payer === 'self' ? Number(gw.game_cost) || 0 : 0;
   writeKittyRow(`k_gw_${gameweekId}`,
     gw.historical ? 0 : round2(contracted - pitch - water),
     `Game on ${gw.date}: charged ${round2(contracted)} less pitch ${pitch}`
@@ -120,14 +126,23 @@ export const gameweeksRepo = {
     // that never read paid_count/pending_amount at all.
     const ids = rows.map(g => g.id);
     const placeholders = ids.map(() => '?').join(',');
+    // What is still outstanding is only the cash a guest owes. A contract
+    // player's charge came out of a balance the club already holds, so it is
+    // settled the moment the game is recorded and its `paid` flag means nothing
+    // — nothing ever sets it. Counting those as unpaid made a normal game read
+    // "400 pending, 0% collected" when the only money actually outstanding was
+    // the guest cash.
+    const awaitingCash = `COALESCE(sp.player_type,'regular') = 'outside' AND ch.paid = 0`;
     const stats = db.prepare(`
-      SELECT gameweek_id,
+      SELECT ch.gameweek_id,
              COUNT(*) AS charges_count,
-             COALESCE(SUM(amount), 0) AS charged,
-             COALESCE(SUM(CASE WHEN paid = 1 THEN 1 ELSE 0 END), 0) AS paid_count,
-             COALESCE(SUM(CASE WHEN paid = 0 THEN amount ELSE 0 END), 0) AS pending_amount
-      FROM charges WHERE gameweek_id IN (${placeholders})
-      GROUP BY gameweek_id
+             COALESCE(SUM(ch.amount), 0) AS charged,
+             COALESCE(SUM(CASE WHEN ${awaitingCash} THEN 0 ELSE 1 END), 0) AS paid_count,
+             COALESCE(SUM(CASE WHEN ${awaitingCash} THEN ch.amount ELSE 0 END), 0) AS pending_amount
+      FROM charges ch
+      LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+      WHERE ch.gameweek_id IN (${placeholders})
+      GROUP BY ch.gameweek_id
     `).all(...ids);
     const statsById = new Map(stats.map(s => [s.gameweek_id, s]));
     const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0 };
@@ -218,8 +233,19 @@ export const gameweeksRepo = {
   get(id) {
     const g = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(id);
     if (!g) return null;
-    g.charges = db.prepare(`SELECT ch.*, p.name AS player_name FROM charges ch
-      JOIN players p ON p.id = ch.player_id WHERE ch.gameweek_id = ?
+    // Who settles a charge is not always who played it, and it decides whether
+    // the money is already in hand (a contract balance) or still to be collected
+    // (a guest's cash). Callers were left to guess from player_id alone, so they
+    // treated every unpaid charge as outstanding — including the ones already
+    // paid for out of a balance.
+    g.charges = db.prepare(`SELECT ch.*, p.name AS player_name,
+        COALESCE(ch.charged_to, ch.player_id) AS settled_by,
+        sp.name AS settler_name,
+        COALESCE(sp.player_type, 'regular') AS settler_type
+      FROM charges ch
+      JOIN players p ON p.id = ch.player_id
+      LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+      WHERE ch.gameweek_id = ?
       ORDER BY ch.team, p.name`).all(id);
     return g;
   },

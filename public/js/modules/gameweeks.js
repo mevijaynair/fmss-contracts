@@ -359,10 +359,13 @@ async function detail(id) {
 // Edit payment status for players in this gameweek
 function editPayments(gw) {
   const charges = gw.charges || [];
-  const pending = charges.filter(c => !c.paid);
+  // Only a guest's cash is ever outstanding. A contract player's charge came out
+  // of a balance the club already holds, so listing them here as unpaid sent you
+  // chasing money that had already arrived.
+  const pending = charges.filter(c => !c.paid && c.settler_type === 'outside');
 
   if (pending.length === 0) {
-    toast('✓ All players have paid!', false);
+    toast('✓ Nothing left to collect for this game', false);
     return;
   }
 
