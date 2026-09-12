@@ -35,6 +35,13 @@ const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
+// Of those, the ones that actually cost them something. The bulk-imported
+// seasons carry a charge row per player worth 0 — an attendance record, not a
+// bill — so a single "games played" figure mixes games that moved a balance
+// with games that only say who turned up.
+const GAMES_BILLED = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
+  JOIN gameweeks g ON g.id = ch.gameweek_id
+  WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id AND ch.amount > 0), 0)`;
 // Last incoming transaction (contribution or positive adjustment)
 const LAST_INCOMING = `(SELECT MAX(CASE WHEN c.amount > 0 THEN c.date END) FROM contributions c
   WHERE c.player_id = l.player_id AND c.contract_id = l.contract_id AND c.historical = 0)`;
@@ -51,6 +58,7 @@ const SELECT = `
          ${CHARGED} AS charged,
          ${ADJUSTED} AS adjusted,
          ${LIFETIME_GAMES} AS games,
+         ${GAMES_BILLED} AS games_billed,
          ${LAST_INCOMING} AS last_incoming_date,
          ${LAST_GAME_DATE} AS last_game_date,
          ROUND(l.opening_balance + ${CONTRIB} - ${CHARGED} + ${ADJUSTED}, 2) AS present_balance
@@ -85,6 +93,7 @@ export const ledgersRepo = {
       charged: ledgers.reduce((s, l) => s + l.charged, 0),
       adjusted: ledgers.reduce((s, l) => s + l.adjusted, 0),
       games: ledgers.reduce((s, l) => s + l.games, 0),
+      games_billed: ledgers.reduce((s, l) => s + l.games_billed, 0),
       present_balance: Math.round(ledgers.reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
       first_game_date: null,
       last_game_date: null,
@@ -96,7 +105,8 @@ export const ledgersRepo = {
         charged: l.charged,
         adjusted: l.adjusted,
         present_balance: l.present_balance,
-        games: l.games
+        games: l.games,
+        games_billed: l.games_billed
       }))
     };
 

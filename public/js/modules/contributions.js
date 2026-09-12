@@ -25,7 +25,7 @@ function fillSelects() {
 
 async function renderLog() {
   const rows = await api.contributions(
-    $('contribFilter').value ? { player: $('contribFilter').value } : {});
+    $('contribFilter').value ? { player_id: $('contribFilter').value } : {});
   $('contribTable').querySelector('tbody').innerHTML = rows.slice(0, 400).map(c => `
     <tr style="${c.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(c.date))}</td>

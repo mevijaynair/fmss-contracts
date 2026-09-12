@@ -423,10 +423,16 @@ async function renderPlayerDetail(player, stats, record) {
     console.error('Failed to load transactions:', e);
   }
 
-  // Calculate cross-contract stats
+  // Cross-contract stats. Every figure here spans BOTH contracts, which is why
+  // the balance shown will not match the single-contract row the panel was
+  // opened from — the labels say so rather than leaving it to be guessed at.
   const totalGames = allLedgers.reduce((sum, l) => sum + (l.games || 0), 0);
+  const billedGames = allLedgers.reduce((sum, l) => sum + (l.games_billed || 0), 0);
+  const recordOnlyGames = totalGames - billedGames;
   const totalContributions = allContributions.reduce((sum, c) => sum + (c.amount || 0), 0);
   const totalBalance = allLedgers.reduce((sum, l) => sum + (l.present_balance || 0), 0);
+  const perContract = allLedgers
+    .map(l => `${l.contract_id} ${money(l.present_balance)}`).join(' · ');
 
   // Build modular tabs
   let tabsHtml = `
@@ -444,14 +450,19 @@ async function renderPlayerDetail(player, stats, record) {
         <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
           <div style="color: var(--text-muted); font-size: 0.9rem;">Games Played</div>
           <div style="font-size: 1.8rem; font-weight: 700; color: var(--sport);">${totalGames}</div>
+          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">
+            ${billedGames} billed · ${recordOnlyGames} record only</div>
         </div>
         <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Total Balance</div>
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Balance, both contracts</div>
           <div style="font-size: 1.8rem; font-weight: 700; color: ${totalBalance > 0 ? 'var(--success)' : 'var(--danger)'};">${money(totalBalance)}</div>
+          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">${esc(perContract)}</div>
         </div>
         <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-          <div style="color: var(--text-muted); font-size: 0.9rem;">Total Contributions</div>
+          <div style="color: var(--text-muted); font-size: 0.9rem;">Contributions, both contracts</div>
           <div style="font-size: 1.8rem; font-weight: 700; color: var(--success);">+${money(totalContributions)}</div>
+          <div class="hint" style="font-size: 0.78rem; margin-top: 0.2rem;">
+            ${allContributions.length} payment${allContributions.length === 1 ? '' : 's'} in</div>
         </div>
         <div style="padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
           <div style="color: var(--text-muted); font-size: 0.9rem;">Contracts</div>

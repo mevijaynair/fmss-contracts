@@ -512,7 +512,11 @@ r.get('/contributions', wrap((req) => {
   if (req.user.role === 'player') {
     return contributionsRepo.all({ playerId: req.user.playerId, contractId: req.query.contract });
   }
-  return contributionsRepo.all({ playerId: req.query.player, contractId: req.query.contract });
+  // player_id, not player: every other filtered endpoint spells it that way, and
+  // this one being different meant the player detail panel — which sent the
+  // conventional spelling — silently matched nothing and totalled up EVERY
+  // contribution in the club against whoever was on screen.
+  return contributionsRepo.all({ playerId: req.query.player_id, contractId: req.query.contract });
 }));
 r.post('/contributions', wrap((req) => { requireAdmin(req); return contributionsRepo.create(req.body); }));
 r.delete('/contributions/:id', wrap((req) => { requireAdmin(req); contributionsRepo.remove(req.params.id); return { ok: true }; }));
