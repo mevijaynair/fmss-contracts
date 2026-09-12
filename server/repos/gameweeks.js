@@ -192,9 +192,21 @@ export const gameweeksRepo = {
         VALUES (?,?,?,?,?,?,?,?,?)`);
       charges.forEach((ch, i) => {
         ledgersRepo.ensure(ch.player_id, gw.contract_id);
+        const settledBy = ch.charged_to || ch.player_id;
         insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
           ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
-          ch.charged_to || ch.player_id, ch.paid ? 1 : 0);
+          settledBy, ch.paid ? 1 : 0);
+
+        // Remember who covered a guest, so the next game can suggest them
+        // rather than asking again — losing that link is losing who came from
+        // whom. Only recorded when it is not already known, so a deliberate
+        // correction on the players screen is never overwritten by one game.
+        if (settledBy !== ch.player_id) {
+          db.prepare(
+            `UPDATE players SET introduced_by = ?
+             WHERE id = ? AND introduced_by IS NULL AND id <> ?`
+          ).run(settledBy, ch.player_id, settledBy);
+        }
       });
       // Whoever bought the water is out of pocket for it. game_cost_paid_by was
       // recorded but nothing ever gave it back, so a player who bought the water

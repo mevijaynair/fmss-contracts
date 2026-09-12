@@ -894,6 +894,14 @@ body.role-player .role-admin-only { display: none !important; }
   background: color-mix(in srgb, var(--success) 14%, transparent); }
 .settle-badge.is-collect { color: var(--warning);
   background: color-mix(in srgb, var(--warning) 16%, transparent); }
+/* Cash already in hand — same money as "to collect", a different half of it. */
+.settle-badge.is-collected { color: var(--success);
+  background: color-mix(in srgb, var(--success) 18%, transparent); }
+.settle-badge.is-toggle { cursor: pointer; }
+.settle-badge.is-toggle:hover { filter: brightness(1.25); }
+.settle-badge.is-toggle:focus-visible { outline: 2px solid var(--sport); outline-offset: 2px; }
+/* Who covered this guest last time. */
+.intro-note { display: block; margin-top: 0.2rem; font-size: 0.68rem; color: var(--text-faint); }
 .gd-summary { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin-top: 0.6rem;
   font-size: 0.85rem; color: var(--text-muted); }
 .gd-summary strong { color: var(--text-main); }

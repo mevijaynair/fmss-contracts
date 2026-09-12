@@ -303,12 +303,20 @@ function settlementOf(r) {
     || (payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract'));
 
   if (paysCash) {
-    return {
-      cls: 'is-collect', label: 'to collect', cash: true,
-      why: payerId
-        ? `${payerName || 'They'} have no prepaid balance, so this stays owed until you collect it.`
-        : 'Nobody is prepaying this, so it stays owed until collected.',
-    };
+    // Cash can already be in your pocket by the time the game is entered, so
+    // the only question the preview could answer was "still owed?" — now it can
+    // say "already have it" too, and the kitty counts it accordingly.
+    return r.paid
+      ? {
+        cls: 'is-collected', label: 'cash in hand', cash: true, collected: true,
+        why: `${payerName || 'They'} paid on the day — click to put it back to owed.`,
+      }
+      : {
+        cls: 'is-collect', label: 'to collect', cash: true, collected: false,
+        why: payerId
+          ? `${payerName || 'They'} have no prepaid balance, so this stays owed until you collect it. Click if you already have the cash.`
+          : 'Nobody is prepaying this. Click if you already have the cash.',
+      };
   }
   return {
     cls: 'is-balance', label: payerId === r.player_id ? 'from balance' : `${payerName} pays`,
@@ -369,11 +377,23 @@ function renderPreview(meta) {
     //
     // The list is every player, not only the ones in this game: whoever vouches
     // for a guest is not always on the pitch that night.
+    // Who covered them last time. A guest brought by the same member most weeks
+    // should not have to be re-linked every week — and forgetting it is how you
+    // lose track of who came from whom.
+    if (r.charged_to === undefined && r.introduced_by && r.introduced_by !== r.player_id) {
+      r.charged_to = r.introduced_by;
+    }
     const settlesId = r.charged_to || r.player_id || '';
+    const introducer = r.introduced_by
+      ? (store.players || []).find(p => p.id === r.introduced_by)?.name
+      : null;
     const roster = (store.players || []).filter(p => !p.is_sandbox);
     const playerOptions = roster
       .map(p => `<option value="${p.id}" ${p.id === settlesId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
     const selfLabel = r.matched ? 'Themselves' : 'Themselves (new player)';
+    const introNote = introducer && settlesId === r.introduced_by
+      ? `<span class="intro-note" title="Remembered from a previous game">usually ${esc(introducer)}</span>`
+      : '';
     const chargedToControl = `
       <select class="charged-to-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;">
         <option value="" ${!r.charged_to ? 'selected' : ''}>${selfLabel}</option>
@@ -391,10 +411,12 @@ function renderPreview(meta) {
       <td><span class="tag">${RATE_LABEL[r.rate_type] || r.rate_type}</span></td>
       <td style="text-align:right;"><input class="amt-input" type="number" step="1" data-i="${i}" value="${r.amount}"></td>
       <td style="text-align:center; font-size:0.85rem;">
-        <span class="hint">Charged to:</span><br>${chargedToControl}
+        <span class="hint">Charged to:</span><br>${chargedToControl}${introNote}
       </td>
       <td style="text-align:center;">
-        <span class="settle-badge ${s.cls}" title="${esc(s.why)}">${s.label}</span>
+        <span class="settle-badge ${s.cls}${s.cash ? ' is-toggle' : ''}"
+          ${s.cash ? `data-cash="${i}" role="button" tabindex="0"` : ''}
+          title="${esc(s.why)}">${s.label}</span>
       </td>
       <td class="row-actions"><button class="link-btn" data-del="${i}" title="Remove">✕</button></td>
     </tr>`;
@@ -429,6 +451,22 @@ function renderPreview(meta) {
       renderPreview(meta);
     }));
 
+  // Cash rows toggle between owed and already-collected.
+  $('gdTable').querySelectorAll('[data-cash]').forEach(el => {
+    const flip = () => {
+      const row = rows[el.dataset.cash];
+      row.paid = !row.paid;
+      toast(row.paid
+        ? `${row.display_name}'s cash is in hand`
+        : `${row.display_name} still to collect`, false);
+      renderPreview(meta);
+    };
+    el.addEventListener('click', flip);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+    });
+  });
+
   $('gdTable').querySelectorAll('.amt-input').forEach(inp =>
     inp.addEventListener('input', () => { rows[inp.dataset.i].amount = Number(inp.value) || 0; recalcTotal(); }));
   $('gdTable').querySelectorAll('[data-del]').forEach(btn =>
@@ -450,15 +488,22 @@ function recalcTotal() {
   // splits: some comes off balances now, the rest is cash still to chase.
   const summary = document.querySelector('[data-gd-summary]');
   if (summary) {
+    // Three fates, not two: taken from a balance, cash already in hand, and
+    // cash still owed. Folding the middle one into "to collect" told you to go
+    // and chase money that was already in your pocket.
     const fates = rows.map(r => ({ r, s: settlementOf(r) }));
-    const fromBalance = fates.filter(f => !f.s.cash).reduce((s, f) => s + (Number(f.r.amount) || 0), 0);
-    const toCollect = fates.filter(f => f.s.cash).reduce((s, f) => s + (Number(f.r.amount) || 0), 0);
-    const collectNames = fates.filter(f => f.s.cash).map(f => f.r.display_name);
+    const sum = (f) => f.reduce((s, x) => s + (Number(x.r.amount) || 0), 0);
+    const onBalance = fates.filter(f => !f.s.cash);
+    const inHand = fates.filter(f => f.s.cash && f.s.collected);
+    const owed = fates.filter(f => f.s.cash && !f.s.collected);
+
     summary.innerHTML = rows.length ? `
-      <span><strong>${money(fromBalance)}</strong> off balances now
-        <span class="hint">(${fates.filter(f => !f.s.cash).length} player${fates.filter(f => !f.s.cash).length === 1 ? '' : 's'})</span></span>
-      ${toCollect ? `<span><strong>${money(toCollect)}</strong> to collect in cash
-        <span class="hint">(${collectNames.join(', ')})</span></span>` : ''}
+      <span><strong>${money(sum(onBalance))}</strong> off balances now
+        <span class="hint">(${onBalance.length} player${onBalance.length === 1 ? '' : 's'})</span></span>
+      ${inHand.length ? `<span><strong>${money(sum(inHand))}</strong> cash in hand
+        <span class="hint">(${inHand.map(f => f.r.display_name).join(', ')})</span></span>` : ''}
+      ${owed.length ? `<span><strong>${money(sum(owed))}</strong> still to collect
+        <span class="hint">(${owed.map(f => f.r.display_name).join(', ')})</span></span>` : ''}
       <span>Total charged <strong>${money(tot)}</strong></span>` : '';
   }
 
@@ -525,9 +570,12 @@ function recomputeKitty() {
   // two together and calling the result profit puts money in the kitty that is
   // still in somebody's pocket, so they are counted separately.
   const settles = (r) => rows.find(x => x.player_id === (r.charged_to || r.player_id)) || r;
+  // Cash still to collect. Money already in hand counts as collected, which is
+  // what the toggle on each row sets. This read the PAYER's paid flag rather
+  // than the row's, so marking a guest collected changed nothing.
   const isCash = (r) => {
     const payer = settles(r);
-    return (payer.player_type === 'outside' || payer.rate_type === 'noncontract') && !payer.paid;
+    return (payer.player_type === 'outside' || payer.rate_type === 'noncontract') && !r.paid;
   };
   const amount = (r) => Number(r.amount) || 0;
   const collected = rows.filter(r => !isCash(r)).reduce((s, r) => s + amount(r), 0);
