@@ -27,6 +27,7 @@ process.env.FMSS_DB_PATH = scratch;
 
 const { db, initSchema, DB_FILE } = await import('../server/db.js');
 const { ledgersRepo } = await import('../server/repos/ledgers.js');
+const { gameweeksRepo } = await import('../server/repos/gameweeks.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -196,6 +197,135 @@ test('a shared balance group sums its members', () => {
   const g = ledgersRepo.getGroupBalance(CONTRACT, 'grp');
   assert.equal(g.combined_present_balance, 75, '100 + 5 - 30');
   assert.equal(g.members.length, 2);
+});
+
+// --- the kitty a game owes ---------------------------------------------------
+// The pot used to be committed by a confirm() in the browser after the game had
+// already saved, so declining it left a recorded game whose money went nowhere.
+// These pin the replacement: the kitty is derived from the charges, inside the
+// same transaction, and every later correction is re-derived rather than patched.
+
+const kittyOf = (gwId) => db.prepare(
+  `SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) AS n
+   FROM kitty WHERE scope = ?`).get(gwId).n;
+
+function playGame({ pitch = 100, water = 0, players = [], ...rest }) {
+  return gameweeksRepo.create(
+    { contract_id: CONTRACT, date: '2026-02-01', cost_per_gw: pitch, game_cost: water, ...rest },
+    players);
+}
+
+test('recording a game commits its kitty in the same breath', () => {
+  const a = player('Kitty A'); const b = player('Kitty B');
+  const gw = playGame({ pitch: 100, water: 15, players: [
+    { player_id: a, amount: 40 }, { player_id: b, amount: 40 },
+  ] });
+  assert.equal(kittyOf(gw.id), 80 - 100 - 15, 'charged less pitch less water');
+});
+
+test('a game that loses money is an expense, not a negative income', () => {
+  const a = player('Thin turnout');
+  const gw = playGame({ pitch: 100, players: [{ player_id: a, amount: 40 }] });
+  const row = db.prepare('SELECT kind, amount FROM kitty WHERE id = ?').get(`k_gw_${gw.id}`);
+  assert.equal(row.kind, 'expense');
+  assert.equal(row.amount, 60, 'magnitude only — the sign lives in kind');
+});
+
+test("a guest's cash reaches the kitty when it is collected, not before", () => {
+  const host = player('Host'); const guest = player('Guest'); makeOutside(guest);
+  const gw = playGame({ pitch: 50, players: [
+    { player_id: host, amount: 40 }, { player_id: guest, amount: 35 },
+  ] });
+  assert.equal(kittyOf(gw.id), -10, 'guest cash is still in their pocket');
+
+  const chargeId = gw.charges.find(c => c.player_id === guest).id;
+  gameweeksRepo.setChargePaid(gw.id, chargeId, { paid: true });
+  assert.equal(kittyOf(gw.id), 25, 'collected — now it is club money');
+
+  gameweeksRepo.setChargePaid(gw.id, chargeId, { paid: false });
+  assert.equal(kittyOf(gw.id), -10, 'un-collecting takes it straight back out');
+});
+
+test('collecting the same cash twice still only banks it once', () => {
+  const guest = player('Repeat payer'); makeOutside(guest);
+  const gw = playGame({ pitch: 0, players: [{ player_id: guest, amount: 35 }] });
+  const chargeId = gw.charges[0].id;
+  gameweeksRepo.setChargePaid(gw.id, chargeId, { paid: true });
+  gameweeksRepo.setChargePaid(gw.id, chargeId, { paid: true });
+  assert.equal(kittyOf(gw.id), 35, 'idempotent — one collection, one entry');
+});
+
+test('a guest already marked paid on the night is banked with the game', () => {
+  const guest = player('Paid on the night'); makeOutside(guest);
+  const gw = playGame({ pitch: 20, players: [{ player_id: guest, amount: 35, paid: 1 }] });
+  assert.equal(kittyOf(gw.id), 15, 'cash in hand, counted once, not twice');
+});
+
+test('correcting a charge moves the kitty with it', () => {
+  const a = player('Rate fixed');
+  const gw = playGame({ pitch: 30, players: [{ player_id: a, amount: 40 }] });
+  assert.equal(kittyOf(gw.id), 10);
+  gameweeksRepo.applyChargeEdits(gw.id, [{ chargeId: gw.charges[0].id, newAmount: 50 }]);
+  assert.equal(kittyOf(gw.id), 20, 'the pot follows the charge it was derived from');
+});
+
+test('a typed-over figure is kept as its own adjustment, and guests still top up', () => {
+  const host = player('Override host'); const guest = player('Override guest');
+  makeOutside(guest);
+  const gw = playGame({ pitch: 100, kitty_earned: 5, kitty_override: true, players: [
+    { player_id: host, amount: 40 }, { player_id: guest, amount: 35 },
+  ] });
+  assert.equal(kittyOf(gw.id), 5, 'the number the club actually agreed on');
+  gameweeksRepo.setChargePaid(gw.id, gw.charges.find(c => c.player_id === guest).id, { paid: true });
+  assert.equal(kittyOf(gw.id), 40, 'the guest paying is on top of the correction');
+});
+
+test('an imported results sheet moves no money, so it credits no kitty', () => {
+  // Imported games record who played and nothing else — every charge is zero,
+  // with no pitch or water. Nothing may reach the pot from a participation record.
+  const a = player('Sheet row'); const b = player('Sheet row 2');
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: a, amount: 0 }, { player_id: b, amount: 0 },
+  ] });
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 0);
+});
+
+test('the score is saved with the game, not in a second call that can be lost', () => {
+  const a = player('Scorer');
+  const gw = playGame({ pitch: 10, players: [{ player_id: a, amount: 40 }],
+    result: { team_a_name: 'Reds', team_b_name: 'Blues', goals_team_a: 3, goals_team_b: 1 } });
+  const r = db.prepare('SELECT * FROM game_results WHERE gameweek_id = ?').get(gw.id);
+  assert.equal(r.result, 'a_wins');
+  assert.equal(r.goals_team_a, 3);
+});
+
+test('deleting a game takes its kitty entries with it', () => {
+  const a = player('Deleted game'); const guest = player('Deleted guest'); makeOutside(guest);
+  const gw = playGame({ pitch: 10, players: [
+    { player_id: a, amount: 40 }, { player_id: guest, amount: 35, paid: 1 },
+  ] });
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 2);
+  gameweeksRepo.remove(gw.id);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 0,
+    'no kitty row may outlive the game that justified it');
+});
+
+test('taking a player out of a game takes their money out of the kitty', () => {
+  const a = player('Stays'); const guest = player('Leaves'); makeOutside(guest);
+  const gw = playGame({ pitch: 10, players: [
+    { player_id: a, amount: 40 }, { player_id: guest, amount: 35, paid: 1 },
+  ] });
+  assert.equal(kittyOf(gw.id), 65);
+  gameweeksRepo.removeCharge(gw.id, gw.charges.find(c => c.player_id === guest).id);
+  assert.equal(kittyOf(gw.id), 30, 'the guest and their cash both go');
+});
+
+test('a historical game contributes nothing — the opening snapshot already has it', () => {
+  const a = player('Imported game');
+  const gw = { ...playGame({ pitch: 10, players: [{ player_id: a, amount: 40 }] }) };
+  db.prepare('UPDATE gameweeks SET historical = 1 WHERE id = ?').run(gw.id);
+  gameweeksRepo.applyChargeEdits(gw.id, [{ chargeId: gw.charges[0].id, newAmount: 45 }]);
+  assert.equal(kittyOf(gw.id), 0, 'historical money must never be banked twice');
 });
 
 process.on('exit', () => {

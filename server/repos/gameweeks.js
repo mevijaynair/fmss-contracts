@@ -2,8 +2,110 @@
 import { db } from '../db.js';
 import { ledgersRepo } from './ledgers.js';
 import { auditRepo } from './audit.js';
+import { gameResultsRepo } from './game_results.js';
+
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Write one derived kitty row, or remove it if it nets to nothing.
+ *
+ * The kitty stores sign in `kind` and magnitude in `amount`, so a net loss is
+ * an expense rather than a negative income. Every game-derived row carries the
+ * gameweek id in `scope`, which is what lets deleting a game take its kitty
+ * entries with it — kitty has no foreign key to cascade on.
+ *
+ * Deletes first, always: that makes every caller idempotent, so recomputing
+ * twice, or toggling a collection on and off, can never leave a duplicate or a
+ * stale row behind.
+ */
+function writeKittyRow(id, net, label, date, scope) {
+  db.prepare('DELETE FROM kitty WHERE id = ?').run(id);
+  const amount = round2(Math.abs(net));
+  if (amount < 0.01) return;
+  db.prepare(`INSERT INTO kitty (id,kind,label,amount,date,scope,historical,created_at)
+              VALUES (?,?,?,?,?,?,0,?)`)
+    .run(id, net > 0 ? 'income' : 'expense', label, amount,
+      date || new Date().toISOString().slice(0, 10), scope || '',
+      new Date().toISOString());
+}
+
+/**
+ * One guest's cash, in or out of the kitty, keyed to the charge that owes it.
+ *
+ * An out-of-contract player hands over cash rather than drawing on a prepaid
+ * balance, so the money genuinely arrives in the club's hands only when it is
+ * collected. A contract player's charge was already funded by their balance,
+ * so settling it moves nothing and belongs in the game's own entry instead.
+ *
+ * Safe to call for a charge that no longer exists — it clears the row and stops,
+ * which is what removing a player from a game needs.
+ */
+function syncGuestCashToKitty(chargeId) {
+  const row = db.prepare(`SELECT ch.*, g.date AS game_date, g.historical,
+      COALESCE(p.player_type,'regular') AS payer_type, p.name AS payer_name
+    FROM charges ch
+    JOIN gameweeks g ON g.id = ch.gameweek_id
+    LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
+    WHERE ch.id = ?`).get(chargeId);
+  const kittyId = `k_charge_${chargeId}`;
+  if (!row) { db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId); return; }
+
+  const amount = row.historical || !row.paid || row.payer_type !== 'outside'
+    ? 0 : Number(row.amount) || 0;
+  writeKittyRow(kittyId, amount,
+    `${row.payer_name || 'Guest'} paid for the game on ${row.game_date}`,
+    row.game_date, row.gameweek_id);
+}
+
+/**
+ * Rebuild every kitty entry this game owes, from the charges as they stand now.
+ *
+ * The kitty used to be committed by a confirm() dialog in the browser *after*
+ * the game had already been saved, so declining it — or closing the tab, or any
+ * error in between — left a committed game whose money never reached the pot.
+ * Deriving the entries here instead means there is no window in which the two
+ * can disagree: whatever the charges say, the kitty says.
+ *
+ * Two kinds of row, because the money arrives at two different times. Contract
+ * charges are funded from balances the club already holds, so they land with
+ * the game, net of the pitch and the water. Guest cash lands when the guest
+ * actually hands it over, which is usually later. Their sum is the game's true
+ * profit once everyone has settled.
+ *
+ * Historical games are left alone: they are already inside the opening snapshot,
+ * and crediting them again would count that money twice.
+ */
+function recomputeGameKitty(gameweekId) {
+  const gw = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(gameweekId);
+  if (!gw) return;
+
+  const charges = db.prepare(`SELECT ch.id, ch.amount,
+      COALESCE(p.player_type,'regular') AS payer_type
+    FROM charges ch LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
+    WHERE ch.gameweek_id = ?`).all(gameweekId);
+
+  let contracted = 0;
+  for (const ch of charges) {
+    if (ch.payer_type === 'outside') syncGuestCashToKitty(ch.id);
+    else contracted += Number(ch.amount) || 0;
+  }
+  // A game that becomes historical — pulled behind a closed baseline — must give
+  // its entry back rather than keep it. Writing zero is how that row is removed,
+  // so the check lands here and not as an early return that leaves it standing.
+  const pitch = Number(gw.cost_per_gw) || 0;
+  const water = Number(gw.game_cost) || 0;
+  writeKittyRow(`k_gw_${gameweekId}`,
+    gw.historical ? 0 : round2(contracted - pitch - water),
+    `Game on ${gw.date}: charged ${round2(contracted)} less pitch ${pitch}`
+    + (water ? ` and water ${water}` : ''),
+    gw.date, gameweekId);
+}
 
 export const gameweeksRepo = {
+  // Exposed for the one-off reconcile script, which rebuilds the pot from games
+  // that predate the derived entries.
+  recomputeGameKitty,
   all(contractId) {
     const sql = contractId
       ? 'SELECT * FROM gameweeks WHERE contract_id = ? ORDER BY date DESC, gw_number DESC'
@@ -73,6 +175,7 @@ export const gameweeksRepo = {
         is_captain ? 1 : 0, rate_type, amt);
     db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
       .run(this.chargeCount(gameweekId), gameweekId);
+    recomputeGameKitty(gameweekId);
     return this.get(gameweekId);
   },
 
@@ -84,27 +187,10 @@ export const gameweeksRepo = {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
     if (!row) throw new Error('Charge not found');
-    const gw = db.prepare('SELECT contract_id, date FROM gameweeks WHERE id = ?').get(gameweekId);
     db.prepare('UPDATE charges SET paid = ?, paid_at = ?, paid_method = ? WHERE id = ?')
       .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, paid ? method : null, chargeId);
 
-    // An out-of-contract player pays cash on the day rather than from a prepaid
-    // balance, so that money lands in the kitty. A contract player's charge was
-    // already funded by their balance, so settling it moves nothing.
-    // Keyed to the charge so unticking removes exactly the entry it added.
-    const kittyId = `k_charge_${chargeId}`;
-    const payerId = row.charged_to || row.player_id;
-    const payer = db.prepare('SELECT name, player_type FROM players WHERE id = ?').get(payerId);
-    const isOutside = payer?.player_type === 'outside';
-    const amount = Number(row.amount) || 0;
-
-    db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId);
-    if (paid && isOutside && amount > 0) {
-      db.prepare(`INSERT INTO kitty (id,kind,label,amount,date,historical,created_at)
-                  VALUES (?,?,?,?,?,0,?)`)
-        .run(kittyId, 'income', `${payer.name} paid for ${gw?.date || 'a game'}`,
-          amount, gw?.date || new Date().toISOString().slice(0, 10), new Date().toISOString());
-    }
+    syncGuestCashToKitty(chargeId);
     return this.get(gameweekId);
   },
 
@@ -115,6 +201,8 @@ export const gameweeksRepo = {
     db.prepare('DELETE FROM charges WHERE id = ?').run(chargeId);
     db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
       .run(this.chargeCount(gameweekId), gameweekId);
+    syncGuestCashToKitty(chargeId);   // clears the row the departed charge owned
+    recomputeGameKitty(gameweekId);
     return this.get(gameweekId);
   },
 
@@ -227,6 +315,35 @@ export const gameweeksRepo = {
       // clears the marker rather than leaving the schedule contradicting itself.
       db.prepare('DELETE FROM no_game_days WHERE contract_id = ? AND date = ?')
         .run(gw.contract_id, gw.date || now.slice(0, 10));
+
+      // The score belongs to the game, so it is written with it. It used to be a
+      // second POST after the save had returned, which meant a game could be
+      // recorded and its result quietly lost to a dropped connection.
+      const res = gw.result;
+      if (res?.team_a_name && res?.team_b_name
+        && Number.isFinite(Number(res.goals_team_a)) && Number.isFinite(Number(res.goals_team_b))) {
+        gameResultsRepo.create(db, id, res.team_a_name, res.team_b_name,
+          Number(res.goals_team_a), Number(res.goals_team_b));
+      }
+
+      // The kitty is committed here, inside the same transaction as the game, so
+      // the two can only ever succeed or fail together. It used to be a separate
+      // confirm() in the browser after the save had already gone through, which
+      // is how a game could be recorded with its money missing.
+      recomputeGameKitty(id);
+
+      // A figure typed over the calculated one is a deliberate correction — a
+      // note in someone's pocket, a discount agreed on the night. Keep it as its
+      // own one-off adjustment rather than overwriting the derived entry, so a
+      // guest settling up later still tops the kitty up on top of it.
+      if (gw.kitty_override) {
+        const derived = db.prepare(
+          `SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) AS n
+           FROM kitty WHERE scope = ?`).get(id).n;
+        writeKittyRow(`k_gwadj_${id}`, round2((Number(gw.kitty_earned) || 0) - derived),
+          `Manual adjustment to the game on ${gw.date || now.slice(0, 10)}`,
+          gw.date || now.slice(0, 10), id);
+      }
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');
@@ -255,6 +372,11 @@ export const gameweeksRepo = {
     // The water credit is a contribution keyed to this gameweek — remove it too,
     // otherwise deleting the game leaves the payer permanently in credit for it.
     db.prepare('DELETE FROM contributions WHERE id = ?').run(`c_water_${id}`);
+    // Kitty rows have no foreign key to cascade on, so the game's own entries —
+    // its profit, each guest's cash, any manual adjustment — are cleared by the
+    // scope they all carry. Missing this would leave the pot crediting a game
+    // that no longer exists.
+    db.prepare('DELETE FROM kitty WHERE scope = ?').run(id);
     db.prepare('DELETE FROM gameweeks WHERE id = ?').run(id);   // charges cascade
   },
 
@@ -332,6 +454,7 @@ export const gameweeksRepo = {
           .run(delta, charge.player_id, gameweek.contract_id);
       }
     }
+    recomputeGameKitty(gameweekId);
     return this.get(gameweekId);
   },
 
@@ -342,6 +465,7 @@ export const gameweeksRepo = {
       WHERE id=?`).run(
       scoreline || '', teams_json || null, whatsapp_message || '',
       game_cost || 0, game_cost_paid_by || 'self', kitty_earned || 0, id);
+    recomputeGameKitty(id);   // the water cost comes straight off the kitty
     return this.get(id);
   },
 

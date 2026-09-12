@@ -711,6 +711,10 @@ async function doConfirm() {
     game_cost: Number($('gdGameCost').value) || 0,
     game_cost_paid_by: $('gdCostPaidBy').value || 'self',
     kitty_earned: Number($('gdKittyEarned').value) || 0,
+    // Only a figure typed over the calculated one travels as an override. Left
+    // alone, the server derives the kitty from the charges itself, so there is
+    // no second number to drift out of step with the first.
+    kitty_override: $('gdKittyEarned').dataset.override === '1',
   };
   const charges = rows.map(r => ({
     player_id: r.player_id, team: r.team, is_captain: r.is_captain,
@@ -739,105 +743,36 @@ async function doConfirm() {
     store.players = await api.players();
   }
 
+  // The result travels with the game rather than following it in a second call,
+  // so a game can never end up saved with its score lost. The guest-introducer
+  // round-trip that used to run here is gone too: a guest is billed through
+  // charged_to, and the transactions it wrote were excluded from every balance,
+  // so they were a second set of books that moved nothing.
+  if (d.hasScore) {
+    gameweek.result = {
+      team_a_name: d.aName, team_b_name: d.bName,
+      goals_team_a: d.aGoals, goals_team_b: d.bGoals,
+    };
+  }
+
   try {
-    const gwResult = await api.createGameweek(gameweek, charges);
+    await api.createGameweek(gameweek, charges);
 
-    // Handle outside player charges with introducer credits
-    const outsidePlayers = charges.filter(c => c.player_type === 'outside' && c.introduced_by);
-    for (const outside of outsidePlayers) {
-      if (outside.outside_handling === 'relationship') {
-        await api.post(`/gameweeks/${gwResult.id}/outside-player-charge`, {
-          outside_player_id: outside.player_id,
-          introducer_id: outside.introduced_by,
-          cost: outside.outside_cost,
-        });
-      }
-    }
-
-    // Record the result from the same derived values the gameweek was created
-    // with. This used to read the team-name and goal boxes directly and rebuild
-    // the scoreline from them — now that those are auto-filled rather than typed,
-    // it wrote 0-0 over a scoreline that was already correct.
-    if (d.hasScore) {
-      await api.post(`/gameweeks/${gwResult.id}/accounting`, {
-        scoreline: `${d.aGoals}-${d.bGoals}`,
-        team_a_name: d.aName,
-        team_b_name: d.bName,
-        goals_team_a: d.aGoals,
-        goals_team_b: d.bGoals,
-        teams_json: gameweek.teams_json,
-        whatsapp_message: gameweek.whatsapp_message,
-        game_cost: gameweek.game_cost,
-        game_cost_paid_by: gameweek.game_cost_paid_by,
-        kitty_earned: gameweek.kitty_earned,
-      });
-    }
-
-    toast('Game recorded — balances deducted ✓');
-
-    // Offer to commit gameweek result to kitty
-    const contractedCharges = charges.filter(c => c.player_type !== 'outside');
-    const contractedTotal = contractedCharges.reduce((s, c) => s + c.amount, 0);
-    const pitchCost = gameweek.cost_per_gw || 0;
-    const gwProfit = contractedTotal - pitchCost;
-
-    if (contractedTotal > 0) {
-      const commitMsg = gwProfit >= 0
-        ? `Commit profit ${money(gwProfit)} to kitty? (Collected ${money(contractedTotal)} - Pitch cost ${money(pitchCost)})`
-        : `Commit loss ${money(gwProfit)} to kitty? (Collected ${money(contractedTotal)} - Pitch cost ${money(pitchCost)})`;
-
-      if (confirm(commitMsg)) {
-        try {
-          await api.createKitty({
-            kind: gwProfit >= 0 ? 'income' : 'expense',
-            amount: Math.abs(gwProfit),
-            label: `GW Result (${gameweek.date}) - Pending outside players`,
-            date: gameweek.date,
-          });
-          toast(`✓ Committed ${money(Math.abs(gwProfit))} to kitty (pending adjustments)`, false);
-        } catch (e) {
-          toast(`Could not commit to kitty: ${e.message}`, true);
-        }
-      }
-    }
+    // The kitty is committed by the server inside the same transaction as the
+    // game, so there is nothing left to ask here. This used to be a confirm()
+    // that ran after the save had already gone through: declining it, or any
+    // error in between, left the game recorded and its money nowhere.
+    toast(`Game recorded — balances deducted, ${money(gameweek.kitty_earned)} to the kitty ✓`);
 
     clearForm();
     await loadDashboard();
   } catch (e) { toast(e.message, true); }
 }
 
-// === GAMEWEEK P/L MANAGEMENT ===
-
-// Calculate P/L for a gameweek (contracted players only, before outside players pay)
-function calculateContractedPL(charges, pitchCost) {
-  const contracted = charges.filter(c => c.player_type !== 'outside');
-  const total = contracted.reduce((s, c) => s + c.amount, 0);
-  return total - pitchCost;
-}
-
-// Adjust gameweek commit when outside players pay
-async function adjustGameweekCommit(gameweekDate, actualOutsideIncome, kittyEntryId) {
-  try {
-    // First, delete the provisional entry
-    if (kittyEntryId) {
-      await api.deleteKitty(kittyEntryId);
-    }
-
-    // Then add the adjusted entry
-    await api.createKitty({
-      kind: 'income',
-      amount: actualOutsideIncome,
-      label: `GW Result Adjusted (${gameweekDate}) - Outside players paid`,
-      date: gameweekDate,
-    });
-
-    toast(`✓ Updated gameweek commit with actual outside income ${money(actualOutsideIncome)}`, false);
-    return true;
-  } catch (e) {
-    toast(`Failed to adjust commit: ${e.message}`, true);
-    return false;
-  }
-}
+// The provisional-then-adjust pair that used to live here (post a guess at the
+// profit, delete and repost it once the guests paid) is gone. Each guest's cash
+// is now its own kitty entry written when they are marked paid, so the pot tops
+// itself up and there is no provisional figure to go back and correct.
 
 function clearForm() {
   rows = [];
