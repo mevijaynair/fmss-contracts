@@ -95,13 +95,24 @@ function timelines(gws) {
 function streaks(games) {
   const decided = games.filter(g => g.outcome);
   let curW = 0, curUnbeaten = 0, bestW = 0, bestUnbeaten = 0, run = 0, runU = 0;
+  // When each run started, and the span of the best one. "Five in a row" invites
+  // the question "when?", and the answer is already in hand while walking the
+  // list — keeping it costs two variables and saves going to look.
+  let runFrom = null, runUFrom = null;
+  let bestWFrom = null, bestWTo = null, bestUFrom = null, bestUTo = null;
 
   for (const g of decided) {
-    if (g.outcome === 'win') { run++; runU++; }
-    else if (g.outcome === 'draw') { run = 0; runU++; }
-    else { run = 0; runU = 0; }
-    bestW = Math.max(bestW, run);
-    bestUnbeaten = Math.max(bestUnbeaten, runU);
+    if (g.outcome === 'win') {
+      if (run === 0) runFrom = g.date;
+      if (runU === 0) runUFrom = g.date;
+      run++; runU++;
+    } else if (g.outcome === 'draw') {
+      if (runU === 0) runUFrom = g.date;
+      run = 0; runU++;
+    } else { run = 0; runU = 0; }
+
+    if (run > bestW) { bestW = run; bestWFrom = runFrom; bestWTo = g.date; }
+    if (runU > bestUnbeaten) { bestUnbeaten = runU; bestUFrom = runUFrom; bestUTo = g.date; }
   }
   // Current run = the tail of the list.
   for (let i = decided.length - 1; i >= 0; i--) {
@@ -110,7 +121,20 @@ function streaks(games) {
   for (let i = decided.length - 1; i >= 0; i--) {
     if (decided[i].outcome === 'loss') break; else curUnbeaten++;
   }
-  return { currentWin: curW, longestWin: bestW, currentUnbeaten: curUnbeaten, longestUnbeaten: bestUnbeaten };
+  return {
+    currentWin: curW, longestWin: bestW, currentUnbeaten: curUnbeaten, longestUnbeaten: bestUnbeaten,
+    // Dates of the first and last game IN the run. A game with no recorded score
+    // sits between them without belonging to it — it breaks nothing and counts
+    // for nothing — so the span can be longer than the number of games implies.
+    longestWinFrom: bestWFrom, longestWinTo: bestWTo,
+    longestUnbeatenFrom: bestUFrom, longestUnbeatenTo: bestUTo,
+  };
+}
+
+/** "3 Aug – 27 Aug", or a single date when the run is one game. */
+function spanLabel(from, to) {
+  if (!from) return '';
+  return from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`;
 }
 
 /** Last five decided results, most recent last. */
@@ -317,12 +341,14 @@ function showLeaderboards(stats) {
       ${board('📈 Best Win Rate', 'of games with a result', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
         p => `${pct(p.winRate)} <span class="hint">${p.wins}/${p.decided}</span>`)}
-      ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
+      ${board('🔥 Longest Win Streak', 'consecutive wins, and when', 'is-win',
         [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
-        p => `${p.longestWin}${p.currentWin > 1 ? ` <span class="hint">on ${p.currentWin} now</span>` : ''}`)}
-      ${board('🛡️ Longest Unbeaten', 'wins and draws', '',
+        p => `${p.longestWin}<span class="hint"> ${esc(spanLabel(p.longestWinFrom, p.longestWinTo))}${
+  p.currentWin > 1 ? ` · on ${p.currentWin} now` : ''}</span>`)}
+      ${board('🛡️ Longest Unbeaten', 'wins and draws, and when', '',
         [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
-        p => p.longestUnbeaten)}
+        p => `${p.longestUnbeaten}<span class="hint"> ${
+  esc(spanLabel(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`)}
       ${board('👑 Best Captain Rate', 'wins as captain, of games with a result', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
         p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainDecided}${
@@ -412,8 +438,13 @@ function showPlayerDetail(p) {
     <h4 class="mini-h mt">Form &amp; streaks</h4>
     ${row('Last five', formDots(p.form))}
     ${row('Current win streak', p.currentWin || '—', 'is-win')}
-    ${row('Longest win streak', p.longestWin || '—', 'is-win')}
-    ${row('Longest unbeaten', p.longestUnbeaten || '—')}
+    ${row('Longest win streak', p.longestWin
+    ? `${p.longestWin} <span class="hint">${esc(spanLabel(p.longestWinFrom, p.longestWinTo))}</span>`
+    : '—', 'is-win')}
+    ${row('Longest unbeaten', p.longestUnbeaten
+    ? `${p.longestUnbeaten} <span class="hint">${
+      esc(spanLabel(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`
+    : '—')}
     <h4 class="mini-h mt">Goals</h4>
     ${row('Scored / conceded', `${p.gf} / ${p.ga}`)}
     ${row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`, p.gd >= 0 ? 'is-win' : '')}
