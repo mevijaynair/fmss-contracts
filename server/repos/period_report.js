@@ -94,6 +94,8 @@ export const periodReportRepo = {
       return {
         player_id: l.player_id,
         name: l.player_name,
+        player_type: l.player_type || 'regular',
+        cash_owed: round2(l.cash_owed || 0),
         present_balance: round2(l.present_balance),
         status: statusFor(l.present_balance, gamesLeft ?? 0),
         games_left: gamesLeft,
@@ -112,16 +114,28 @@ export const periodReportRepo = {
     // are dormant: nobody who has never played this contract and holds no money
     // belongs on a sheet about who owes what. Keeping them would bury the
     // eighteen names that matter under thirty that do not.
-    const squad = includeDormant
+    //
+    // Guests are held out for the same reason. This sheet is about contract
+    // credit — who is topped up, who needs a refill, how many games they have
+    // left. A guest keeps no balance and buys no games; they pay cash on the day
+    // and that is the whole of their involvement. Listing every one-off who
+    // turned up once buries the squad, and gives them a 0 balance and an "Out of
+    // contract" status that mean nothing. What they owe is counted separately
+    // and reported as guest_cash_owed.
+    const guests = rows.filter(r => r.player_type === 'outside');
+    const squad = (includeDormant
       ? rows
-      : rows.filter(r => r.present_balance !== 0 || r.played > 0 || r.last_contribution_date);
+      : rows.filter(r => r.present_balance !== 0 || r.played > 0 || r.last_contribution_date))
+      .filter(r => r.player_type !== 'outside');
     squad.sort((x, y) => x.name.localeCompare(y.name));
 
     return {
       contract_id: contractId,
       contract_name: c.name,
       period_start: from,
-      dormant_hidden: rows.length - squad.length,
+      dormant_hidden: rows.length - guests.length - squad.length,
+      guests_hidden: guests.filter(r => r.played > 0 || r.cash_owed > 0).length,
+      guest_cash_owed: round2(guests.reduce((s2, r) => s2 + r.cash_owed, 0)),
       generated_at: new Date().toISOString().slice(0, 10),
       rate,
       refill_below_games: REFILL_BELOW_GAMES,

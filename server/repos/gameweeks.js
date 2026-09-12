@@ -118,6 +118,85 @@ function recomputeGameKitty(gameweekId) {
     gw.date, gameweekId);
 }
 
+/**
+ * Read a typed score into the three places a result actually lives.
+ *
+ * A game's result is stored three times over: `score` as readable text,
+ * `scoreline` as "a-b", and a game_results row that every statistic is built
+ * from. Game Day writes all three. Editing the score from the Season panel wrote
+ * only the text, so a corrected scoreline read right on screen and counted for
+ * nothing — 20 August says "Red win 13-9" with a 0-0 scoreline and no result row
+ * at all.
+ *
+ * Accepts what a person would actually type: "13-9", "Red win 13-9", or
+ * "Red 13 - Blue 9". A named winner is believed over position, because "Blue win
+ * 7-5" means Blue scored seven no matter which team is listed first.
+ *
+ * Returns null when nothing numeric can be found, which clears the result rather
+ * than guessing — an empty score box means the game has no recorded result.
+ */
+function parseScore(raw, aName, bName) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const num = (s) => Number(String(s).replace(/\D/g, ''));
+
+  // "<team> win 13-9" / "<team> won 13 - 9"
+  const won = text.match(/([A-Za-z]+)\s*(?:win|won|wins)\s*(\d+)\s*[-–:]\s*(\d+)/i);
+  if (won) {
+    const hi = Math.max(num(won[2]), num(won[3]));
+    const lo = Math.min(num(won[2]), num(won[3]));
+    return won[1].toLowerCase() === String(bName).toLowerCase()
+      ? { a: lo, b: hi } : { a: hi, b: lo };
+  }
+  // "Red 13 - Blue 9"
+  const named = text.match(/([A-Za-z]+)\s*(\d+)\s*[-–:]\s*([A-Za-z]+)\s*(\d+)/i);
+  if (named) {
+    return named[1].toLowerCase() === String(bName).toLowerCase()
+      ? { a: num(named[4]), b: num(named[2]) }
+      : { a: num(named[2]), b: num(named[4]) };
+  }
+  // Bare "13-9", read in listed order.
+  const bare = text.match(/(\d+)\s*[-–:]\s*(\d+)/);
+  return bare ? { a: num(bare[1]), b: num(bare[2]) } : null;
+}
+
+/** The sentence a person reads, built from the numbers so the two always agree. */
+function scoreSentence(a, b, aName, bName) {
+  if (a === b) return `${aName} ${a} - ${bName} ${b} (draw)`;
+  return `${a > b ? aName : bName} win ${Math.max(a, b)}-${Math.min(a, b)}`;
+}
+
+function applyScore(gameweekId, rawScore) {
+  const existing = db.prepare('SELECT team_a_name, team_b_name FROM game_results WHERE gameweek_id = ?')
+    .get(gameweekId);
+  // Team names, in preference order: what the result already said, what the
+  // charges say, then the house colours.
+  // In the order the teams were written down, not alphabetically: the first team
+  // in the pasted message is team A, which is what every existing result row and
+  // every scoreline already assumes. Sorting by name made Blue team A and turned
+  // "13-9" into a Blue win.
+  const teams = db.prepare(
+    `SELECT team FROM charges WHERE gameweek_id = ? AND team <> ''
+     GROUP BY team ORDER BY MIN(rowid)`)
+    .all(gameweekId).map(r => r.team);
+  const aName = existing?.team_a_name || teams[0] || 'Red';
+  const bName = existing?.team_b_name || teams[1] || 'Blue';
+
+  const parsed = parseScore(rawScore, aName, bName);
+  if (!parsed) {
+    db.prepare('DELETE FROM game_results WHERE gameweek_id = ?').run(gameweekId);
+    db.prepare("UPDATE gameweeks SET score = '', scoreline = '' WHERE id = ?").run(gameweekId);
+    return null;
+  }
+
+  const { a, b } = parsed;
+  db.prepare('UPDATE gameweeks SET score = ?, scoreline = ? WHERE id = ?')
+    .run(scoreSentence(a, b, aName, bName), `${a}-${b}`, gameweekId);
+  if (existing) gameResultsRepo.update(db, gameweekId, aName, bName, a, b);
+  else gameResultsRepo.create(db, gameweekId, aName, bName, a, b);
+  return { a, b, aName, bName };
+}
+
 export const gameweeksRepo = {
   // Exposed for the one-off reconcile script, which rebuilds the pot from games
   // that predate the derived entries.
@@ -473,11 +552,33 @@ export const gameweeksRepo = {
   },
 
   // Update gameweek metadata (game_type, tournament_name, score, comments, etc.)
-  updateMetadata(id, { game_type, tournament_name, score, comments, teams_raw, captains_raw }) {
-    db.prepare(`UPDATE gameweeks SET game_type=?, tournament_name=?, score=?, comments=?, teams_raw=?, captains_raw=?
-                WHERE id=?`).run(
-      game_type ?? 'regular', tournament_name || null, score || '', comments || '',
-      teams_raw || '', captains_raw || '', id);
+  /**
+   * Change a game's descriptive fields. Only what the caller actually sent.
+   *
+   * This wrote every column unconditionally, defaulting anything absent to ''.
+   * The Season edit form sends four fields and not the pasted team message, so
+   * correcting a score silently erased the original WhatsApp text — the record
+   * of who actually played, and the only thing that can rebuild a game whose
+   * charges were mismatched. 20 August lost its text that way.
+   *
+   * The score goes through applyScore, which writes the readable sentence, the
+   * numeric scoreline and the result row that statistics are built from. Setting
+   * it here used to write the text alone, so an edited score read correctly and
+   * counted for nothing.
+   */
+  updateMetadata(id, fields = {}) {
+    const columns = ['game_type', 'tournament_name', 'comments', 'teams_raw', 'captains_raw'];
+    const sets = [];
+    const values = [];
+    for (const col of columns) {
+      if (fields[col] === undefined) continue;
+      sets.push(`${col}=?`);
+      values.push(col === 'tournament_name' ? (fields[col] || null) : (fields[col] ?? ''));
+    }
+    if (sets.length) {
+      db.prepare(`UPDATE gameweeks SET ${sets.join(', ')} WHERE id=?`).run(...values, id);
+    }
+    if (fields.score !== undefined) applyScore(id, fields.score);
     return this.get(id);
   },
 

@@ -91,6 +91,11 @@ const LAST_GAME_DATE = `(SELECT g.date FROM charges ch
 
 const SELECT = `
   SELECT l.player_id, l.contract_id, p.name AS player_name,
+         -- Whether someone is a guest decides how nearly every screen should
+         -- treat them, so it belongs on the row. The /ledgers route patched it
+         -- in afterwards, which meant anything calling this repo directly — the
+         -- Standing sheet among them — could not tell a guest from a member.
+         COALESCE(p.player_type, 'regular') AS player_type,
          l.opening_balance, l.status,
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,

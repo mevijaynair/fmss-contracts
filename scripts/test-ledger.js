@@ -28,6 +28,7 @@ process.env.FMSS_DB_PATH = scratch;
 const { db, initSchema, DB_FILE } = await import('../server/db.js');
 const { ledgersRepo } = await import('../server/repos/ledgers.js');
 const { gameweeksRepo } = await import('../server/repos/gameweeks.js');
+const { periodReportRepo } = await import('../server/repos/period_report.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -390,6 +391,66 @@ test('switching a collected charge back to a balance does not leave it looking p
   assert.equal(charge.paid, 0, 'collected is a question only cash can answer');
   assert.equal(balanceOf(p), 460, 'it comes off the balance instead');
   assert.equal(kittyOf(gw.id), 40, 'still 40 in the pot, now from the balance');
+});
+
+// --- editing a game afterwards ----------------------------------------------
+
+test('editing the score writes the result stats are built from', () => {
+  const a = player('Reds', 500); const b = player('Blues', 500);
+  const gw = playGame({ pitch: 0, teams_raw: 'Red: Reds / Blue: Blues', players: [
+    { player_id: a, amount: 0, team: 'Red' }, { player_id: b, amount: 0, team: 'Blue' },
+  ] });
+  const read = () => ({
+    ...db.prepare('SELECT score, scoreline, teams_raw FROM gameweeks WHERE id = ?').get(gw.id),
+    result: db.prepare('SELECT goals_team_a a, goals_team_b b, result FROM game_results WHERE gameweek_id = ?').get(gw.id),
+  });
+
+  gameweeksRepo.updateMetadata(gw.id, { score: '13-9' });
+  let r = read();
+  assert.equal(r.score, 'Red win 13-9', 'the sentence is derived, not typed');
+  assert.equal(r.scoreline, '13-9');
+  assert.equal(r.result.result, 'a_wins', 'and the stats row exists');
+
+  // A named winner beats position: "Blue win 7-5" is seven to Blue, whichever
+  // team happens to be listed first.
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Blue win 7-5' });
+  r = read();
+  assert.equal(r.scoreline, '5-7');
+  assert.equal(r.result.result, 'b_wins');
+
+  gameweeksRepo.updateMetadata(gw.id, { score: '' });
+  assert.equal(read().result, undefined, 'clearing the box clears the result');
+});
+
+test('editing a game keeps the fields the form did not send', () => {
+  // The Season form sends four fields. Writing every column and defaulting the
+  // absent ones to '' erased the pasted team message — the only record of who
+  // actually played, and 20 August lost its copy that way.
+  const a = player('Kept', 500);
+  const gw = playGame({ pitch: 0, teams_raw: 'Red: the original message', players: [
+    { player_id: a, amount: 10, team: 'Red' },
+  ] });
+  gameweeksRepo.updateMetadata(gw.id, { score: '3-1', comments: 'windy' });
+  const g = db.prepare('SELECT teams_raw, comments FROM gameweeks WHERE id = ?').get(gw.id);
+  assert.equal(g.teams_raw, 'Red: the original message', 'untouched fields stay untouched');
+  assert.equal(g.comments, 'windy');
+});
+
+test('the Standing sheet is the squad, not every guest who turned up once', () => {
+  const member = player('Squad member', 300);
+  const guest = player('One-off guest'); makeOutside(guest);
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: member, amount: 32 }, { player_id: guest, amount: 40 },
+  ] });
+  const rep = periodReportRepo.report(CONTRACT, { since: '2000-01-01' });
+  assert.ok(rep.rows.some(r => r.player_id === member), 'members are listed');
+  assert.ok(!rep.rows.some(r => r.player_id === guest), 'guests are not');
+  // Other tests above left guests owing on this same scratch contract, so the
+  // total is the contract's, not this game's — what matters is that the guest
+  // who was hidden from the sheet is still counted in it.
+  assert.ok(rep.guest_cash_owed >= 40, 'what they owe is still counted, separately');
+  assert.ok(rep.rows.every(r => r.player_type !== 'outside'), 'no guest reaches the sheet');
+  assert.ok(gw.id);
 });
 
 test('the score is saved with the game, not in a second call that can be lost', () => {
