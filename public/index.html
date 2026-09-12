@@ -101,6 +101,7 @@
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Game Day — paste WhatsApp teams</h3>
               <span class="seg" id="gdContractSeg"></span></div>
+            <div id="gdFixture"></div>
             <p class="hint">Paste the team message from WhatsApp, then Parse. Review the auto-detected
               players, teams, captains and per-player cost — edit anything — then Confirm to deduct balances.</p>
             <textarea id="gdText" class="wa-input"
@@ -121,44 +122,45 @@
               </table>
             </div>
             <h4 class="mini-h" style="margin-top:1.6rem">Game details</h4>
-            <p class="hint" style="margin:0 0 0.8rem">Date, result and costs. These do not change what anyone is charged.</p>
             <div class="form-row">
               <div class="form-group"><label>Date</label><input type="date" id="gdDate"></div>
-              <div class="form-group"><label>Contract # (optional)</label><input type="number" id="gdContractNo" min="0" placeholder="e.g. 8"></div>
+              <div class="form-group"><label>Score <span class="hint">— just the numbers</span></label>
+                <input type="text" id="gdScore" placeholder="e.g. 7-5" inputmode="numeric">
+                <p class="hint" data-gd-scorenote style="margin:0.3rem 0 0"></p></div>
             </div>
             <div class="form-row mt">
-              <div class="form-group"><label>Score / Result</label><input type="text" id="gdScore" placeholder="e.g. Reds win 7-5"></div>
-              <div class="form-group"><label>Comments</label><input type="text" id="gdComments" placeholder="optional"></div>
+              <div class="form-group"><label>Water (AED)</label>
+                <input type="number" id="gdGameCost" step="0.5" min="0" value="15"></div>
+              <div class="form-group"><label>Paid by</label>
+                <select id="gdCostPaidBy"><option value="self">Me (Vijay)</option></select></div>
             </div>
+            <p class="hint" data-gd-kittynote style="margin:0.8rem 0 0"></p>
 
-            <!-- Game Accounting Section -->
-            <div style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px; border-left: 4px solid var(--accent);">
-              <div style="color: var(--accent); font-weight: 600; margin-bottom: 0.5rem;">💰 Game Accounting</div>
-
-              <!-- Team Scores -->
+            <details class="gd-more">
+              <summary>Anything else — notes, a contract number, a hand-set kitty figure</summary>
+              <div class="form-row mt">
+                <div class="form-group"><label>Notes</label>
+                  <input type="text" id="gdComments" placeholder="optional"></div>
+                <div class="form-group"><label>Contract #</label>
+                  <input type="number" id="gdContractNo" min="0" placeholder="auto"></div>
+              </div>
+              <div class="form-group"><label>Kitty earned (AED)</label>
+                <input type="number" id="gdKittyEarned" step="0.5" placeholder="auto">
+                <p class="hint" style="margin:0.3rem 0 0">Worked out for you above. Only set this if the real figure differs.</p></div>
+              <div class="form-group"><label>Full WhatsApp message</label>
+                <textarea id="gdGameMessage" placeholder="Optional — keeps the original text on the record" style="font-size:0.9rem; height:3rem;"></textarea></div>
+              <!-- Team names and goals are worked out from the score and the parsed
+                   teams. Kept as fields so an odd game can still be corrected by
+                   hand, but nobody should have to fill four boxes for "7-5". -->
               <div class="form-row">
-                <div class="form-group"><label>Team A Name</label><input type="text" id="gdTeamAName" placeholder="e.g. Red, Team 1"></div>
-                <div class="form-group"><label>Team A Goals</label><input type="number" id="gdTeamAGoals" min="0" placeholder="0"></div>
+                <div class="form-group"><label>Team A</label><input type="text" id="gdTeamAName" placeholder="auto"></div>
+                <div class="form-group"><label>Goals</label><input type="number" id="gdTeamAGoals" min="0" placeholder="auto"></div>
               </div>
               <div class="form-row">
-                <div class="form-group"><label>Team B Name</label><input type="text" id="gdTeamBName" placeholder="e.g. Blue, Team 2"></div>
-                <div class="form-group"><label>Team B Goals</label><input type="number" id="gdTeamBGoals" min="0" placeholder="0"></div>
+                <div class="form-group"><label>Team B</label><input type="text" id="gdTeamBName" placeholder="auto"></div>
+                <div class="form-group"><label>Goals</label><input type="number" id="gdTeamBGoals" min="0" placeholder="auto"></div>
               </div>
-
-              <!-- Costs & Kitty -->
-              <div class="form-row">
-                <div class="form-group"><label>Water Cost (AED)</label><input type="number" id="gdGameCost" step="0.5" min="0" value="15" placeholder="15"></div>
-                <div class="form-group"><label>Who Paid Water Cost</label>
-                  <select id="gdCostPaidBy">
-                    <option value="self">Me (Vijay)</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-group"><label>Kitty Earned (AED) — calculated profit, editable</label><input type="number" id="gdKittyEarned" step="0.5" placeholder="auto"><p class="hint" data-gd-kittynote></p></div>
-
-              <!-- Game Message -->
-              <div class="form-group"><label>Game Message (optional)</label><textarea id="gdGameMessage" placeholder="Store elaborate WhatsApp details..." style="font-size: 0.9rem; height: 3rem;"></textarea></div>
-            </div>
+            </details>
 
             <div class="preview-foot">
               <div>

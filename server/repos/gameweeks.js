@@ -210,6 +210,11 @@ export const gameweeksRepo = {
             gw.date || now.slice(0, 10),
             `Bought the water for the game on ${gw.date || now.slice(0, 10)}`, now);
       }
+      // Deciding later that a game did happen after all is a normal correction.
+      // The date cannot be both played and not played, so recording the game
+      // clears the marker rather than leaving the schedule contradicting itself.
+      db.prepare('DELETE FROM no_game_days WHERE contract_id = ? AND date = ?')
+        .run(gw.contract_id, gw.date || now.slice(0, 10));
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');

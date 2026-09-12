@@ -217,6 +217,86 @@ async function showUnmatchedMapping(unmatched) {
 
 // Mark unidentified/outside players inline via dropdown (removed dialog prompts)
 
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const dayOf = (iso) => DAYS[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+const pretty = (iso) => `${dayOf(iso)} ${new Date(`${iso}T00:00:00Z`).getUTCDate()} ${
+  ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][new Date(`${iso}T00:00:00Z`).getUTCMonth()]}`;
+
+/**
+ * Which fixture is being entered. The date box alone cannot answer "what do I
+ * do next?", so this names the oldest date nothing has been said about and
+ * offers the only two answers there are: it was played, or it was not.
+ *
+ * Dates already marked as no-game stay listed, because deciding a week later
+ * that a game did happen is a normal correction, not an edge case.
+ */
+async function renderFixture() {
+  const host = $('gdFixture');
+  if (!host) return;
+  let s;
+  try { s = await api.schedule(contractId); }
+  catch { host.innerHTML = ''; return; }
+  if (!s.game_days?.length) { host.innerHTML = ''; return; }
+
+  const missing = s.days.filter(d => d.state === 'missing');
+  const skipped = s.days.filter(d => d.state === 'no_game');
+  const next = s.next_missing;
+
+  // Pre-fill the date so the common case needs no input at all.
+  const dateBox = $('gdDate');
+  if (dateBox && !dateBox.dataset.touched) dateBox.value = next || today();
+
+  const options = [
+    ...missing.map(d => `<option value="${d.date}" ${d.date === next ? 'selected' : ''}>${pretty(d.date)} — nothing recorded</option>`),
+    ...skipped.map(d => `<option value="${d.date}">${pretty(d.date)} — marked no game</option>`),
+  ].join('');
+
+  host.innerHTML = `
+    <div class="gd-fixture">
+      ${next ? `
+        <div class="gd-fixture-lead">
+          <span class="hint">Next to account for</span>
+          <strong>${pretty(next)}</strong>
+        </div>
+        <div class="gd-fixture-actions">
+          <button class="btn btn-secondary btn-sm" id="gdNoGame">No game that day</button>
+        </div>`
+      : `<div class="gd-fixture-lead"><span class="hint">Every fixture up to today is accounted for.</span></div>`}
+      ${options ? `
+        <label class="gd-fixture-pick">
+          <span class="hint">Entering</span>
+          <select id="gdFixturePick" style="width:auto; display:inline-block;">
+            ${options}
+            <option value="">Another date…</option>
+          </select>
+        </label>` : ''}
+    </div>
+    <p class="hint" data-gd-reopen style="margin:0.4rem 0 0.8rem"></p>`;
+
+  $('gdNoGame')?.addEventListener('click', async () => {
+    const reason = prompt(`No game on ${pretty(next)}?\n\nWhy not? (optional)`);
+    if (reason === null) return;
+    try {
+      await api.markNoGame(contractId, next, reason.trim() || null);
+      toast(`${pretty(next)} marked as no game`);
+      renderFixture();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  $('gdFixturePick')?.addEventListener('change', (e) => {
+    const picked = e.target.value;
+    const note = document.querySelector('[data-gd-reopen]');
+    if (!picked) { if (note) note.textContent = 'Pick any date in the box below.'; return; }
+    if (dateBox) { dateBox.value = picked; dateBox.dataset.touched = '1'; }
+    const wasSkipped = skipped.some(d => d.date === picked);
+    if (note) {
+      note.textContent = wasSkipped
+        ? `${pretty(picked)} was marked as no game — confirming a game here will undo that.`
+        : '';
+    }
+  });
+}
+
 /**
  * What confirming will actually do to this row — the question the preview was
  * silently not answering, since every row said "pending" whatever its fate.
@@ -537,18 +617,59 @@ async function doParse() {
   } catch (e) { toast(e.message, true); }
 }
 
+/**
+ * Fill in what the score and the parsed teams already imply, so "7-5" does not
+ * have to be retyped into four more boxes. Anything set by hand wins.
+ */
+function derivedGame() {
+  const teams = parseResult?.teams || [];
+  const scoreText = ($('gdScore')?.value || '').trim();
+  const m = scoreText.match(/(\d+)\s*[-–—:]\s*(\d+)/);
+  const typed = (id) => {
+    const v = $(id)?.value;
+    return v === '' || v === undefined || v === null ? null : v;
+  };
+  return {
+    aName: typed('gdTeamAName') ?? teams[0] ?? 'A',
+    bName: typed('gdTeamBName') ?? teams[1] ?? 'B',
+    aGoals: Number(typed('gdTeamAGoals') ?? (m ? m[1] : 0)) || 0,
+    bGoals: Number(typed('gdTeamBGoals') ?? (m ? m[2] : 0)) || 0,
+    hasScore: !!m,
+  };
+}
+
+/** Say out loud what the single score box was understood to mean. */
+function showScoreNote() {
+  const note = document.querySelector('[data-gd-scorenote]');
+  if (!note) return;
+  const d = derivedGame();
+  const raw = ($('gdScore')?.value || '').trim();
+  note.textContent = !raw
+    ? 'Leave blank if it was not recorded.'
+    : d.hasScore
+      ? `${d.aName} ${d.aGoals} — ${d.bName} ${d.bGoals}${d.aGoals === d.bGoals ? ' (draw)'
+        : ` · ${d.aGoals > d.bGoals ? d.aName : d.bName} win`}`
+      : 'Could not read a score from that — enter it as two numbers, like 7-5.';
+}
+
 async function doConfirm() {
   if (!rows.length) return;
+  const d = derivedGame();
   const gameweek = {
     contract_id: contractId,
     date: $('gdDate').value || today(),
     contract_number: Number($('gdContractNo').value) || 0,
     cost_per_gw: store.contracts.find(c => c.id === contractId)?.cost_per_gw || 0,
     teams_raw: $('gdText').value.trim(),
-    score: $('gdScore').value.trim(),
+    // A readable result built from the one score box, rather than asking for the
+    // same thing again in words.
+    score: d.hasScore
+      ? (d.aGoals === d.bGoals
+        ? `${d.aName} ${d.aGoals} - ${d.bName} ${d.bGoals} (draw)`
+        : `${d.aGoals > d.bGoals ? d.aName : d.bName} win ${Math.max(d.aGoals, d.bGoals)}-${Math.min(d.aGoals, d.bGoals)}`)
+      : $('gdScore').value.trim(),
     comments: $('gdComments').value.trim(),
-    // New game accounting fields
-    scoreline: `${Number($('gdTeamAGoals').value) || 0}-${Number($('gdTeamBGoals').value) || 0}`,
+    scoreline: `${d.aGoals}-${d.bGoals}`,
     teams_json: JSON.stringify(rows.map(r => ({ player_id: r.player_id, team: r.team }))),
     whatsapp_message: $('gdGameMessage').value.trim(),
     game_cost: Number($('gdGameCost').value) || 0,
@@ -597,18 +718,17 @@ async function doConfirm() {
       }
     }
 
-    // If team scores provided, record the game result
-    const teamAName = $('gdTeamAName').value.trim();
-    const teamBName = $('gdTeamBName').value.trim();
-    const goalsA = Number($('gdTeamAGoals').value) || 0;
-    const goalsB = Number($('gdTeamBGoals').value) || 0;
-    if (teamAName && teamBName) {
+    // Record the result from the same derived values the gameweek was created
+    // with. This used to read the team-name and goal boxes directly and rebuild
+    // the scoreline from them — now that those are auto-filled rather than typed,
+    // it wrote 0-0 over a scoreline that was already correct.
+    if (d.hasScore) {
       await api.post(`/gameweeks/${gwResult.id}/accounting`, {
-        scoreline: `${goalsA}-${goalsB}`,
-        team_a_name: teamAName,
-        team_b_name: teamBName,
-        goals_team_a: goalsA,
-        goals_team_b: goalsB,
+        scoreline: `${d.aGoals}-${d.bGoals}`,
+        team_a_name: d.aName,
+        team_b_name: d.bName,
+        goals_team_a: d.aGoals,
+        goals_team_b: d.bGoals,
         teams_json: gameweek.teams_json,
         whatsapp_message: gameweek.whatsapp_message,
         game_cost: gameweek.game_cost,
@@ -691,10 +811,17 @@ function clearForm() {
   $('gdCostPaidBy').value = 'self';
   $('gdGameCost').value = '15'; // Reset to default water cost
   $('gdPreviewCard').hidden = true;
+  // Release the date so the next fixture can prefill it again, and re-read the
+  // schedule — the game just entered is no longer outstanding.
+  delete $('gdDate').dataset.touched;
+  showScoreNote();
+  renderFixture();
 }
 
 export function initGameday() {
-  contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => { contractId = id; recalcTotal(); });
+  contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
+    contractId = id; recalcTotal(); renderFixture();
+  });
   $('gdDate').value = today();
   $('gdGameCost').value = '15'; // Default water cost
 
@@ -717,13 +844,20 @@ export function initGameday() {
   // The water cost feeds the profit, so a change to it should flow through.
   $('gdGameCost')?.addEventListener('input', () => recomputeKitty());
 
+  $('gdScore').addEventListener('input', showScoreNote);
+  // A date the user set themselves must not be overwritten by the next fixture.
+  $('gdDate').addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
   $('gdConfirm').addEventListener('click', doConfirm);
   $('gdClear').addEventListener('click', clearForm);
+  showScoreNote();
 }
 
 export function loadGameday() {
   // Keep the contract segment in sync if contracts loaded after init.
-  contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => { contractId = id; recalcTotal(); });
+  contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
+    contractId = id; recalcTotal(); renderFixture();
+  });
+  renderFixture();
 
   // Arriving from "Enter this game" on the season schedule: prefill the date
   // being caught up on, rather than making it be retyped and risking today's
