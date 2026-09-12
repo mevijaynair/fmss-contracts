@@ -284,12 +284,22 @@ header { display: flex; justify-content: space-between; align-items: flex-end; m
 .mt { margin-top: 1.1rem; }
 
 label { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; }
-input, select, textarea { background-color: var(--bg-main); border: 1px solid var(--border-strong);
+/* Checkboxes and radios are excluded deliberately. This rule is for fields you
+   type or choose in, and its width:100% plus padding and border was stretching
+   every checkbox in the app to the full width of its container — a ~98px empty
+   bordered box with a tick adrift inside it, pushing any adjacent label text out
+   of its own box. A checkbox should keep the size the browser gives it. */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  background-color: var(--bg-main); border: 1px solid var(--border-strong);
   color: var(--text-main); padding: 0.58rem 0.72rem; border-radius: 9px; font-size: 0.9rem; width: 100%;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
-input:focus, select:focus, textarea:focus { border-color: var(--sport); outline: none;
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
+  border-color: var(--sport); outline: none;
   background: var(--bg-card); box-shadow: 0 0 0 3px var(--sport-ring); }
+/* Keep a visible focus ring on the ones excluded above. */
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+  outline: 2px solid var(--sport); outline-offset: 2px; }
 
 .btn { background: var(--sport-grad); color: #fff; padding: 0.58rem 1.15rem; border: none;
   border-radius: 9px; font-weight: 600; font-size: 0.88rem; cursor: pointer;
@@ -756,15 +766,21 @@ tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 
 /* --- Search + filter bar (players ledger). Wraps instead of forcing 4 fixed
        columns, which overflowed a 375px viewport. --- */
-.filter-bar { display: grid; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border-color);
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+/* Flex, not grid: the bar holds five controls of genuinely different natural
+   widths — a search field, three dropdowns and a nowrap checkbox label. Equal
+   grid tracks squeezed the label below its own text, which then escaped the box
+   and collided with the field beside it. Flex lets each take what it needs and
+   wrap when there is no room. */
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+  margin-bottom: 1rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color); }
+.filter-bar > input { flex: 2 1 220px; }
+.filter-bar > select { flex: 1 1 150px; }
 .filter-bar > input, .filter-bar > select { min-width: 0; padding: 0.5rem;
   border: 1px solid var(--border-color); border-radius: 6px;
   background: var(--bg-card); color: var(--text-main); font: inherit; font-size: 0.88rem; }
 .filter-bar > input:focus, .filter-bar > select:focus { outline: none;
   border-color: var(--sport); box-shadow: 0 0 0 3px var(--focus); }
-@media (min-width: 900px) { .filter-bar { grid-template-columns: 2fr 1fr 1fr 1fr; } }
 
 /* --- Layout utilities --- */
 .header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
@@ -829,7 +845,10 @@ body.role-player .role-admin-only { display: none !important; }
 
 .guest-toggle { display: flex; align-items: center; gap: 0.45rem; cursor: pointer;
   padding: 0.5rem 0.7rem; border-radius: 6px; font-size: 0.85rem; white-space: nowrap;
-  color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border-color); }
+  color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border-color);
+  /* Never shrink below the label text: it does not wrap, so any squeeze pushes
+     the words outside the box and over whatever sits beside it. */
+  flex: 0 0 auto; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
 
