@@ -52,7 +52,7 @@ for (const r of empty) {
 // The figures that must not move. If pruning changes either of these, the rows
 // were not as empty as the query claimed and the whole thing is rolled back.
 const totals = () => Object.fromEntries(
-  db.prepare('SELECT contract_id FROM contracts').all().map(c => [
+  db.prepare('SELECT id FROM contracts').all().map(c => [
     c.id,
     Math.round(ledgersRepo.forContract(c.id)
       .reduce((s, l) => s + l.present_balance, 0) * 100) / 100,
