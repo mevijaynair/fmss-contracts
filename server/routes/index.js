@@ -780,8 +780,12 @@ r.get('/dashboard', wrap((req) => {
 
     const credit = ledgers.filter(l => l.present_balance > 0)
       .reduce((s, l) => s + l.present_balance, 0);
-    const debt = ledgers.filter(l => l.present_balance < 0)
-      .reduce((s, l) => s + l.present_balance, 0);
+    // As an amount owed, not as a signed balance. This summed the negatives and
+    // handed back a negative, so a contract card read "Owed to club  −405" —
+    // which says the club is owed minus four hundred — while the headline KPI
+    // took Math.abs of the same figure and read 2,360. One word, two signs.
+    const debt = Math.abs(ledgers.filter(l => l.present_balance < 0)
+      .reduce((s, l) => s + l.present_balance, 0));
 
     // Only chase people it makes sense to chase. A sandbox account, or someone
     // who has never played and sits at exactly zero, is dormant rather than at
@@ -826,7 +830,7 @@ r.get('/dashboard', wrap((req) => {
   });
 
   const creditHeld = round2(perContract.reduce((s, c) => s + c.credit, 0));
-  const owed = round2(Math.abs(perContract.reduce((s, c) => s + c.debt, 0)));
+  const owed = round2(perContract.reduce((s, c) => s + c.debt, 0));
   const kitty = kittyRepo.balance();
 
   return {

@@ -86,6 +86,15 @@ async function start() {
     if (fn) Promise.resolve(fn()).catch(err => toast(err.message, true));
   });
 
+  // Any button can send you to a view. The screens that are no longer in the
+  // sidebar — Standing, Player Logins, Transfers, Sandbox — are reached this
+  // way, from the screen each belongs to. Delegated, so buttons rendered later
+  // work without being wired individually.
+  document.addEventListener('click', (e) => {
+    const go = e.target.closest('[data-goto]');
+    if (go) showView(go.dataset.goto);
+  });
+
   $('modalClose').addEventListener('click', closeModal);
   document.querySelector('#modal .modal-overlay').addEventListener('click', closeModal);
 

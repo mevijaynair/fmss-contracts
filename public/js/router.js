@@ -2,6 +2,15 @@
 // Grouped by the job being done, not by what the screen is called. A flat list
 // of thirteen nouns made "which of these is about money?" a question you had to
 // answer by memory — nine of them are.
+// Thirteen destinations is more than anyone holds in their head, and four of
+// them were things you visit once a season or never: PINs, transfer approvals, a
+// test-player sandbox, and a report that is the Players ledger in a shareable
+// shape. They are still reachable — `hidden` keeps a view routable without
+// giving it a permanent line in the sidebar — but they are reached from the
+// screen they belong to rather than competing with Game Day for attention.
+//
+// What is left is grouped by the job: what you do on a match night, where the
+// money is, and the once-in-a-while admin.
 const ADMIN_NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
 
@@ -12,16 +21,19 @@ const ADMIN_NAV = [
 
   { group: 'Money' },
   { view: 'players',       label: 'Players',       title: 'Player Ledger' },
-  { view: 'report',        label: 'Standing',      title: 'Credit Tracking — the sheet players see' },
-  { view: 'contributions', label: 'Contributions', title: 'Contributions' },
+  { view: 'contributions', label: 'Contributions', title: 'Money in, and money moved' },
   { view: 'kitty',         label: 'Kitty',         title: 'Club Kitty' },
   { view: 'events',        label: 'Programmes',    title: 'Programmes — events, tours and dinners' },
 
   { group: 'Running it' },
   { view: 'settings',      label: 'Settings',      title: 'Contract Settings & Admin' },
-  { view: 'logins',        label: 'Player Logins', title: 'Player Logins' },
-  { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers' },
-  { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment' },
+
+  // Reachable, not listed. Each is linked from the screen it belongs to:
+  // Standing from Players, the rest from Settings.
+  { view: 'report',        label: 'Standing',      title: 'Credit Tracking — the sheet players see', hidden: true },
+  { view: 'logins',        label: 'Player Logins', title: 'Player Logins', hidden: true },
+  { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers', hidden: true },
+  { view: 'sandbox',       label: 'Sandbox',       title: 'Test Environment', hidden: true },
 ];
 
 const PLAYER_NAV = [
@@ -64,7 +76,9 @@ export function buildNav(role = 'admin') {
   currentNav = items.filter(n => n.view);
 
   const nav = document.getElementById('nav');
-  nav.innerHTML = items.map(n => n.group
+  // `hidden` entries stay routable above but are not drawn — they are reached
+  // from the screen they belong to.
+  nav.innerHTML = items.filter(n => !n.hidden).map(n => n.group
     ? `<div class="nav-group">${n.group}</div>`
     : `<button data-view="${n.view}">${ICONS[n.view] || ''}<span>${n.label}</span></button>`
   ).join('');

@@ -837,6 +837,10 @@ tr.row-alert > td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 
 /* Hidden for non-admins; main.js puts role-player on <body>. */
 body.role-player .role-admin-only { display: none !important; }
+/* And the mirror: a card that only makes sense on a player's own screen. An
+   admin was being shown a Send money form that renders for players only, so the
+   heading offered something the empty box below it could not do. */
+body.role-admin .role-player-only { display: none !important; }
 
 .form-run { display: inline-flex; gap: 0.2rem; }
 .form-dot { width: 1.15rem; height: 1.15rem; border-radius: 4px; font-size: 0.66rem;

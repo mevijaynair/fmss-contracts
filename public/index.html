@@ -191,6 +191,10 @@
             <div class="card-header"><h3 class="card-title">Player Ledger</h3>
               <div style="display:flex; gap:0.6rem; align-items:center;">
                 <span class="seg" id="plContractSeg"></span>
+                <!-- Standing is this same ledger in the shape the club shares, so
+                     it belongs beside it rather than as its own destination. -->
+                <button class="btn btn-secondary btn-sm" data-goto="report"
+                  title="The same balances, laid out as the sheet you send round">Standing sheet</button>
                 <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
               </div></div>
             <div style="overflow-x:auto;">
@@ -236,7 +240,7 @@
           </div>
           <!-- Money that moves without a game: the pot paying somebody, somebody
                paying into it, or credit moved between two players. -->
-          <div class="sams-card">
+          <div class="sams-card role-admin-only">
             <div class="card-header"><h3 class="card-title">Move money</h3>
               <span class="card-sub">Between a player and the kitty, or between two players</span></div>
             <form id="moveForm">
@@ -333,10 +337,26 @@
               <span class="card-sub">Take the whole database offline, or load it back</span></div>
             <div id="backupPanel"></div>
           </div>
+          <!-- The screens that used to sit in the sidebar all year for the sake of
+               being used once a season. Still here, just not in the way. -->
+          <div class="sams-card role-admin-only">
+            <div class="card-header"><h3 class="card-title">Other admin screens</h3>
+              <span class="card-sub">Needed now and then, not every week</span></div>
+            <div class="quick-row">
+              <button class="btn btn-secondary" data-goto="logins">Player Logins</button>
+              <button class="btn btn-secondary" data-goto="transfers">Transfer approvals</button>
+              <button class="btn btn-secondary" data-goto="sandbox">Sandbox</button>
+            </div>
+            <p class="hint">Player Logins issues and resets PINs. Transfer approvals is where a
+              player's request to send money to someone else is signed off — moving money yourself
+              is quicker from Contributions. Sandbox creates throwaway players in the live
+              database for testing; delete them when you are done.</p>
+          </div>
         </section>
 
         <!-- PLAYER LOGINS (admin) -->
         <section class="view" data-view="logins" hidden>
+            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="settings">← back to Settings</button></p>
           <div class="sams-card">
             <div class="card-header">
               <h3 class="card-title">Player Logins</h3>
@@ -357,6 +377,7 @@
 
         <!-- EXTERNAL EVENTS (admin) — restaurant bills, venue costs, etc. -->
         <section class="view" data-view="report" hidden>
+            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="players">← back to Players</button></p>
           <div id="reportRoot"></div>
         </section>
 
@@ -367,6 +388,7 @@
         <!-- OPENING BALANCES (admin) — import initial balances for a contract (1 Aug baseline) -->
         <!-- SANDBOX (admin only) — test players for safe balance testing -->
         <section class="view" data-view="sandbox" hidden>
+            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="settings">← back to Settings</button></p>
           <div class="sams-card">
             <div id="sandboxContainer"></div>
           </div>
@@ -374,12 +396,28 @@
 
         <!-- TRANSFERS (both) — player-to-player kitty transfers -->
         <section class="view" data-view="transfers" hidden>
-          <div class="sams-card">
+            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="settings">← back to Settings</button></p>
+          <!-- The form inside this card renders for players only; an admin sees an
+               empty box under a heading offering to do something it will not do.
+               Say whose screen this is, and point an admin at the tool that
+               actually moves money. "Another player's kitty" also predates the
+               club having a real kitty — it means their balance. -->
+          <div class="sams-card role-player-only">
             <div class="card-header">
-              <h3 class="card-title">Transfers</h3>
-              <span class="card-sub">Send money to another player's kitty</span>
+              <h3 class="card-title">Send money</h3>
+              <span class="card-sub">Move some of your balance to another player</span>
             </div>
             <div id="transferFormContainer"></div>
+          </div>
+          <div class="sams-card role-admin-only">
+            <div class="card-header">
+              <h3 class="card-title">Transfer approvals</h3>
+              <span class="card-sub">Requests from players, waiting to be signed off</span>
+            </div>
+            <p class="hint">Only a player's own request lands here. To move money yourself —
+              between two people, or in and out of the kitty — use
+              <button class="link-btn" data-goto="contributions">Contributions → Move money</button>,
+              which applies straight away.</p>
           </div>
           <div class="sams-card" style="margin-top: 1.5rem;">
             <h4 class="card-title" id="transfersListTitle">Pending Transfers (Admin)</h4>

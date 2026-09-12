@@ -63,7 +63,8 @@ export async function loadDashboard() {
                       : '<span class="hint">none</span>'}</span></div>
         <div class="kv"><span class="k">Games in last 30 days</span><span class="v">${c.games_30d}</span></div>
         <div class="kv"><span class="k">Held in credit</span><span class="v">${balCell(c.credit)}</span></div>
-        <div class="kv"><span class="k">Owed to club</span><span class="v">${balCell(c.debt)}</span></div>
+        <div class="kv"><span class="k">Owed to club</span><span class="v">${
+  c.debt > 0 ? `<span class="bal neg">${money(c.debt)}</span>` : '<span class="bal zero">0</span>'}</span></div>
         <div class="kv"><span class="k">Already in debt</span><span class="v">${
           c.in_debt_count ? `<span class="tag tag-critical">${c.in_debt_count}</span>` : '0'}</span></div>
         <div class="kv"><span class="k">Under 2 games of credit</span><span class="v">${
