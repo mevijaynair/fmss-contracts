@@ -123,6 +123,16 @@ r.post('/admin/bulk-import/players-and-balances', wrap((req) => {
   const { contract_id, data } = req.body;
   if (!contract_id || !data) throw new Error('contract_id and data required');
 
+  // This route sets opening balances too, so a closed baseline has to stop it
+  // as well — guarding only the other import would leave the door open.
+  const baseline = ledgersRepo.baselineState(contract_id);
+  if (baseline.is_closed && req.body.force !== true) {
+    throw new Error(
+      `The ${contract_id} baseline was closed on ${String(baseline.closed_at).slice(0, 10)} and its opening balances are final. ` +
+      'Reopen it first if these figures genuinely need to change.'
+    );
+  }
+
   const lines = data.trim().split('\n').filter(l => l.trim());
   let created = 0, updated = 0;
 
@@ -1057,6 +1067,22 @@ r.get('/admin/transfers', wrap((req) => {
   ).all(status, Number(req.query.limit) || 100);
 }));
 
+// ---- baseline closure: opening balances agreed and final ----
+r.get('/admin/baseline/:contractId', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.baselineState(req.params.contractId);
+}));
+
+r.post('/admin/baseline/:contractId/close', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.closeBaseline(req.params.contractId);
+}));
+
+r.post('/admin/baseline/:contractId/reopen', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.reopenBaseline(req.params.contractId);
+}));
+
 // ---- opening balances (1 Aug baseline per contract) ----
 
 // Admin: import opening balances for a contract (bulk from CSV or manual entry).
@@ -1066,7 +1092,8 @@ r.post('/admin/opening-balances/import', wrap((req) => {
   if (!contract_id || !balances?.length) {
     throw new Error('contract_id and balances array required');
   }
-  return openingBalancesRepo.importBalances(db, playersRepo, contract_id, balances);
+  return openingBalancesRepo.importBalances(db, playersRepo, contract_id, balances,
+    { force: req.body.force === true });
 }));
 
 // Admin: get current opening balances for a contract (for verification).

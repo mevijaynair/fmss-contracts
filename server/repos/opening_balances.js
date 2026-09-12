@@ -4,9 +4,20 @@ import { ledgersRepo } from './ledgers.js';
 export const openingBalancesRepo = {
   // Bulk import opening balances for a contract. Creates/updates ledger records.
   // payload: { contract_id, balances: [{name, balance}] }
-  importBalances(db, playersRepo, contractId, balances) {
+  importBalances(db, playersRepo, contractId, balances, { force = false } = {}) {
     if (!contractId || !balances?.length) {
       throw new Error('contract_id and balances array required');
+    }
+
+    // A closed baseline is a set of figures somebody has signed off. Replacing
+    // them wholesale should take a deliberate act, not an import that happens to
+    // name the same contract.
+    const state = ledgersRepo.baselineState(contractId);
+    if (state.is_closed && !force) {
+      throw new Error(
+        `The ${contractId} baseline was closed on ${String(state.closed_at).slice(0, 10)} and its opening balances are final. ` +
+        'Reopen it first if these figures genuinely need to change.'
+      );
     }
 
     const results = { imported: 0, skipped: 0, errors: [] };

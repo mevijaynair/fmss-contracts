@@ -136,6 +136,42 @@ export const ledgersRepo = {
     db.prepare(`INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status)
                 VALUES (?,?,0,'')`).run(playerId, contractId);
   },
+  /**
+   * Close the baseline for a contract: mark every opening balance as agreed and
+   * final. After this, importing opening balances over the top is refused rather
+   * than quietly accepted — which is the point. The opening figures come from
+   * signed-off reference sheets, and the damage from a later import silently
+   * replacing them is invisible until somebody notices their balance is wrong.
+   *
+   * Reversible by design (reopenBaseline), because being unable to correct a
+   * genuine mistake is its own kind of damage. What it prevents is doing so by
+   * accident.
+   */
+  closeBaseline(contractId) {
+    const at = new Date().toISOString();
+    const info = db.prepare(
+      `UPDATE ledgers SET is_opening_balanced = 1, opening_balanced_at = ?
+       WHERE contract_id = ? AND is_opening_balanced = 0`
+    ).run(at, contractId);
+    return { contract_id: contractId, closed: info.changes, closed_at: at };
+  },
+
+  reopenBaseline(contractId) {
+    const info = db.prepare(
+      `UPDATE ledgers SET is_opening_balanced = 0, opening_balanced_at = NULL
+       WHERE contract_id = ?`
+    ).run(contractId);
+    return { contract_id: contractId, reopened: info.changes };
+  },
+
+  baselineState(contractId) {
+    const r = db.prepare(
+      `SELECT COUNT(*) total, SUM(is_opening_balanced) closed, MAX(opening_balanced_at) at
+       FROM ledgers WHERE contract_id = ?`
+    ).get(contractId);
+    return { total: r.total, closed: r.closed || 0, closed_at: r.at, is_closed: r.total > 0 && r.closed === r.total };
+  },
+
   setStatus(playerId, contractId, status) {
     this.ensure(playerId, contractId);
     db.prepare('UPDATE ledgers SET status=? WHERE player_id=? AND contract_id=?')
