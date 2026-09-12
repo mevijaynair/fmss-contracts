@@ -14,6 +14,15 @@ export const sandboxPlayersRepo = {
       `INSERT INTO players (id, name, is_sandbox, created_at)
        VALUES (?, ?, 1, ?)`
     ).run(id, name, now);
+
+    // A real player gets a ledger row per contract the moment they are created.
+    // A sandbox player did not, so the one thing they exist for — trying
+    // something out against a balance — had nowhere to happen, and they never
+    // appeared in the ledger at all.
+    for (const c of db.prepare('SELECT id FROM contracts ORDER BY sort, name').all()) {
+      db.prepare(`INSERT OR IGNORE INTO ledgers (player_id, contract_id, opening_balance, status)
+                  VALUES (?, ?, 0, '')`).run(id, c.id);
+    }
     return { id, name, is_sandbox: 1 };
   },
 

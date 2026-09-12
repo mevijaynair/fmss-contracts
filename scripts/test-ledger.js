@@ -153,6 +153,26 @@ test('a guest billed to a contract member hits that member immediately', () => {
   assert.equal(balanceOf(guest), 0);
 });
 
+test('an approved transfer moves money rather than destroying it', () => {
+  const from = player('Sends', 300);
+  const to = player('Receives', 100);
+  // The legs as the approve endpoint writes them: negative out, positive in.
+  txn(from, 'transfer_out', -50);
+  txn(to, 'transfer_in', 50);
+  assert.equal(balanceOf(from), 250);
+  assert.equal(balanceOf(to), 150);
+  assert.equal(balanceOf(from) + balanceOf(to), 400, 'the pair must still hold what it started with');
+});
+
+test('a pending transfer moves nothing until it is approved', () => {
+  const from = player('Awaiting', 300);
+  const to = player('Expecting', 100);
+  txn(from, 'transfer_out', -50, 'pending');
+  txn(to, 'transfer_in', 50, 'pending');
+  assert.equal(balanceOf(from), 300);
+  assert.equal(balanceOf(to), 100);
+});
+
 test('the identity holds for every row the repo returns', () => {
   for (const r of ledgersRepo.all()) {
     const expected = Math.round((r.opening_balance + r.contributed - r.charged + r.adjusted) * 100) / 100;

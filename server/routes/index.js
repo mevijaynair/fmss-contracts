@@ -1,6 +1,7 @@
 // routes/index.js — all FMSS API endpoints (auth required; role-based filtering).
 // Two-tier: admin sees everything, players see only their own data.
 import { Router } from 'express';
+import { randomBytes } from 'node:crypto';
 import { db } from '../db.js';
 import { contractsRepo } from '../repos/contracts.js';
 import { playersRepo } from '../repos/players.js';
@@ -991,7 +992,7 @@ r.post('/my/transfers', wrap((req) => {
   }
   // Create pending transfer transaction
   const now = new Date().toISOString();
-  const txnId = require('crypto').randomBytes(8).toString('hex');
+  const txnId = randomBytes(8).toString('hex');
   db.prepare(
     `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, related_player_id, status, created_by, created_at, updated_at)
      VALUES (?, ?, ?, 'transfer_out', ?, ?, ?, 'pending', ?, ?, ?)`
@@ -1028,17 +1029,24 @@ r.post('/admin/transfers/:txnId/approve', wrap((req) => {
 
   const now = new Date().toISOString();
   // Mark transfer_out as approved
+  // An admin signed in with the shared password has no auth_users row, so
+  // req.user.id is undefined — and node:sqlite refuses to bind undefined, which
+  // made approving a transfer fail outright.
+  const approver = req.user.id ?? null;
   db.prepare('UPDATE transactions SET status = ?, approved_by = ?, updated_at = ? WHERE id = ?')
-    .run('approved', req.user.id, now, req.params.txnId);
+    .run('approved', approver, now, req.params.txnId);
 
   // Create matching transfer_in for recipient
   db.prepare(
     `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, related_player_id, status, approved_by, created_by, created_at, updated_at)
      VALUES (?, ?, ?, 'transfer_in', ?, ?, ?, 'approved', ?, ?, ?, ?)`
   ).run(
-    require('crypto').randomBytes(8).toString('hex'),
-    txn.related_player_id, txn.contract_id, txn.amount, // positive = credit
-    txn.description, txn.player_id, req.user.id, req.user.id, now, now
+    randomBytes(8).toString('hex'),
+    // The outgoing leg is stored negative. Passing it through unchanged debited
+    // the recipient as well as the sender, so approving a transfer destroyed the
+    // money instead of moving it.
+    txn.related_player_id, txn.contract_id, Math.abs(txn.amount),
+    txn.description, txn.player_id, approver, approver, now, now
   );
 
   return { ok: true, status: 'approved' };
@@ -1052,7 +1060,7 @@ r.post('/admin/transfers/:txnId/reject', wrap((req) => {
   if (txn.status !== 'pending') throw new Error('Only pending transfers can be rejected');
 
   db.prepare('UPDATE transactions SET status = ?, approved_by = ? WHERE id = ?')
-    .run('rejected', req.user.id, req.params.txnId);
+    .run('rejected', req.user.id ?? null, req.params.txnId);
   return { ok: true, status: 'rejected' };
 }));
 
