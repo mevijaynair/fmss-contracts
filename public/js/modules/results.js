@@ -131,10 +131,21 @@ function streaks(games) {
   };
 }
 
-/** "3 Aug – 27 Aug", or a single date when the run is one game. */
-function spanLabel(from, to) {
+/**
+ * "2 May – 6 Jun", or "6 Dec 25 – 3 Jan 26" when the run crosses a year.
+ *
+ * fmtDate gives a raw ISO date, and two of those on one line pushed the player's
+ * name out of its own row — the eighth entry rendered as "8." with no name at
+ * all. The year is dropped unless the span actually needs it.
+ */
+function shortSpan(from, to) {
   if (!from) return '';
-  return from === to ? fmtDate(from) : `${fmtDate(from)} – ${fmtDate(to)}`;
+  const d = (iso) => new Date(iso);
+  const day = (iso, withYear) => d(iso).toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'short', ...(withYear ? { year: '2-digit' } : {}) });
+  const crossesYear = d(from).getFullYear() !== d(to).getFullYear();
+  if (from === to) return day(from, crossesYear);
+  return `${day(from, crossesYear)} – ${day(to, crossesYear)}`;
 }
 
 /** Last five decided results, most recent last. */
@@ -320,16 +331,24 @@ function showLeaderboards(stats) {
   // captained but cannot be won, so it belongs in neither half of a win rate.
   const capts = all.filter(p => p.captainDecided >= 2);
 
+  // fmt may return a string, or { v, meta } to put a quiet second line under the
+  // row. Anything long — a date span — belongs in meta: on one line it crowds
+  // the number and squeezes the name to nothing.
   const board = (title, sub, tone, data, fmt) => `
     <div class="sams-card">
       <div class="card-header"><h3 class="card-title">${title}</h3>
         <span class="card-sub">${sub}</span></div>
       <div class="res-board">
-        ${data.length ? data.slice(0, 8).map((p, i) => `
-          <div class="res-row" data-player="${esc(p.name)}">
+        ${data.length ? data.slice(0, 8).map((p, i) => {
+    const out = fmt(p);
+    const { v, meta } = typeof out === 'object' && out !== null ? out : { v: out, meta: '' };
+    return `
+          <div class="res-row${meta ? ' has-meta' : ''}" data-player="${esc(p.name)}">
             <span class="res-name">${i + 1}. ${esc(p.name)}</span>
-            <span class="res-val ${tone}">${fmt(p)}</span>
-          </div>`).join('')
+            <span class="res-val ${tone}">${v}</span>
+            ${meta ? `<span class="res-meta">${meta}</span>` : ''}
+          </div>`;
+  }).join('')
         : '<p class="hint">Not enough games in this period.</p>'}
       </div>
     </div>`;
@@ -341,14 +360,14 @@ function showLeaderboards(stats) {
       ${board('📈 Best Win Rate', 'of games with a result', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
         p => `${pct(p.winRate)} <span class="hint">${p.wins}/${p.decided}</span>`)}
-      ${board('🔥 Longest Win Streak', 'consecutive wins, and when', 'is-win',
+      ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
         [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
-        p => `${p.longestWin}<span class="hint"> ${esc(spanLabel(p.longestWinFrom, p.longestWinTo))}${
-  p.currentWin > 1 ? ` · on ${p.currentWin} now` : ''}</span>`)}
-      ${board('🛡️ Longest Unbeaten', 'wins and draws, and when', '',
+        p => ({ v: p.longestWin, meta: `${esc(shortSpan(p.longestWinFrom, p.longestWinTo))}${
+  p.currentWin > 1 ? ` · on ${p.currentWin} now` : ''}` }))}
+      ${board('🛡️ Longest Unbeaten', 'wins and draws', '',
         [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
-        p => `${p.longestUnbeaten}<span class="hint"> ${
-  esc(spanLabel(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`)}
+        p => ({ v: p.longestUnbeaten,
+          meta: esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo)) }))}
       ${board('👑 Best Captain Rate', 'wins as captain, of games with a result', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
         p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainDecided}${
@@ -439,11 +458,11 @@ function showPlayerDetail(p) {
     ${row('Last five', formDots(p.form))}
     ${row('Current win streak', p.currentWin || '—', 'is-win')}
     ${row('Longest win streak', p.longestWin
-    ? `${p.longestWin} <span class="hint">${esc(spanLabel(p.longestWinFrom, p.longestWinTo))}</span>`
+    ? `${p.longestWin} <span class="hint">${esc(shortSpan(p.longestWinFrom, p.longestWinTo))}</span>`
     : '—', 'is-win')}
     ${row('Longest unbeaten', p.longestUnbeaten
     ? `${p.longestUnbeaten} <span class="hint">${
-      esc(spanLabel(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`
+      esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`
     : '—')}
     <h4 class="mini-h mt">Goals</h4>
     ${row('Scored / conceded', `${p.gf} / ${p.ga}`)}
