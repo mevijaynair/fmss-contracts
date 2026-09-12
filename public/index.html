@@ -209,7 +209,7 @@
                 <thead><tr><th>Player</th><th>Status</th><th class="num">Opening</th>
                   <th class="num">Contributed</th><th class="num">Charged</th>
                   <th class="num" title="Games played">Games</th><th class="num">Balance</th>
-                  <th class="num" title="Games this balance still covers">Runway</th>
+                  <th class="num" title="How many more games this balance covers">Games<br>left</th>
                   <th></th></tr></thead>
                 <tbody></tbody>
               </table>
@@ -454,7 +454,7 @@
     <div class="modal-overlay"></div>
     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3 id="egTitle">Edit Game</h3>
+        <h3 id="egTitle">Edit charge amounts</h3>
         <button class="modal-close" id="egClose">✕</button>
       </div>
       <div class="modal-body">
@@ -485,7 +485,7 @@
               <thead>
                 <tr>
                   <th>Player</th><th>Team</th><th>Captain</th><th>Rate</th>
-                  <th class="num">Original</th><th class="num">New</th><th class="num">Delta</th><th></th>
+                  <th class="num">Was</th><th class="num">Now</th><th class="num">Change</th><th></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -494,7 +494,7 @@
         </div>
 
         <div id="egImpactPreview" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-inset); border-radius: 0.5rem; display: none;">
-          <h4 style="margin-bottom: 0.8rem;">Impact Preview</h4>
+          <h4 style="margin-bottom: 0.8rem;">What this will change</h4>
           <div id="egImpactText"></div>
         </div>
 

@@ -81,10 +81,10 @@ async function render() {
               <th class="num">#</th>
               <th>Name</th>
               <th class="num">Present<br>Balance</th>
-              <th>Contract Status<br>According to Balance</th>
-              <th class="num">Capt<br>Subsidy</th>
-              <th class="num">Deducted Amount<br>(Played in Contract)</th>
-              <th class="num">Played Count<br>(in this Contract)</th>
+              <th>Status<br>from balance</th>
+              <th class="num">Games<br>captained</th>
+              <th class="num">Charged<br>this period</th>
+              <th class="num">Games<br>played</th>
               <th class="num">Last<br>Contribution</th>
             </tr>
           </thead>
@@ -93,10 +93,11 @@ async function render() {
       </div>
 
       <p class="hint rep-key">
-        Capt Subsidy is the share of this period's games the player captained — NA until they have played.
-        Status follows runway at ${money(data.rate)} a game: under one game is out of contract,
-        under ${data.refill_below_games} needs a refill.${data.dormant_hidden
-      ? ` ${data.dormant_hidden} dormant player${data.dormant_hidden === 1 ? '' : 's'} with no balance and no games this period ${data.dormant_hidden === 1 ? 'is' : 'are'} not listed.`
+        Games captained is the share of this period's games the player led — NA until they have played.
+        Status is how many games the balance still covers at ${money(data.rate)} a game: under one
+        game is out of contract, under ${data.refill_below_games} needs a refill.${data.dormant_hidden
+      ? ` ${data.dormant_hidden} player${data.dormant_hidden === 1 ? '' : 's'} holding no money and
+         with nothing this period ${data.dormant_hidden === 1 ? 'is' : 'are'} not listed.`
       : ''}
       </p>
     </div>`;

@@ -60,7 +60,7 @@ async function renderLog() {
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
       <td>${esc(c.comments || '')}${splitNote(c)}</td>
-      <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);">📋 Seed</span>'
+      <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);" title="Came in with the opening balances — already counted there, so it cannot be edited or removed">📋 Imported</span>'
         : `<button class="link-btn" data-del="${c.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
 

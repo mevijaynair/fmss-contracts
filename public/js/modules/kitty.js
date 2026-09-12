@@ -18,7 +18,7 @@ async function render() {
       <td><span class="tag ${e.kind === 'income' ? 'tag-paid' : 'tag-overdue'}">${e.kind}</span></td>
       <td>${esc(e.label)}</td>
       <td class="num">${e.kind === 'income' ? balCell(e.amount) : `<span class="bal neg">-${money(e.amount)}</span>`}</td>
-      <td class="row-actions">${e.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);">📋 Seed</span>'
+      <td class="row-actions">${e.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);" title="Came in with the opening balances — already counted there, so it cannot be edited or removed">📋 Imported</span>'
         : `<button class="link-btn" data-del="${e.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="5" class="hint">No entries.</td></tr>';
 

@@ -584,12 +584,14 @@ async function previewImpact(gameweekId) {
     const impact = await api.get(`/gameweeks/${gameweekId}/impact?chargeEdits=${JSON.stringify(edits)}`);
     const preview = $('egImpactPreview');
     preview.style.display = 'block';
+    const diff = impact.totalDelta;
     $('egImpactText').innerHTML = `
-      <strong>${impact.changedCount} charges changed</strong><br>
-      Original total: ${money(impact.originalTotal)} AED<br>
-      New total: ${money(impact.newTotal)} AED<br>
-      Delta: ${money(impact.totalDelta)} AED<br>
-      ${impact.playerImpacts.map(pi => `<div class="hint">${pi.playerName}: ${money(pi.oldAmount)} → ${money(pi.newAmount)}</div>`).join('')}
+      <strong>${impact.changedCount} charge${impact.changedCount === 1 ? '' : 's'} would change</strong><br>
+      The game was ${money(impact.originalTotal)} and becomes ${money(impact.newTotal)} —
+      ${diff === 0 ? 'no difference overall'
+    : `${money(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'}`}.<br>
+      ${impact.playerImpacts.map(pi => `<div class="hint">${esc(pi.playerName)}: ${
+  money(pi.oldAmount)} → ${money(pi.newAmount)}</div>`).join('')}
     `;
   } catch (e) {
     toast(`Failed to calculate impact: ${e.message}`, true);
