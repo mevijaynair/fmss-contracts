@@ -34,7 +34,7 @@ export const statsRepo = {
       // Seeded historical games have no team on any charge, so they can never be
       // won or lost — only imported/parsed games carry teams.
       no_score: 0, no_team: 0,
-      gf: 0, ga: 0, captainGames: 0, captainWins: 0,
+      gf: 0, ga: 0, captainGames: 0, captainDecided: 0, captainWins: 0,
     };
 
     for (const row of rows) {
@@ -76,6 +76,7 @@ export const statsRepo = {
       }
       const wt = winningTeam(sc.winner, teams);
       const decided = sc.known && (sc.winner === 'draw' || wt);
+      if (decided && row.is_captain) r.captainDecided++;
       if (!decided) {
         r.unknown++;
         if (!sc.known) r.no_score++;
@@ -97,7 +98,12 @@ export const statsRepo = {
     r.decided = r.wins + r.draws + r.losses;
     r.winRate = r.decided ? Math.round((r.wins / r.decided) * 100) : null;
     r.gd = r.gf - r.ga;
-    r.captainWinRate = r.captainGames ? Math.round((r.captainWins / r.captainGames) * 100) : null;
+    // Only games with a result can be won, so only those may sit under a win
+    // rate. Dividing by every captained game deflated the figure by any game
+    // nobody scored — and it disagreed with the same number on the Results
+    // screen, which had already been corrected.
+    r.captainWinRate = r.captainDecided
+      ? Math.round((r.captainWins / r.captainDecided) * 100) : null;
     return r;
   },
 

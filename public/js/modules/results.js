@@ -292,7 +292,9 @@ function showPeriodBar(gws, stats) {
 function showLeaderboards(stats) {
   const all = Object.values(stats).filter(p => p.games >= minGames);
   const rated = all.filter(p => p.decided >= Math.max(3, Math.floor(minGames / 2)));
-  const capts = all.filter(p => p.captainGames >= 2);
+  // Captained games that were actually played out. A game with no score can be
+  // captained but cannot be won, so it belongs in neither half of a win rate.
+  const capts = all.filter(p => p.captainDecided >= 2);
 
   const board = (title, sub, tone, data, fmt) => `
     <div class="sams-card">
@@ -321,9 +323,12 @@ function showLeaderboards(stats) {
       ${board('🛡️ Longest Unbeaten', 'wins and draws', '',
         [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
         p => p.longestUnbeaten)}
-      ${board('👑 Best Captain Rate', '2+ games as captain', 'is-capt',
-        [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainGames - a.captainGames),
-        p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainGames}</span>`)}
+      ${board('👑 Best Captain Rate', 'wins as captain, of games with a result', 'is-capt',
+        [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
+        p => `${pct(p.captainWinRate)} <span class="hint">${p.captainWins}/${p.captainDecided}${
+  p.captainGames > p.captainDecided
+    ? ` <span title="Captained, but the game has no recorded score, so it cannot count either way">+${
+      p.captainGames - p.captainDecided} unscored</span>` : ''}</span>`)}
       ${board('⚽ Goal Difference', 'per decided game', '',
         [...rated].sort((a, b) => b.gdPerGame - a.gdPerGame),
         p => `${signed(p.gd)} <span class="hint">${signed(p.gdPerGame)}/g</span>`)}
@@ -414,7 +419,8 @@ function showPlayerDetail(p) {
     ${row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`, p.gd >= 0 ? 'is-win' : '')}
     <h4 class="mini-h mt">Captaincy</h4>
     ${row('👑 Games led', p.captainGames)}
-    ${row('Won as captain', `${p.captainWins} (${pct(p.captainWinRate)})`, 'is-win')}
+    ${row('Won as captain', `${p.captainWins} of ${p.captainDecided} played out (${
+  pct(p.captainWinRate)})`, 'is-win')}
     <h4 class="mini-h mt">Span</h4>
     ${row('First game', p.first ? fmtDate(p.first) : '—')}
     ${row('Latest game', p.last ? fmtDate(p.last) : '—')}`);

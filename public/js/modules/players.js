@@ -375,7 +375,8 @@ function formBlock(r, totalGames, billedGames, recordOnlyGames) {
       ${tile('Win rate', pct(r.winRate), 'var(--success)', r.decided ? `of ${r.decided} decided` : '')}
       ${tile('Captained', r.captainGames || 0, 'var(--sport)',
     r.captainGames
-      ? `won ${r.captainWins} of them${r.captainWinRate === null ? '' : ` · ${r.captainWinRate}%`}`
+      ? `won ${r.captainWins} of ${r.captainDecided || 0} played out${
+        r.captainWinRate === null ? '' : ` · ${r.captainWinRate}%`}`
       : 'never worn the armband')}
     </div>
     <div class="auto-grid" style="--col-min: 240px;">${results}${goals}${played}</div>
@@ -406,7 +407,8 @@ function matchRecordBlock(r) {
       ${tile('Win rate', pct(r.winRate), 'is-win')}
       ${tile('Goals for / against', `${r.gf} / ${r.ga}`)}
       ${tile('Goal difference', signed(r.gd), r.gd >= 0 ? 'is-win' : '')}
-      ${tile('Captained', r.captainGames ? `${r.captainWins}/${r.captainGames} (${pct(r.captainWinRate)})` : '—')}
+      ${tile('Captained', r.captainGames
+    ? `${r.captainWins}/${r.captainDecided || 0} (${pct(r.captainWinRate)})` : '—')}
     </div>
     ${caveat.length ? `<p class="hint mt">Rates cover the ${r.decided} game(s) with a usable
       result. Excluded: ${caveat.join(', ')}.</p>` : ''}`;
