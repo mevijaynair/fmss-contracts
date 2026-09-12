@@ -145,7 +145,7 @@ body.single-sport .sport-scoped { display: none !important; }
 .nav button:hover { background: var(--bg-subtle); color: var(--text-main); }
 .nav button:hover svg { opacity: 1; }
 .nav button.active { background: var(--sport-soft); color: var(--sport-on-soft); font-weight: 600; }
-.nav button.active svg { opacity: 1; color: var(--sport); }
+.nav button.active svg { opacity: 1; color: var(--sport-on-soft); }
 .nav button.active::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%;
   width: 3px; border-radius: 0 3px 3px 0; background: var(--sport); }
 .sidebar-foot { padding: 0.5rem 0.6rem; }
@@ -162,7 +162,7 @@ body.single-sport .sport-scoped { display: none !important; }
   background: var(--sport-grad); opacity: 0.9; }
 .topbar-lead { display: flex; align-items: center; gap: 0.8rem; min-width: 0; }
 .topbar-sport { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center;
-  background: var(--sport-soft); color: var(--sport); }
+  background: var(--sport-soft); color: var(--sport-on-soft); }
 .topbar-sport svg { width: 20px; height: 20px; }
 .topbar-titles { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .page-title { font-size: 1.14rem; font-weight: 700; letter-spacing: -0.01em; }
@@ -594,7 +594,7 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 .result-detail table { width: 100%; }
 .result-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
 .btn-edit { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 0.9rem; padding: 0 0.3rem; }
-.btn-edit:hover { color: var(--sport); }
+.btn-edit:hover { color: var(--sport-on-soft); }
 
 /* ===== Player timeline & stats ===== */
 .timeline-container { margin-bottom: 1.5rem; }
@@ -607,7 +607,7 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 .timeline-date { font-size: 0.85rem; color: var(--text-faint); }
 .timeline-type { font-weight: 500; }
 .timeline-detail { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem; }
-.timeline-balance { font-weight: 600; color: var(--sport); }
+.timeline-balance { font-weight: 600; color: var(--sport-on-soft); }
 
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
 /* The player detail panel holds a tabbed document, not a row of stat cards, so
@@ -616,7 +616,7 @@ textarea.wa-input { min-height: 150px; font-size: 0.92rem; line-height: 1.55; re
 #playerStatsGrid { display: block; }
 .stat-card { padding: 1rem; background: var(--bg-inset); border-radius: 8px; }
 .stat-label { font-size: 0.85rem; color: var(--text-faint); margin-bottom: 0.4rem; }
-.stat-value { font-size: 1.5rem; font-weight: 600; color: var(--sport); }
+.stat-value { font-size: 1.5rem; font-weight: 600; color: var(--sport-on-soft); }
 .stat-detail { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.4rem; }
 
 .tag-tournament { background: var(--warning); color: white; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
@@ -705,13 +705,12 @@ body.sport-football { --sport-on-soft: color-mix(in srgb, var(--sport) 32%, var(
 
 /* Brand wordmark — gold, uppercase, glow, like the site navbar. */
 .brand-name {
-  color: var(--sport);
+  color: var(--sport-on-soft);
   text-transform: uppercase;
   font-weight: 700;
   letter-spacing: 0.18em;
-  text-shadow: 0 0 18px rgba(255, 215, 0, 0.45);
 }
-.brand-tag { color: var(--sport); opacity: 0.75; letter-spacing: 0.12em; }
+.brand-tag { color: var(--sport-on-soft); opacity: 0.75; letter-spacing: 0.12em; }
 
 /* Tiger logo in the sidebar brand mark + login card. */
 .brand-mark { background: none !important; box-shadow: none !important;
@@ -720,11 +719,15 @@ body.sport-football { --sport-on-soft: color-mix(in srgb, var(--sport) 32%, var(
   filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.35)); }
 .login-logo { width: 76px; height: 76px; object-fit: contain; margin: 0 auto 0.9rem;
   display: block; filter: drop-shadow(0 0 12px rgba(255, 215, 0, 0.4)); }
-.login-header h1 { color: var(--sport); text-transform: uppercase; letter-spacing: 0.16em;
-  text-shadow: 0 0 18px rgba(255, 215, 0, 0.4); }
+.login-header h1 { color: var(--sport-on-soft); text-transform: uppercase;
+  letter-spacing: 0.16em; }
+/* The gold glow reads as brand on a near-black ground and as a smudge on white,
+   so it belongs to the dark theme only. */
+:root[data-theme="dark"] .login-header h1,
+:root[data-theme="dark"] .brand-name { text-shadow: 0 0 18px rgba(255, 215, 0, 0.45); }
 
 /* Topbar accent icon → gold tint. */
-.topbar-sport { background: rgba(255, 215, 0, 0.12); color: var(--sport); }
+.topbar-sport { background: rgba(255, 215, 0, 0.12); color: var(--sport-on-soft); }
 
 /* Primary buttons → solid gold with dark text, matching the site CTAs. */
 body.sport-football .btn:not(.btn-secondary) {
@@ -733,8 +736,8 @@ body.sport-football .btn:not(.btn-secondary) {
 body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-deep); }
 
 /* Active nav item → gold left-rail + gold text. */
-.nav button.active { color: var(--sport); }
-.dev-tag { color: var(--sport);
+.nav button.active { color: var(--sport-on-soft); }
+.dev-tag { color: var(--sport-on-soft);
   background: rgba(255, 215, 0, 0.1); border-color: rgba(255, 215, 0, 0.3); }
 
 /* Full-screen login overlay. main.js toggles display between none/flex; these
@@ -757,7 +760,7 @@ body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-dee
 
 /* PIN chip in the admin Player Logins table. */
 .pin-chip { display: inline-block; font-family: 'Oswald', sans-serif; font-weight: 600;
-  letter-spacing: 0.14em; font-size: 1rem; color: var(--sport);
+  letter-spacing: 0.14em; font-size: 1rem; color: var(--sport-on-soft);
   background: rgba(255, 215, 0, 0.1); border: 1px solid rgba(255, 215, 0, 0.3);
   padding: 0.1rem 0.6rem; border-radius: 7px; }
 
@@ -874,7 +877,7 @@ body.role-admin .role-player-only { display: none !important; }
    traced to the rows it became. */
 .split-note { display: inline-block; margin-left: 0.4rem; font-size: 0.72rem;
   font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; cursor: pointer;
-  color: var(--sport); background: color-mix(in srgb, var(--sport) 14%, transparent);
+  color: var(--sport-on-soft); background: color-mix(in srgb, var(--sport) 14%, transparent);
   white-space: nowrap; }
 .split-note:hover { background: color-mix(in srgb, var(--sport) 26%, transparent); }
 
@@ -884,7 +887,7 @@ body.role-admin .role-player-only { display: none !important; }
   padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; border-radius: 8px;
   background: var(--bg-subtle); border: 1px solid var(--border-color); }
 .gd-fixture-lead { display: flex; flex-direction: column; line-height: 1.3; }
-.gd-fixture-lead strong { font-size: 1.05rem; color: var(--sport); }
+.gd-fixture-lead strong { font-size: 1.05rem; color: var(--sport-on-soft); }
 .gd-fixture-actions { display: flex; gap: 0.5rem; }
 .gd-fixture-pick { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 
