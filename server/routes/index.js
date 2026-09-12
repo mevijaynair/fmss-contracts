@@ -6,6 +6,7 @@ import { contractsRepo } from '../repos/contracts.js';
 import { playersRepo } from '../repos/players.js';
 import { ledgersRepo } from '../repos/ledgers.js';
 import { gameweeksRepo } from '../repos/gameweeks.js';
+import { scheduleRepo } from '../repos/schedule.js';
 import { contributionsRepo } from '../repos/contributions.js';
 import { pendingContributionsRepo } from '../repos/contributions_pending.js';
 import { kittyRepo } from '../repos/kitty.js';
@@ -218,6 +219,27 @@ r.put('/ledgers/:playerId/:contractId/status', wrap((req) => {
   requireAdmin(req);
   ledgersRepo.setStatus(req.params.playerId, req.params.contractId, req.body.status || '');
   return ledgersRepo.get(req.params.playerId, req.params.contractId);
+}));
+
+// ---- season schedule: which fixtures are still unaccounted for ----
+r.get('/schedule/:contractId', wrap((req) => {
+  requireAdmin(req);
+  return scheduleRepo.status(req.params.contractId, req.query.upto || null);
+}));
+
+r.put('/schedule/:contractId', wrap((req) => {
+  requireAdmin(req);
+  return scheduleRepo.setConfig(req.params.contractId, req.body);
+}));
+
+r.post('/schedule/:contractId/no-game', wrap((req) => {
+  requireAdmin(req);
+  return scheduleRepo.markNoGame(req.params.contractId, req.body.date, req.body.reason || null);
+}));
+
+r.delete('/schedule/:contractId/no-game/:date', wrap((req) => {
+  requireAdmin(req);
+  return scheduleRepo.clearNoGame(req.params.contractId, req.params.date);
 }));
 
 // ---- gameweeks ----

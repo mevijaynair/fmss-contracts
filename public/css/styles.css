@@ -852,6 +852,28 @@ body.role-player .role-admin-only { display: none !important; }
 .guest-toggle input { accent-color: var(--sport); cursor: pointer; flex: none; }
 .guest-toggle .is-owing { color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); font-weight: 600; }
 
+/* --- Season schedule panel (Game History) --- */
+.sched-panel { padding: 1rem; margin-bottom: 1.2rem; border-radius: 10px;
+  background: var(--bg-subtle); border: 1px solid var(--border-color); }
+.sched-head { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: space-between;
+  align-items: baseline; margin-bottom: 0.7rem; }
+.sched-bar { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+.sched-bar > span { display: block; height: 100%; background: var(--success); transition: width 0.3s; }
+.sched-next { display: flex; flex-wrap: wrap; gap: 0.7rem; justify-content: space-between;
+  align-items: center; margin-top: 0.9rem; padding: 0.7rem 0.85rem; border-radius: 8px;
+  background: var(--bg-card); border: 1px solid var(--border-color); }
+.sched-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
+.sched-pill { font: inherit; font-size: 0.78rem; padding: 0.3rem 0.55rem; border-radius: 999px;
+  cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-muted); white-space: nowrap; transition: filter 0.14s; }
+.sched-pill:hover { filter: brightness(1.25); }
+.sched-pill.is-played { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.sched-pill.is-skipped { color: var(--text-faint); }
+/* The only state that needs chasing, so it is the only one that shouts. */
+.sched-pill.is-missing { color: var(--warning); font-weight: 600;
+  border-color: color-mix(in srgb, var(--warning) 55%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-card)); }
+
 .raw-block { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
   padding: 0.8rem; border-radius: 8px; background: var(--bg-inset);
   border: 1px solid var(--border-color); color: var(--text-muted);

@@ -606,4 +606,14 @@ export function initGameday() {
 export function loadGameday() {
   // Keep the contract segment in sync if contracts loaded after init.
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => { contractId = id; recalcTotal(); });
+
+  // Arriving from "Enter this game" on the season schedule: prefill the date
+  // being caught up on, rather than making it be retyped and risking today's
+  // date being recorded against an older fixture.
+  const pending = sessionStorage.getItem('fmss:gameDate');
+  if (pending) {
+    sessionStorage.removeItem('fmss:gameDate');
+    $('gdDate').value = pending;
+    toast(`Entering the game for ${pending}`);
+  }
 }

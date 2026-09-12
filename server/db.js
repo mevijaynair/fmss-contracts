@@ -632,6 +632,51 @@ export function initSchema() {
       }
     },
 
+    // Season schedule. A contract plays on fixed weekdays, so the dates a game
+    // SHOULD exist on are derivable — which means a missing week can be spotted
+    // instead of quietly never being entered. game_days holds JS weekday numbers
+    // (0 Sun … 6 Sat); season_start is the date tracking begins.
+    () => {
+      const cols = db.prepare('PRAGMA table_info(contracts)').all().map(c => c.name);
+      if (!cols.includes('game_days')) db.exec("ALTER TABLE contracts ADD COLUMN game_days TEXT NOT NULL DEFAULT '[]'");
+      if (!cols.includes('season_start')) db.exec('ALTER TABLE contracts ADD COLUMN season_start TEXT');
+
+      // Seed from the contract's own name rather than its id, because the id is
+      // spelled differently in different databases (mon_thu vs monthu).
+      for (const c of db.prepare('SELECT id, name, game_days, season_start FROM contracts').all()) {
+        if (c.game_days && c.game_days !== '[]' && c.season_start) continue;
+        const n = (c.name || '').toLowerCase();
+        const days = [];
+        if (/\bsun/.test(n)) days.push(0);
+        if (/\bmon/.test(n)) days.push(1);
+        if (/\btue/.test(n)) days.push(2);
+        if (/\bwed/.test(n)) days.push(3);
+        if (/\bthu/.test(n)) days.push(4);
+        if (/\bfri/.test(n)) days.push(5);
+        if (/\bsat/.test(n)) days.push(6);
+        db.prepare('UPDATE contracts SET game_days = ?, season_start = COALESCE(season_start, ?) WHERE id = ?')
+          .run(JSON.stringify(days), '2026-08-03', c.id);
+      }
+    },
+
+    // A date the fixture was not played. Without this there is no way to tell
+    // "no game that week" apart from "nobody has entered it yet", and the whole
+    // point of tracking the schedule is telling those two apart.
+    () => {
+      try {
+        db.prepare('SELECT id FROM no_game_days LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE no_game_days (
+          id TEXT PRIMARY KEY,
+          contract_id TEXT NOT NULL REFERENCES contracts(id),
+          date TEXT NOT NULL,
+          reason TEXT,
+          created_at TEXT NOT NULL
+        )`);
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_nogame_contract_date ON no_game_days(contract_id, date)');
+      }
+    },
+
     // opening_balances_snapshot.imported_by has the same flaw external_events
     // had: NOT NULL REFERENCES auth_users(id), which an admin signed in with the
     // shared password cannot satisfy. Nothing has ever written to this table,

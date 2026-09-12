@@ -32,8 +32,12 @@ export function fmtDate(d) {
 
 // Build a segmented contract switcher into `host`; calls onPick(contractId).
 export function contractSeg(host, contracts, active, onPick) {
+  // The contract's own name is already the label. This used to truncate at the
+  // first space and bolt "/Thu" back on when the id was exactly 'monthu', which
+  // rendered "Mon/Thu/Thu" on any database spelling the id that way — and did
+  // nothing at all where it is spelled 'mon_thu'.
   host.innerHTML = contracts.map(c =>
-    `<button data-id="${c.id}" class="${c.id === active ? 'active' : ''}">${esc(c.name.split(' ')[0])}${c.id === 'monthu' ? '/Thu' : ''}</button>`).join('');
+    `<button data-id="${c.id}" class="${c.id === active ? 'active' : ''}">${esc(c.name)}</button>`).join('');
   host.querySelectorAll('button').forEach(b =>
     b.addEventListener('click', () => {
       host.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));

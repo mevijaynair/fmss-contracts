@@ -101,6 +101,12 @@ export const api = {
   resetPin: (playerId) => req('POST', `/admin/logins/${playerId}/reset`, {}),
   setLoginActive: (playerId, active) => req('PUT', `/admin/logins/${playerId}/active`, { active }),
 
+  // ---- season schedule ----
+  schedule: (contractId) => req('GET', `/schedule/${contractId}`),
+  setSchedule: (contractId, patch) => req('PUT', `/schedule/${contractId}`, patch),
+  markNoGame: (contractId, date, reason) => req('POST', `/schedule/${contractId}/no-game`, { date, reason }),
+  clearNoGame: (contractId, date) => req('DELETE', `/schedule/${contractId}/no-game/${date}`),
+
   // ---- programmes (Onam nights, tours, team dinners) ----
   createEvent: (payload) => req('POST', '/admin/events', payload),
   listEvents: (q = {}) => {
