@@ -8,7 +8,9 @@ const RATE_FIELDS = [
   ['contracted_12', 'Contract rate (12-player)'],
   ['captain_10', 'Captain rate (10-player)'],
   ['captain_12', 'Captain rate (12-player)'],
-  ['noncontract', 'Non-contract rate'],
+  // Stored under the key `noncontract`; shown as what it is — what somebody
+  // outside the contract pays for a game.
+  ['noncontract', 'Guest rate'],
 ];
 
 function card(c) {

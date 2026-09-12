@@ -11,7 +11,7 @@ let parseResult = null;        // full parser result with metadata
 
 const RATE_LABEL = {
   contracted_10: 'Contract', contracted_12: 'Contract',
-  captain_10: 'Captain', captain_12: 'Captain', noncontract: 'Non-contract',
+  captain_10: 'Captain', captain_12: 'Captain', noncontract: 'Guest rate',
 };
 
 // Parse team emojis from WhatsApp message
