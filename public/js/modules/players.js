@@ -103,9 +103,12 @@ async function render() {
 
   // How many guests are being withheld, and whether any of them owe. Hiding them
   // silently would be worse than the clutter — a guest in debt still matters.
+  // A guest owes through cash_owed, not through a negative balance: they keep no
+  // prepaid balance to go into the red. This counted negative balances, which
+  // after that correction is always nobody.
   const guestRows = ledgers.filter(l => l.player_type === 'outside');
-  const guestsOwing = guestRows.filter(l => l.present_balance < 0);
-  const guestDebt = guestsOwing.reduce((a, l) => a + Math.abs(l.present_balance), 0);
+  const guestsOwing = guestRows.filter(l => (l.cash_owed || 0) > 0);
+  const guestDebt = guestsOwing.reduce((a, l) => a + (l.cash_owed || 0), 0);
 
   const tableContainer = $('playersTable').parentElement;
 
@@ -161,10 +164,15 @@ async function render() {
       lastTxnHtml = `<span style="white-space: nowrap;">${emoji} ${sign}${money(Math.abs(lastTxn.amount))} • ${formattedDate}</span>`;
     }
 
+    // A guest with cash still to collect is as much an alert as a member in the
+    // red — it is just a different kind of money, so it is flagged on its own.
+    const owed = l.cash_owed || 0;
+
     return `
-    <tr class="${l.present_balance < 0 ? 'row-alert' : ''}">
+    <tr class="${l.present_balance < 0 || owed > 0 ? 'row-alert' : ''}">
       <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}${
         l.player_type === 'outside' ? ' <span class="tag tag-due" title="Guest — not on a contract">Guest</span>' : ''}${
+        owed > 0 ? ` <span class="tag tag-due" title="Cash still to collect">to collect ${money(owed)}</span>` : ''}${
         l.balance_group_id ? ' <span class="tag tag-cashier" title="Shares a balance with another player">🔗 Shared</span>' : ''}</td>
       <td><span class="tag ${status.cls}">${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>

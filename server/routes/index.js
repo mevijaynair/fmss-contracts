@@ -359,15 +359,11 @@ r.post('/gameweeks/:id/water-cost', wrap((req) => {
   return gameFinancingRepo.create(db, req.params.id, g.contract_id, 'water_cost', payer_id, amount, notes);
 }));
 
-// Record kitty collection / provisional payment
-r.post('/gameweeks/:id/kitty', wrap((req) => {
-  requireAdmin(req);
-  const { payer_id, amount, notes } = req.body;
-  const g = gameweeksRepo.get(req.params.id);
-  if (!g) throw new Error('Gameweek not found');
-
-  return gameFinancingRepo.create(db, req.params.id, g.contract_id, 'kitty_collection', payer_id, amount, notes);
-}));
+// The kitty_collection route that stood here is gone. It filed a game's kitty
+// money into game_financing, a table no kitty or balance query reads — so the
+// pot the club actually banks and the record of collecting it were two separate
+// stories that nothing reconciled. The kitty is derived from the charges now,
+// which is the one place that money is counted.
 
 // Settle a provisional payment
 r.post('/gameweeks/:id/financing/:financing_id/settle', wrap((req) => {
@@ -1196,22 +1192,11 @@ r.get('/admin/contracts/:contractId/balance-groups/:groupId/balance', wrap((req)
   return balance;
 }));
 
-// Record outside player charge and introducer credit
-r.post('/gameweeks/:gameweekId/outside-player-charge', wrap((req) => {
-  requireAdmin(req);
-  const { outside_player_id, introducer_id, cost } = req.body;
-  const gw = gameweeksRepo.get(req.params.gameweekId);
-  if (!gw) throw new Error('Gameweek not found');
-  return outsidePlayersRepo.recordOutsidePlayerCharge(db, req.params.gameweekId, gw.contract_id, outside_player_id, introducer_id, cost || 35);
-}));
-
-// Get outside player charges for a game
-r.get('/gameweeks/:gameweekId/outside-player-charges', wrap((req) => {
-  requireAdmin(req);
-  const gw = gameweeksRepo.get(req.params.gameweekId);
-  if (!gw) throw new Error('Gameweek not found');
-  return outsidePlayersRepo.getOutsidePlayerCharges(db, req.params.gameweekId, gw.contract_id);
-}));
+// The outside-player-charge pair that stood here is gone. It wrote a debit and a
+// credit typed 'charge'/'contribution' — the two types every balance query
+// excludes, because the charges and contributions tables own them — so the rows
+// moved no money and nothing ever read them back. A guest is billed through
+// charges.charged_to, which is what actually reaches the introducer's balance.
 
 // Get introducer summary (how much they earned, how many outside players brought)
 r.get('/admin/players/:playerId/introducer-summary', wrap((req) => {

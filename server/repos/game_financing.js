@@ -29,13 +29,10 @@ export const gameFinancingRepo = {
     return result || null;
   },
 
-  // Get kitty collected for a game
-  getKittyCollected(db, gameweekId) {
-    return db.prepare(`
-      SELECT * FROM game_financing
-      WHERE gameweek_id = ? AND category = 'kitty_collection'
-    `).all(gameweekId);
-  },
+  // getKittyCollected was removed along with the route that wrote its rows. A
+  // game's kitty is derived from its charges in gameweeks.js and lives in the
+  // kitty table; recording it a second time here gave the club two figures for
+  // the same money and no rule for which one won.
 
   // Settle a provisional payment (mark as received)
   settle(db, financingId) {

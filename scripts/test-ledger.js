@@ -133,15 +133,19 @@ test('a charge lands on whoever settles it, not whoever played it', () => {
   assert.equal(balanceOf(guest), 0, 'the guest who played is not billed themselves');
 });
 
-test('an outside player paying cash is not billed until the cash is collected', () => {
+test('an outside player runs no balance — their cash never touches the ledger', () => {
   const cash = player('Pays cash', 0);
   makeOutside(cash);
   const g = game();
   charge(g, cash, 40);
-  assert.equal(balanceOf(cash), 0, 'owed to the club, not taken from a balance');
+  const owing = ledgersRepo.get(cash, CONTRACT);
+  assert.equal(owing.present_balance, 0, 'owed to the club, not taken from a balance');
+  assert.equal(owing.cash_owed, 40, 'but the club is still waiting on it');
 
-  db.prepare("UPDATE charges SET paid = 1 WHERE gameweek_id = ? AND player_id = ?").run(g, cash);
-  assert.equal(balanceOf(cash), -40, 'once collected it lands like any other charge');
+  db.prepare('UPDATE charges SET paid = 1 WHERE gameweek_id = ? AND player_id = ?').run(g, cash);
+  const settled = ledgersRepo.get(cash, CONTRACT);
+  assert.equal(settled.present_balance, 0, 'settling up must not turn a guest into a debtor');
+  assert.equal(settled.cash_owed, 0, 'nothing left to collect');
 });
 
 test('a guest billed to a contract member hits that member immediately', () => {

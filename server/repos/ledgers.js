@@ -36,15 +36,33 @@ const CONTRIB = `COALESCE((SELECT SUM(q.amount) FROM contributions q
 // control had been made to overwrite player_id instead, deleting the guest from
 // the game to move their cost.
 //
-// Unpaid charges settled by an outside player are excluded. They have no prepaid
-// balance to draw on — they hand over cash on the day — so the charge is money
-// owed to the club, not money already taken, until it is marked collected.
+// Charges an outside player settles themselves are excluded outright, paid or
+// not. They keep no prepaid balance to draw on — they hand over cash on the day,
+// and that cash goes to the kitty, not through a ledger. This used to count the
+// charge once it was marked paid, which had it exactly backwards: a guest who
+// had settled up in full showed −35 while one who still owed showed 0. Paying
+// is what made them look like a debtor. Now neither moves their balance, and
+// what they still owe is reported separately as cash_owed.
+//
+// This only applies when the guest settles their own charge. A guest billed to
+// the member who brought them is that member's cost from the moment the game is
+// recorded, because charged_to names who pays.
 const CHARGED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
   WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
     AND g.contract_id = l.contract_id AND g.historical = 0
-    AND (COALESCE(sp.player_type, 'regular') <> 'outside' OR ch.paid = 1)), 0)`;
+    AND COALESCE(sp.player_type, 'regular') <> 'outside'), 0)`;
+// Cash the club is still waiting on: an outside player's own charges, unpaid.
+// Deliberately NOT part of present_balance — it is money owed to the club, not
+// money the club holds. Reported alongside so "do I still need to collect from
+// Yash?" has an answer without a debt masquerading as a negative balance.
+const CASH_OWED = `COALESCE((SELECT SUM(ch.amount) FROM charges ch
+  JOIN gameweeks g ON g.id = ch.gameweek_id
+  LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+  WHERE COALESCE(ch.charged_to, ch.player_id) = l.player_id
+    AND g.contract_id = l.contract_id AND g.historical = 0
+    AND COALESCE(sp.player_type, 'regular') = 'outside' AND ch.paid = 0), 0)`;
 const LIFETIME_GAMES = `COALESCE((SELECT COUNT(DISTINCT ch.gameweek_id) FROM charges ch
   JOIN gameweeks g ON g.id = ch.gameweek_id
   WHERE ch.player_id = l.player_id AND g.contract_id = l.contract_id), 0)`;
@@ -70,6 +88,7 @@ const SELECT = `
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,
          ${ADJUSTED} AS adjusted,
+         ${CASH_OWED} AS cash_owed,
          ${LIFETIME_GAMES} AS games,
          ${GAMES_BILLED} AS games_billed,
          ${LAST_INCOMING} AS last_incoming_date,

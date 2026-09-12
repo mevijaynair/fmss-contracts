@@ -125,12 +125,24 @@ Expenses&#9;-5512
 
 // === MODULAR KITTY ACTIONS ===
 
-// Get pending collections (players with negative balances)
+// Money the club is waiting on, which arrives in two different shapes.
+//
+// A member in the red owes a top-up: their balance is short and they pay it in
+// as a contribution. A guest owes cash for a game they played — they keep no
+// balance to be short, so they used to appear here only because settling up
+// pushed them negative, and after that correction they would not appear at all.
+// cash_owed is what they actually owe.
 async function getPendingCollections() {
   try {
     const ledgers = await api.ledgers();
-    const negative = ledgers.filter(l => l.present_balance < 0);
-    return negative.sort((a, b) => a.present_balance - b.present_balance); // most owed first
+    const owing = ledgers
+      .map(l => ({
+        ...l,
+        owes: (l.cash_owed || 0) > 0 ? l.cash_owed : Math.max(0, -l.present_balance),
+        kind: (l.cash_owed || 0) > 0 ? 'cash' : 'topup',
+      }))
+      .filter(l => l.owes > 0);
+    return owing.sort((a, b) => b.owes - a.owes);   // most owed first
   } catch (e) {
     console.error('Failed to get pending collections:', e);
     return [];
@@ -180,7 +192,7 @@ async function renderPendingCollections() {
   const pending = await getPendingCollections();
   if (!pending.length) return;
 
-  const totalOwed = pending.reduce((s, l) => s + Math.abs(l.present_balance), 0);
+  const totalOwed = pending.reduce((s, l) => s + l.owes, 0);
 
   const html = `
     <div class="panel panel-warn">
@@ -192,8 +204,13 @@ async function renderPendingCollections() {
         ${pending.map(p => `
           <div class="panel-row">
             <strong>${esc(p.player_name)}</strong>
-            <span class="bal neg">${money(Math.abs(p.present_balance))}</span>
-            <button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${Math.abs(p.present_balance)}" title="Quick commit this amount to kitty">✓ Commit</button>
+            <span class="bal neg">${money(p.owes)}</span>
+            ${p.kind === 'cash'
+    // Marking the charge collected in Game History is what banks a guest's
+    // cash, and it credits the kitty on its own. Offering a commit button
+    // here as well would put the same 35 in the pot twice.
+    ? '<span class="hint">mark collected in Game History</span>'
+    : `<button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${p.owes}" title="Quick commit this amount to kitty">✓ Commit</button>`}
           </div>
         `).join('')}
       </div>
