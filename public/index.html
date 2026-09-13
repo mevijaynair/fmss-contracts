@@ -125,39 +125,55 @@
             <div class="card-header"><h3 class="card-title">Game day — paste WhatsApp teams</h3>
               <span class="seg" id="gdContractSeg"></span></div>
             <div id="gdFixture"></div>
-            <p class="hint">Paste the team message from WhatsApp, then Parse. Review the auto-detected
-              players, teams, captains and per-player cost — edit anything — then Confirm to deduct balances.</p>
-            <textarea id="gdText" class="wa-input"
-              placeholder="🔴 Vijay (C) Toby Rojy Prem Sikku&#10;🔵 Jithin Kartik Rakesh Shone Jeetu"></textarea>
-            <div style="display:flex; gap:0.6rem; margin-top:0.8rem;">
-              <button class="btn" id="gdParse">Parse teams</button>
-              <button class="btn btn-secondary" id="gdClear">Clear</button>
+            <!-- Paste box and the note about it side by side on a desktop: the
+                 instruction is read once and then never again, so it should not
+                 push the box you actually use further down the screen. -->
+            <div class="gd-paste">
+              <textarea id="gdText" class="wa-input"
+                placeholder="🔴 Vijay (C) Toby Rojy Prem Sikku&#10;🔵 Jithin Kartik Rakesh Shone Jeetu"></textarea>
+              <div class="gd-paste-side">
+                <p class="hint">Paste the team message from WhatsApp, then Parse. Review the
+                  auto-detected players, teams, captains and per-player cost — edit anything —
+                  then Confirm to deduct balances.</p>
+                <div class="gd-paste-actions">
+                  <button class="btn" id="gdParse">Parse teams</button>
+                  <button class="btn btn-secondary" id="gdClear">Clear</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="sams-card" id="gdPreviewCard" hidden>
             <div class="card-header"><h3 class="card-title">Charge preview</h3>
               <span class="card-sub" id="gdMeta"></span></div>
-            <div class="table-scroll" style="margin-top:1rem;">
-              <table class="sams-table" id="gdTable">
-                <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th style="text-align:center;">Charge</th><th></th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <h4 class="mini-h" style="margin-top:1.6rem">Game details</h4>
-            <div class="form-row">
-              <div class="form-group"><label>Date</label><input type="date" id="gdDate"></div>
-              <div class="form-group"><label>Score <span class="hint">— just the numbers</span></label>
-                <input type="text" id="gdScore" placeholder="e.g. 7-5" inputmode="numeric">
-                <p class="hint" data-gd-scorenote style="margin:0.3rem 0 0"></p></div>
-            </div>
-            <div class="form-row mt">
-              <div class="form-group"><label>Water (AED)</label>
-                <input type="number" id="gdGameCost" step="0.5" min="0" value="15"></div>
-              <div class="form-group"><label>Paid by</label>
-                <select id="gdCostPaidBy"><option value="self">Me (Vijay)</option></select></div>
-            </div>
-            <p class="hint" data-gd-kittynote style="margin:0.8rem 0 0"></p>
+            <!-- The players you check and the four fields you fill are two
+                 halves of one job, and stacking them meant scrolling past the
+                 whole squad to set the date, then scrolling back to see who was
+                 charged. Side by side from 1100px; stacked below that. -->
+            <div class="gd-work">
+             <div class="gd-work-main">
+              <div class="table-scroll">
+                <table class="sams-table" id="gdTable">
+                  <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th class="num">Amount</th><th style="text-align:center;">Charge</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+             </div>
+             <aside class="gd-work-side">
+              <h4 class="mini-h">Game details</h4>
+              <div class="form-row">
+                <div class="form-group"><label>Date</label><input type="date" id="gdDate"></div>
+                <div class="form-group"><label>Score <span class="hint">— just the numbers</span></label>
+                  <input type="text" id="gdScore" placeholder="e.g. 7-5" inputmode="numeric">
+                  <p class="hint" data-gd-scorenote style="margin:0.3rem 0 0"></p></div>
+              </div>
+              <div class="form-row mt">
+                <div class="form-group"><label>Water (AED)</label>
+                  <input type="number" id="gdGameCost" step="0.5" min="0" value="15"></div>
+                <div class="form-group"><label>Paid by</label>
+                  <select id="gdCostPaidBy"><option value="self">Me (Vijay)</option></select></div>
+              </div>
+              <p class="hint" data-gd-kittynote style="margin:0.8rem 0 0"></p>
 
             <details class="gd-more">
               <summary>Anything else — notes, a contract number, a hand-set kitty figure</summary>
@@ -184,8 +200,13 @@
                 <div class="form-group"><label>Goals</label><input type="number" id="gdTeamBGoals" min="0" placeholder="auto"></div>
               </div>
             </details>
+             </aside>
+            </div>
 
-            <div class="preview-foot">
+            <!-- Sticks to the bottom of the viewport while the card is taller
+                 than it: the total and the button that commits it should not be
+                 something you scroll to find. -->
+            <div class="preview-foot is-sticky">
               <div>
                 <div><span class="muted">Total charge</span> &nbsp;<span class="tot" id="gdTotal">0</span> AED
                   &nbsp;·&nbsp; <span class="hint" id="gdVsCost"></span></div>

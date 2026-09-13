@@ -999,6 +999,36 @@ body.role-admin .role-player-only { display: none !important; }
 .gd-fixture-pick { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 
 /* Everything nobody fills in on a normal night. */
+/* ===== Game day =====
+   One job in two halves: check who is being charged, then say what the game
+   cost and confirm it. Stacked, that meant scrolling past the whole squad to
+   set the date and back up again to see the effect, with the Confirm button
+   somewhere below both. */
+.gd-paste { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.gd-paste-side { display: flex; flex-direction: column; gap: 0.8rem; }
+.gd-paste-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+
+.gd-work { display: grid; gap: 1.25rem; grid-template-columns: 1fr; margin-top: 1rem; }
+.gd-work-main { min-width: 0; }
+.gd-work-side { min-width: 0; }
+
+@media (min-width: 1100px) {
+  .gd-paste { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+  .gd-paste-side { padding-top: 0.1rem; }
+
+  .gd-work { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  /* The rail is 340px, so its paired fields stack rather than squeeze. */
+  .gd-work-side .form-row { grid-template-columns: 1fr; gap: 0.8rem; }
+  .gd-work-side { position: sticky; top: 1rem;
+    background: var(--bg-inset); border: 1px solid var(--border-color);
+    border-radius: 11px; padding: 1rem 1.1rem; }
+}
+
+/* The total and the button that commits it should not be something you scroll
+   to find. Sticky only while the card is taller than the viewport. */
+.preview-foot.is-sticky { position: sticky; bottom: 0; z-index: 2;
+  box-shadow: 0 -6px 18px var(--bg-main); }
+
 .gd-more { margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 0.8rem; }
 .gd-more > summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
   list-style: none; display: flex; align-items: center; gap: 0.4rem; }
