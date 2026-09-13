@@ -14,33 +14,33 @@ const ADMIN_NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
 
   { group: 'Match night' },
-  { view: 'gameday',       label: 'Game Day',      title: 'Game Day — paste WhatsApp teams' },
+  { view: 'gameday',       label: 'Game day',      title: 'Game day — paste WhatsApp teams' },
   { view: 'gameweeks',     label: 'Season',        title: 'Season — every fixture, result and settlement' },
-  { view: 'results',       label: 'Results',       title: 'Match Results' },
+  { view: 'results',       label: 'Results',       title: 'Match results' },
 
   { group: 'Money' },
-  { view: 'players',       label: 'Players',       title: 'Player Ledger' },
+  { view: 'players',       label: 'Players',       title: 'Player ledger' },
   { view: 'contributions', label: 'Contributions', title: 'Money in, and money moved' },
-  { view: 'kitty',         label: 'Kitty',         title: 'Club Kitty' },
+  { view: 'kitty',         label: 'Kitty',         title: 'Club kitty' },
   { view: 'events',        label: 'Programmes',    title: 'Programmes — events, tours and dinners' },
 
   { group: 'Running it' },
-  { view: 'settings',      label: 'Settings',      title: 'Contract Settings & Admin' },
+  { view: 'settings',      label: 'Settings',      title: 'Contract settings & admin' },
 
   // Reachable, not listed. Each is linked from the screen it belongs to:
   // Standing from Players, the rest from Settings.
-  { view: 'report',        label: 'Standing',      title: 'Credit Tracking — the sheet players see', hidden: true },
-  { view: 'logins',        label: 'Player Logins', title: 'Player Logins', hidden: true },
-  { view: 'transfers',     label: 'Transfers',     title: 'Player Transfers', hidden: true },
+  { view: 'report',        label: 'Standing',      title: 'Credit tracking — the sheet players see', hidden: true },
+  { view: 'logins',        label: 'Player logins', title: 'Player logins', hidden: true },
+  { view: 'transfers',     label: 'Transfers',     title: 'Player transfers', hidden: true },
 ];
 
 const PLAYER_NAV = [
-  { view: 'dashboard',     label: 'Dashboard',     title: 'My Dashboard' },
-  { view: 'results',       label: 'Results',       title: 'Match Results' },
-  { view: 'players',       label: 'My Ledger',     title: 'My Account' },
-  { view: 'contributions', label: 'Contributions', title: 'My Contributions' },
-  { view: 'transfers',     label: 'Transfers',     title: 'Send Money' },
-  { view: 'settings',      label: 'Account',       title: 'Account Settings' },
+  { view: 'dashboard',     label: 'Dashboard',     title: 'My dashboard' },
+  { view: 'results',       label: 'Results',       title: 'Match results' },
+  { view: 'players',       label: 'My ledger',     title: 'My account' },
+  { view: 'contributions', label: 'Contributions', title: 'My contributions' },
+  { view: 'transfers',     label: 'Transfers',     title: 'Send money' },
+  { view: 'settings',      label: 'Account',       title: 'Account settings' },
 ];
 
 export const NAV = ADMIN_NAV;  // Export admin nav by default for compatibility

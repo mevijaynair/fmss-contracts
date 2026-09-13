@@ -393,27 +393,27 @@ function showLeaderboards(stats) {
 
   slot('results-lb').innerHTML = `
     <div class="auto-grid" style="--col-min: 250px;">
-      ${board('🎮 Most Games', 'appearances', '',
+      ${board('🎮 Most games', 'appearances', '',
         [...all].sort((a, b) => b.games - a.games), p => p.games)}
-      ${board('📈 Best Win Rate', 'games where a score was recorded', 'is-win',
+      ${board('📈 Best win rate', 'games where a score was recorded', 'is-win',
         [...rated].sort((a, b) => b.winRate - a.winRate || b.decided - a.decided),
         p => ({ v: pct(p.winRate),
           meta: `won ${p.wins} of ${p.decided} games with a score` }))}
-      ${board('🔥 Longest Win Streak', 'consecutive wins', 'is-win',
+      ${board('🔥 Longest win streak', 'consecutive wins', 'is-win',
         [...all].filter(p => p.longestWin > 1).sort((a, b) => b.longestWin - a.longestWin),
         p => ({ v: p.longestWin, meta: `${esc(shortSpan(p.longestWinFrom, p.longestWinTo))}${
   p.currentWin > 1 ? ` · on ${p.currentWin} now` : ''}` }))}
-      ${board('🛡️ Longest Unbeaten', 'wins and draws', '',
+      ${board('🛡️ Longest unbeaten', 'wins and draws', '',
         [...all].filter(p => p.longestUnbeaten > 1).sort((a, b) => b.longestUnbeaten - a.longestUnbeaten),
         p => ({ v: p.longestUnbeaten,
           meta: esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo)) }))}
-      ${board('👑 Best Captain Rate', 'games led where a score was recorded', 'is-capt',
+      ${board('👑 Best captain rate', 'games led where a score was recorded', 'is-capt',
         [...capts].sort((a, b) => b.captainWinRate - a.captainWinRate || b.captainDecided - a.captainDecided),
         p => ({ v: pct(p.captainWinRate),
           meta: `won ${p.captainWins} of ${p.captainDecided} led${
             p.captainGames > p.captainDecided
               ? ` · ${p.captainGames - p.captainDecided} had no score` : ''}` }))}
-      ${board('⚽ Goal Difference', 'per game where goals were recorded', '',
+      ${board('⚽ Goal difference', 'per game where goals were recorded', '',
         [...scored].sort((a, b) => b.gdPerGame - a.gdPerGame),
         // Ranked per game, so the per-game figure is the one in bold. Leading
         // with the total while sorting by the rate put Rony's +19 below
@@ -458,7 +458,7 @@ function showTable(stats) {
   });
 
   slot('results-table').innerHTML = `<div class="sams-card">
-    <div class="card-header"><h3 class="card-title">📋 Player Standings</h3>
+    <div class="card-header"><h3 class="card-title">📋 Player standings</h3>
       <span class="card-sub">Click a column to sort &middot; ${rows.length} player(s)</span></div>
     <div style="overflow-x:auto">
       <table class="sams-table">
@@ -533,7 +533,7 @@ function showTrends(gws) {
   const maxGames = Math.max(...series.map(s => s.games), 1);
 
   slot('results-trends').innerHTML = `<div class="sams-card">
-    <div class="card-header"><h3 class="card-title">📈 Club Trend by Quarter</h3>
+    <div class="card-header"><h3 class="card-title">📈 Club trend by quarter</h3>
       <span class="card-sub">Activity, scoring and how close the games were</span></div>
     <div style="overflow-x:auto">
       <table class="sams-table">
@@ -625,12 +625,12 @@ function showPartnerships(gws) {
   slot('results-pairs').innerHTML = `
     <div class="auto-grid" style="--col-min: 280px;">
       <div class="sams-card">
-        <div class="card-header"><h3 class="card-title">🤝 Best Partnerships</h3>
+        <div class="card-header"><h3 class="card-title">🤝 Best partnerships</h3>
           <span class="card-sub">Same side, 4+ games together</span></div>
         <div class="res-board">${list(top, 'is-win')}</div>
       </div>
       <div class="sams-card">
-        <div class="card-header"><h3 class="card-title">🧊 Struggled Together</h3>
+        <div class="card-header"><h3 class="card-title">🧊 Struggled together</h3>
           <span class="card-sub">Same floor, lowest win rate</span></div>
         <div class="res-board">${list(bottom, '')}</div>
       </div>

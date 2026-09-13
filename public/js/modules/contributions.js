@@ -94,7 +94,7 @@ async function renderPendingApprovals() {
 
   card.style.display = 'block';
   card.innerHTML = `
-    <div class="card-header"><h3 class="card-title">Pending Approvals</h3>
+    <div class="card-header"><h3 class="card-title">Pending approvals</h3>
       <span class="card-sub">${pending.length} awaiting review</span></div>
     <div style="overflow-x:auto;">
       <table class="sams-table">
@@ -307,7 +307,7 @@ function rebuildPlayerUI() {
   const view = document.querySelector('[data-view="contributions"]');
   view.innerHTML = `
     <div class="sams-card">
-      <div class="card-header"><h3 class="card-title">Submit a Contribution</h3>
+      <div class="card-header"><h3 class="card-title">Submit a contribution</h3>
         <span class="card-sub">Your submission is reviewed by the cashier before it lands on your balance</span></div>
       <form id="myContribForm">
         <div class="form-row">
@@ -327,7 +327,7 @@ function rebuildPlayerUI() {
       </form>
     </div>
     <div class="sams-card">
-      <div class="card-header"><h3 class="card-title">My Contributions</h3>
+      <div class="card-header"><h3 class="card-title">My contributions</h3>
         <span class="card-sub">Pending submissions + approved payments</span></div>
       <div style="overflow-x:auto;">
         <table class="sams-table" id="myContribTable">

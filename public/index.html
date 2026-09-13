@@ -22,12 +22,26 @@
 
   <!-- LOGIN (full-screen overlay; lives outside .shell so it shows when the shell is hidden) -->
   <section id="loginView" class="login-view" style="display:none;">
+   <div class="login-split">
+    <!-- Shown from 900px up only. On a phone the card carries the crest itself
+         and this panel is not rendered at all. -->
+    <aside class="login-panel">
+      <img src="/fmss-logo.png" alt="" class="login-panel-logo">
+      <h1 class="login-panel-name">FMSS Football Club</h1>
+      <p class="login-panel-tag">Contract fees, match results and the kitty —
+        kept in one place so the club can see where it stands.</p>
+      <p class="login-panel-foot">Monday &amp; Thursday · Saturdays</p>
+    </aside>
+    <div class="login-form-side">
     <div class="login-card">
       <div class="login-header">
         <img src="/fmss-logo.png" alt="FMSS" class="login-logo">
         <h1>FMSS</h1>
-        <p>Contract Manager</p>
+        <p>Contract manager</p>
       </div>
+      <!-- Replaces the crest-and-wordmark block once the panel beside it is
+           carrying the identity, so the club name is not announced twice. -->
+      <h2 class="login-formtitle">Sign in</h2>
       <!-- Opens on the player sign-in, because that is who nearly everyone is:
            sixty players and one admin. It used to present "Admin Password" first,
            behind a tickbox saying "I'm a player" — so every player was asked to
@@ -53,6 +67,8 @@
           Your PIN comes from the club — ask for one if you have not been given it.</p>
       </form>
     </div>
+    </div>
+   </div>
   </section>
 
   <div class="shell">
@@ -63,7 +79,7 @@
         </span>
         <span class="brand-text">
           <span class="brand-name">FMSS</span>
-          <span class="brand-tag">Contract Manager</span>
+          <span class="brand-tag">Contract manager</span>
         </span>
       </div>
       <nav class="nav" id="nav"></nav>
@@ -97,7 +113,7 @@
           <div class="kpi-strip" id="kpiStrip"></div>
           <div class="sams-grid" id="contractCards"></div>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Refill Watchlist</h3>
+            <div class="card-header"><h3 class="card-title">Refill watchlist</h3>
               <span class="card-sub">Players in the red — need a top-up</span></div>
             <div id="watchlist" class="watch-wrap"></div>
           </div>
@@ -106,7 +122,7 @@
         <!-- GAME DAY (WhatsApp parser) -->
         <section class="view" data-view="gameday" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Game Day — paste WhatsApp teams</h3>
+            <div class="card-header"><h3 class="card-title">Game day — paste WhatsApp teams</h3>
               <span class="seg" id="gdContractSeg"></span></div>
             <div id="gdFixture"></div>
             <p class="hint">Paste the team message from WhatsApp, then Parse. Review the auto-detected
@@ -120,9 +136,9 @@
           </div>
 
           <div class="sams-card" id="gdPreviewCard" hidden>
-            <div class="card-header"><h3 class="card-title">Charge Preview</h3>
+            <div class="card-header"><h3 class="card-title">Charge preview</h3>
               <span class="card-sub" id="gdMeta"></span></div>
-            <div style="overflow-x:auto; margin-top:1rem;">
+            <div class="table-scroll" style="margin-top:1rem;">
               <table class="sams-table" id="gdTable">
                 <thead><tr><th>Player</th><th>Team</th><th>Status</th><th>Rate</th><th style="text-align:right;">Amount</th><th style="text-align:center;">Charge</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -183,7 +199,7 @@
         <!-- RESULTS -->
         <section class="view" data-view="results" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Match Results</h3>
+            <div class="card-header"><h3 class="card-title">Match results</h3>
               <div class="header-actions">
                 <span class="seg" id="resContractSeg"></span>
                 <button class="btn btn-sm" id="importResultsBtn">📥 Import</button>
@@ -195,7 +211,7 @@
         <!-- PLAYERS -->
         <section class="view" data-view="players" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Player Ledger</h3>
+            <div class="card-header"><h3 class="card-title">Player ledger</h3>
               <div style="display:flex; gap:0.6rem; align-items:center;">
                 <span class="seg" id="plContractSeg"></span>
                 <!-- Standing is this same ledger in the shape the club shares, so
@@ -204,7 +220,7 @@
                   title="The same balances, laid out as the sheet you send round">Standing sheet</button>
                 <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
               </div></div>
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
               <table class="sams-table" id="playersTable">
                 <thead><tr><th>Player</th><th>Status</th><th class="num">Opening</th>
                   <th class="num">Contributed</th><th class="num">Charged</th>
@@ -230,7 +246,7 @@
         <!-- CONTRIBUTIONS -->
         <section class="view" data-view="contributions" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Add Contribution</h3>
+            <div class="card-header"><h3 class="card-title">Add contribution</h3>
               <span class="card-sub">Log an incoming payment</span></div>
             <form id="contribForm">
               <div class="form-row">
@@ -271,11 +287,11 @@
             <div id="mvLog" class="mt"></div>
           </div>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Contributions Log</h3>
+            <div class="card-header"><h3 class="card-title">Contributions log</h3>
               <div style="display:flex; gap:0.5rem; align-items:center;">
                 <select id="contribFilter" style="width:auto;"><option value="">All players</option></select>
               </div></div>
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
               <table class="sams-table" id="contribTable">
                 <thead><tr><th>Date</th><th>Player</th><th>Contract</th><th class="num">Amount</th><th>Comments</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -287,10 +303,10 @@
         <!-- GAMEWEEKS -->
         <section class="view" data-view="gameweeks" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Game History</h3>
+            <div class="card-header"><h3 class="card-title">Game history</h3>
               <span class="seg" id="gwContractSeg"></span></div>
             <div id="gwSchedule"></div>
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
               <div id="gwBulkBar" class="filter-bar" hidden>
                 <div class="hint" style="flex:1"><strong id="gwSelCount">0</strong> game(s) selected</div>
                 <button class="btn btn-danger btn-sm" id="gwBulkDelete">Delete selected</button>
@@ -307,7 +323,7 @@
         <section class="view" data-view="kitty" hidden>
           <div class="kpi-strip" id="kittyKpi"></div>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Add Kitty Entry</h3>
+            <div class="card-header"><h3 class="card-title">Add kitty entry</h3>
               <span class="card-sub">Club income or expense (BBQ, iftar, top-ups…)</span></div>
             <form id="kittyForm">
               <div class="form-row">
@@ -322,8 +338,8 @@
             </form>
           </div>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Kitty Ledger</h3></div>
-            <div style="overflow-x:auto;">
+            <div class="card-header"><h3 class="card-title">Kitty ledger</h3></div>
+            <div class="table-scroll">
               <table class="sams-table" id="kittyTable">
                 <thead><tr><th>Date</th><th>Type</th><th>Label</th><th class="num">Amount</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -335,12 +351,12 @@
         <!-- SETTINGS -->
         <section class="view" data-view="settings" hidden>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Contract Settings &amp; Rate Cards</h3>
+            <div class="card-header"><h3 class="card-title">Contract settings &amp; rate cards</h3>
               <span class="card-sub">Edit venue, cost per game and per-player rates</span></div>
             <div id="settingsCards"></div>
           </div>
           <div class="sams-card role-admin-only" id="backupCard">
-            <div class="card-header"><h3 class="card-title">Backup &amp; Restore</h3>
+            <div class="card-header"><h3 class="card-title">Backup &amp; restore</h3>
               <span class="card-sub">Take the whole database offline, or load it back</span></div>
             <div id="backupPanel"></div>
           </div>
@@ -350,7 +366,7 @@
             <div class="card-header"><h3 class="card-title">Other admin screens</h3>
               <span class="card-sub">Needed now and then, not every week</span></div>
             <div class="quick-row">
-              <button class="btn btn-secondary" data-goto="logins">Player Logins</button>
+              <button class="btn btn-secondary" data-goto="logins">Player logins</button>
               <button class="btn btn-secondary" data-goto="transfers">Transfer approvals</button>
             </div>
             <p class="hint">Player Logins issues and resets PINs. Transfer approvals is where a
@@ -364,14 +380,14 @@
             <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="settings">← back to Settings</button></p>
           <div class="sams-card">
             <div class="card-header">
-              <h3 class="card-title">Player Logins</h3>
+              <h3 class="card-title">Player logins</h3>
               <button class="btn btn-sm" id="loginsGenerate">Generate logins for all players</button>
             </div>
             <p class="hint">Every player logs in by picking their name and entering their PIN.
               Share each player's PIN with them (e.g. over WhatsApp). Players can only view their
               own balance and submit contributions — they can't edit anything.</p>
             <div id="loginsIssued" hidden></div>
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
               <table class="sams-table" id="loginsTable">
                 <thead><tr><th>Player</th><th>PIN</th><th>Status</th><th></th></tr></thead>
                 <tbody></tbody>
@@ -420,7 +436,7 @@
           </div>
           <div class="sams-card" style="margin-top: 1.5rem;">
             <h4 class="card-title" id="transfersListTitle">Pending Transfers (Admin)</h4>
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
               <table class="sams-table" id="transfersTable">
                 <thead><tr><th>From</th><th>To</th><th>Amount (AED)</th><th>Status</th><th></th></tr></thead>
                 <tbody></tbody>

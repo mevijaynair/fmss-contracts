@@ -87,35 +87,14 @@ body { background-color: var(--bg-main); color: var(--text-main); line-height: 1
 [hidden] { display: none !important; }
 body.single-sport .sport-scoped { display: none !important; }
 
-/* ===== Login ===== */
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(1200px 600px at 80% -10%, var(--sport-soft) 0%, transparent 55%),
-    radial-gradient(900px 500px at -10% 110%, var(--brand-soft) 0%, transparent 50%),
-    linear-gradient(160deg, #fbfcfe 0%, #f3f5fb 100%); }
-.login-wrap::before {
-  content: ""; position: absolute; inset: -10% -10% auto auto; width: 460px; height: 460px;
-  background: var(--sport-grad); filter: blur(60px); opacity: 0.16; border-radius: 50%;
-  pointer-events: none; }
-.login-card { position: relative; width: 100%; max-width: 400px; background: rgba(255,255,255,0.94);
-  border: 1px solid rgba(255,255,255,0.7); border-radius: 20px; padding: 2.5rem;
-  box-shadow: var(--shadow-lg); }
-.login-mark { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
-  background: var(--sport-grad); color: #fff; margin-bottom: 1.3rem;
-  box-shadow: 0 10px 26px var(--sport-ring); }
-.login-mark svg { width: 32px; height: 32px; }
-.login-title { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.03em;
-  background: var(--sport-grad); -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; }
-.login-sub { color: var(--text-muted); font-size: 0.86rem; margin-bottom: 1.85rem; }
-.login-form { display: flex; flex-direction: column; gap: 1rem; }
+/* ===== Login =====
+   A whole design's worth of rules used to sit here — .login-wrap, .login-mark,
+   .login-title, .login-sub, .login-form, .dev-panel — referenced by no markup
+   in the app, left behind when the page was rebuilt. They were not harmless:
+   the block declared its own .login-card, so there were two competing
+   definitions of the same component and the later one silently won. Removed;
+   the live rules are in the Login block further down. */
 .login-error { color: var(--danger); font-size: 0.82rem; min-height: 1rem; }
-.dev-panel { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px dashed var(--border-strong); }
-.dev-panel-head { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--text-faint); margin-bottom: 0.6rem; }
-.dev-buttons { display: flex; flex-direction: column; gap: 0.4rem; }
-.dev-buttons button { text-align: left; font-size: 0.8rem; }
 
 /* ===== Shell ===== */
 .shell { display: grid; grid-template-columns: 244px 1fr; min-height: 100vh; }
@@ -186,7 +165,20 @@ body.single-sport .sport-scoped { display: none !important; }
   transition: background 0.12s, color 0.12s, border-color 0.12s; }
 .icon-btn:hover { background: var(--sport-soft); color: var(--sport-on-soft); border-color: var(--sport-ring); }
 .icon-btn svg { width: 17px; height: 17px; }
-.content { padding: 2rem; max-width: 1180px; width: 100%; display: flex; flex-direction: column; gap: 1.5rem; }
+/* The reading column.
+   This was a flat `max-width: 1180px` inside a flex column, which meant it was
+   not centred either — on a 1920 screen the content stopped at 1424 and left
+   496px of empty ground down the right-hand side, and on a 2560 monitor over a
+   thousand. A dashboard of tables and cards is not prose; it has no line-length
+   argument for staying narrow, and the width it gives up is a column of figures
+   the cashier then has to scroll for.
+
+   So: fluid padding, a far higher ceiling, and centred once it reaches it, so
+   an ultrawide display reads as deliberate margin rather than a layout stuck to
+   the left. */
+.content { width: 100%; max-width: 1760px; margin-inline: auto;
+  padding: clamp(1.1rem, 1.5vw, 2rem) clamp(1.1rem, 2.2vw, 2.75rem);
+  display: flex; flex-direction: column; gap: clamp(1rem, 1.3vw, 1.5rem); }
 .view { display: flex; flex-direction: column; gap: 1.5rem; }
 
 /* ===== Sport hero banner (dashboard) ===== */
@@ -209,7 +201,8 @@ body.single-sport .sport-scoped { display: none !important; }
 .hero-stat .hs-l { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; font-weight: 600; }
 @media (max-width: 720px) { .sport-hero { flex-wrap: wrap; } .hero-stat { margin-left: 0; width: 100%; } }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+.grid-2 { display: grid; gap: clamp(1.1rem, 1.6vw, 2rem);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); }
 .mini-h { font-size: 0.78rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.7rem;
   text-transform: uppercase; letter-spacing: 0.05em; }
 
@@ -229,7 +222,8 @@ header { display: flex; justify-content: space-between; align-items: flex-end; m
 .tenant-badge { color: var(--text-muted); font-size: 0.8rem; font-weight: 500; }
 
 /* dashboard strip */
-.kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 0.9rem; }
+.kpi-strip { display: grid; gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); }
 .kpi { position: relative; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: var(--radius); padding: 1.15rem 1.3rem; cursor: pointer;
   box-shadow: var(--shadow-sm); transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
@@ -267,10 +261,15 @@ header { display: flex; justify-content: space-between; align-items: flex-end; m
 
 .toggle-container { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 2.5rem; }
 
-.sams-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-@media (max-width: 900px) { .sams-grid { grid-template-columns: 1fr; } }
-.span-2 { grid-column: span 2; }
-@media (max-width: 900px) { .span-2 { grid-column: span 1; } }
+/* Two columns was a fixed count, so extra width stretched two cards wider
+   instead of fitting a third. auto-fit spends it on columns; the min(100%, …)
+   keeps a single card from overflowing a narrow screen, which a bare minmax()
+   would do. Both then need no breakpoint of their own. */
+.sams-grid { display: grid; gap: clamp(1rem, 1.2vw, 1.5rem);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr)); }
+/* Full row whatever the column count — `span 2` guessed at a two-column grid
+   and would leave a gap beside itself in a three-column one. */
+.span-2 { grid-column: 1 / -1; }
 
 .sams-card { position: relative; background-color: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: var(--radius); padding: 1.75rem; display: flex; flex-direction: column; gap: 1.5rem;
@@ -320,16 +319,57 @@ input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
 .btn-sm { padding: 0.38rem 0.75rem; font-size: 0.8rem; }
 .full-w { width: 100%; }
 
+/* ===== Tables =====
+   Every figure the club acts on is read out of one of these, usually at speed
+   on a match night, so the columns have to do the work the eye would otherwise
+   do. Three things were missing and all three are about scanning:
+
+   - NUMBERS WERE LEFT-ALIGNED. .num carried tabular figures but no alignment,
+     and the table's own text-align:left then won, so a column of balances had
+     its digits ragged down the right — the one edge you compare them on.
+   - NO ROW BANDING. Eight columns wide with only a hairline between rows, the
+     eye loses its place halfway across and reads a balance against the wrong
+     name.
+   - NOTHING SAID WHICH COLUMN WAS THE SUBJECT. The player's name sat at the
+     same weight as their opening balance.
+
+   The wrapper is a class now rather than style="overflow-x:auto" repeated
+   inline on eight tables, so a table too wide for a phone scrolls in its own
+   box instead of stretching the page sideways. */
+.table-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+
 .sams-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
 .sams-table th { color: var(--text-faint); font-weight: 700; font-size: 0.7rem; text-transform: uppercase;
-  letter-spacing: 0.06em; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border-color); }
-.sams-table td { padding: 0.85rem 0.8rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+  letter-spacing: 0.06em; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap; }
+.sams-table td { padding: 0.8rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
 .sams-table tr:last-child td { border-bottom: none; }
-.sams-table tbody tr { transition: background 0.12s; }
+
+/* The subject of the row, told apart from its data. */
+.sams-table tbody td:first-child { font-weight: 600; color: var(--text-main); }
+
+/* Figures line up on their last digit and share a width per glyph, so columns
+   of money can be compared by length alone. */
+.sams-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Banding carries the eye across a wide row. Kept very quiet — it is a guide,
+   not a decoration, and it must not compete with the status colours. */
+.sams-table tbody tr { transition: background 0.12s, box-shadow 0.12s; }
+.sams-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text-main) 3%, transparent); }
 .sams-table tbody tr:hover { background: var(--sport-soft); }
 
+/* A row carries its state on its leading edge, where it reads without spending
+   a column on it — that is `tr.row-alert`, which already exists further down
+   and is already set by players.js. Deliberately not duplicated here under a
+   second name: two conventions for one thing is how a stylesheet starts
+   disagreeing with itself. */
+
+/* nowrap is not cosmetic here: "Needs top-up" was wrapping onto three lines
+   inside its pill and tripling the height of that one row, so a table of
+   players had rows of three different heights depending on their status. */
 .tag { display: inline-flex; padding: 0.12rem 0.6rem; border-radius: 9999px; font-size: 0.72rem;
-  font-weight: 600; border: 1px solid var(--border-strong); color: var(--text-muted); background: var(--bg-main); }
+  font-weight: 600; white-space: nowrap; border: 1px solid var(--border-strong);
+  color: var(--text-muted); background: var(--bg-main); }
 .tag-active, .tag-paid { color: color-mix(in srgb, var(--success) 72%, var(--text-main));
   border-color: color-mix(in srgb, var(--success) 35%, var(--bg-card));
   background: color-mix(in srgb, var(--success) 13%, var(--bg-card)); }
@@ -742,9 +782,52 @@ body.sport-football .btn:not(.btn-secondary):hover { background: var(--sport-dee
 
 /* Full-screen login overlay. main.js toggles display between none/flex; these
    rules supply the centring and backdrop that were previously missing entirely. */
+/* On a phone this is a card in the middle of the screen and that is right. On a
+   desktop it was the same 320px card marooned in the middle of 1920px of flat
+   ground, which reads as a page that failed to load rather than a front door.
+   From 900px up it becomes a two-panel door: the club on the left, the form on
+   the right at a size a mouse and keyboard deserve. Below that the panel is
+   dropped entirely and the card is centred as before. */
+/* main.js shows this by setting display:flex inline, which beats anything here
+   — so the rules below are written for flex rather than quietly assuming a
+   grid that never applies. */
 .login-view { position: fixed; inset: 0; z-index: 60; display: flex;
-  align-items: center; justify-content: center; padding: 2rem;
+  align-items: stretch; padding: 1.5rem;
   background: var(--bg-main); overflow-y: auto; }
+
+/* Below 900px the panel does not exist and this is a centred card, exactly as
+   it was. .login-form-side is the centring wrapper at every width. */
+.login-panel { display: none; }
+.login-formtitle { display: none; font-size: 1.45rem; font-weight: 700;
+  letter-spacing: -0.01em; margin-bottom: 1.6rem; color: var(--text-main); }
+.login-split { width: 100%; }
+.login-form-side { display: grid; place-items: center; min-height: 100%; }
+
+@media (min-width: 900px) {
+  .login-view { padding: 0; }
+  .login-split { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100%; }
+  .login-panel { display: flex; flex-direction: column; justify-content: center;
+    gap: 1.1rem; padding: clamp(2.5rem, 6vw, 6rem); position: relative; overflow: hidden;
+    background: var(--bg-card); border-right: 1px solid var(--border-color); }
+  /* A single quiet wash rather than a photograph: it has to sit behind text at
+     4am on a phone-lit screen without fighting it. */
+  .login-panel::after { content: ""; position: absolute; inset: auto auto -20% -15%;
+    width: 420px; height: 420px; border-radius: 50%;
+    background: var(--sport-grad); opacity: 0.07; filter: blur(40px); pointer-events: none; }
+  .login-panel-logo { width: 88px; height: 88px; object-fit: contain; }
+  .login-panel-name { font-size: clamp(2rem, 3.4vw, 3rem); font-weight: 800;
+    letter-spacing: -0.02em; line-height: 1.05; color: var(--text-main); }
+  .login-panel-tag { font-size: 1rem; color: var(--text-muted); max-width: 34ch; line-height: 1.55; }
+  .login-panel-foot { margin-top: auto; padding-top: 2rem; font-size: 0.8rem;
+    color: var(--text-faint); position: relative; }
+  .login-form-side { display: grid; place-items: center; padding: clamp(2rem, 4vw, 4rem); }
+  .login-form-side .login-card { max-width: 400px; box-shadow: none;
+    background: none; border: none; padding: 0; }
+  .login-form-side .login-header { display: none; } /* the panel carries the identity */
+  .login-form-side .login-formtitle { display: block; }
+  .login-form-side .login-alt,
+  .login-form-side .login-help { text-align: left; }
+}
 
 /* Login player-toggle row — inline checkbox + label. */
 /* The way through to the admin form: present, but not the first thing offered.
