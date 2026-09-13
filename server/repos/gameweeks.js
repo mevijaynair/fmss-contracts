@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { ledgersRepo } from './ledgers.js';
 import { auditRepo } from './audit.js';
 import { gameResultsRepo } from './game_results.js';
+import { normaliseScore, winningTeam } from '../results_import.js';
 
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -253,20 +254,55 @@ export const gameweeksRepo = {
              -- player name — and NULLs are skipped, so this is empty for a game
              -- with nothing outstanding.
              GROUP_CONCAT(CASE WHEN ${awaitingCash}
-               THEN sp.name || '|' || ch.amount END, ';') AS pending_names
+               THEN sp.name || '|' || ch.amount END, ';') AS pending_names,
+             -- What the game is still missing, counted here rather than by
+             -- fetching every game's charges one at a time. A side with nobody
+             -- wearing the armband is the common gap and it is invisible from
+             -- the list otherwise: you have to open the game to find out.
+             COUNT(DISTINCT CASE WHEN TRIM(ch.team) <> '' THEN ch.team END) AS teams_count,
+             COUNT(DISTINCT CASE WHEN ch.is_captain = 1 AND TRIM(ch.team) <> ''
+               THEN ch.team END) AS captained_teams
       FROM charges ch
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
       WHERE ch.gameweek_id IN (${placeholders})
       GROUP BY ch.gameweek_id
     `).all(...ids);
     const statsById = new Map(stats.map(s => [s.gameweek_id, s]));
-    const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0, pending_names: null };
+    const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0,
+      pending_names: null, teams_count: 0, captained_teams: 0 };
+
+    // Whether the result is actually resolvable, which is not the same question
+    // as whether the score box has something typed in it: "0-0" is the default
+    // scoreline on every game, and a text that names no side cannot be
+    // attributed to a winner. Same two sources the Results screen reads.
+    const resultRows = new Set(db.prepare(
+      `SELECT gameweek_id FROM game_results WHERE gameweek_id IN (${placeholders})`)
+      .all(...ids).map(r => r.gameweek_id));
 
     // charges_count alongside the charged total: the stored num_players counts
     // everyone named in the message, including people who were never matched to
     // an account, so it runs 1–3 ahead of the players actually charged. Lists
     // should show what was billed.
-    return rows.map(g => ({ ...g, ...(statsById.get(g.id) || empty) }));
+    return rows.map(g => {
+      const s = statsById.get(g.id) || empty;
+      const teams = db.prepare(
+        "SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND TRIM(team) <> ''")
+        .all(g.id).map(r => r.team);
+      const sc = normaliseScore(g.score);
+      return {
+        ...g,
+        ...s,
+        // Three plain yes/no answers the Season list can filter on. Derived here
+        // so the screen never has to re-implement what "has a result" means —
+        // that question already has one answer and it lives in results_import.
+        has_result: resultRows.has(g.id)
+          || (sc.known && (sc.winner === 'draw' || !!winningTeam(sc.winner, teams))),
+        has_teams: s.teams_count > 0,
+        // Every side wants someone wearing the armband; one captain across two
+        // teams is half a record.
+        has_captains: s.teams_count > 0 && s.captained_teams >= s.teams_count,
+      };
+    });
   },
   chargeCount(id) {
     return db.prepare('SELECT COUNT(*) AS n FROM charges WHERE gameweek_id = ?').get(id).n;

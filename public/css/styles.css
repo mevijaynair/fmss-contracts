@@ -571,6 +571,10 @@ input.error:focus, select.error:focus, textarea.error:focus { box-shadow: 0 0 0 
 .seg button { background: none; border: none; cursor: pointer; padding: 0.4rem 0.9rem;
   border-radius: 8px; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
 .seg button.active { background: var(--bg-card); color: var(--sport-on-soft); box-shadow: var(--shadow-sm); }
+/* A filter with nothing behind it stays readable but stops inviting a click —
+   "No captain 0" is worth seeing; a screen of no rows after pressing it is not. */
+.seg button:disabled { cursor: default; opacity: 0.4; }
+.seg button:disabled strong { font-weight: 600; }
 
 /* Team colour dots */
 .team-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 0.4rem;

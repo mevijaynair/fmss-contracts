@@ -94,11 +94,57 @@ async function renderSchedule() {
     }));
 }
 
+/* ---- What a game is still missing -------------------------------------- */
+// Which games are short of something is a question you can only answer today by
+// opening each one in turn. These are the three things a game needs before it
+// counts for anything: who was on which side, who led each of them, and how it
+// finished. An imported game is judged on the same three — a bulk import is
+// exactly where a captain goes missing.
+const GAPS = [
+  { key: 'score', label: 'No result', missing: g => !g.has_result },
+  { key: 'captains', label: 'No captain', missing: g => !g.has_captains },
+  { key: 'teams', label: 'No sides', missing: g => !g.has_teams },
+];
+const gapsFor = (g) => GAPS.filter(f => f.missing(g));
+
+let gapFilter = 'all';            // 'all' | 'incomplete' | one of GAPS[].key
+
+function showGapBar(games) {
+  const bar = $('gwGapBar');
+  if (!bar) return;
+  const incomplete = games.filter(g => gapsFor(g).length);
+  const chip = (key, label, n) =>
+    `<button data-gap="${key}" class="${gapFilter === key ? 'active' : ''}"
+       ${n === 0 && key !== 'all' ? 'disabled' : ''}>${label} <strong>${n}</strong></button>`;
+
+  bar.innerHTML = `
+    <div class="hint" style="flex:1">
+      ${incomplete.length
+    ? `<strong>${incomplete.length}</strong> of ${games.length} games are missing something.`
+    : `All ${games.length} games have sides, captains and a result.`}
+    </div>
+    <span class="seg" id="gwGapSeg">
+      ${chip('all', 'All', games.length)}
+      ${chip('incomplete', 'Needs data', incomplete.length)}
+      ${GAPS.map(f => chip(f.key, f.label, games.filter(f.missing).length)).join('')}
+    </span>`;
+
+  bar.querySelectorAll('#gwGapSeg button').forEach(b =>
+    b.addEventListener('click', () => { gapFilter = b.dataset.gap; render(); }));
+}
+
 async function render() {
   const rows = await api.gameweeks(contractId);
-  const rowsList = Array.isArray(rows) ? rows : [];
+  const all = Array.isArray(rows) ? rows : [];
   const gwTable = $('gwTable');
   if (!gwTable || !gwTable.querySelector('tbody')) return;
+
+  // Counts are always over the whole season, so the chips do not change as you
+  // filter — a count that shrinks when you click it is not a count.
+  showGapBar(all);
+  const rowsList = gapFilter === 'all' ? all
+    : gapFilter === 'incomplete' ? all.filter(g => gapsFor(g).length)
+      : all.filter(GAPS.find(f => f.key === gapFilter).missing);
 
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
@@ -157,7 +203,16 @@ async function render() {
     ? owing.map(o => `<div style="white-space:nowrap">${esc(o.name)}
           <strong style="color: var(--danger)">${money(o.amount)}</strong></div>`).join('')
     : '<span class="hint">—</span>'}</td>
-        <td>${esc(g.score || '—')}</td>
+        <td>${(() => {
+    const gaps = gapsFor(g);
+    const score = g.score ? esc(g.score) : '';
+    if (!gaps.length) return score || '<span class="hint">—</span>';
+    // Say what is missing rather than leaving a dash to be interpreted. A score
+    // that is present but unreadable is worth showing beside the warning — it is
+    // usually a wording problem, not a missing one.
+    return (score ? `${score} ` : '')
+      + gaps.map(f => `<span class="tag tag-due">${f.label}</span>`).join(' ');
+  })()}</td>
         <td class="row-actions">
           ${!g.historical ? `<button class="btn btn-sm" data-gw-edit="${g.id}" style="padding: 0.3rem 0.6rem;">✏️</button>` : '<span class="hint">📋</span>'}
         </td>

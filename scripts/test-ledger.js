@@ -963,6 +963,60 @@ test('no charge ever owns a kitty row of its own', () => {
   assert.equal(kittyOf(gw.id), 35 - 30);
 });
 
+/* ===== What the Season list says a game is missing =====
+   The filters there are only as good as these three flags, and each one is a
+   question the screen must not answer for itself: "has a result" in particular
+   is not "the score box has something in it", because every game is created
+   with a 0-0 scoreline and a text naming no side cannot be attributed. */
+
+const listed = (gwId) => gameweeksRepo.all(CONTRACT).find(g => g.id === gwId);
+
+test('a game with sides, a captain each and a score is not missing anything', () => {
+  const g = game();
+  sided(g, player('Cap red'), 'Red', { captain: 1 });
+  sided(g, player('Cap blue'), 'Blue', { captain: 1 });
+  scored(g, 'Red win 5-3');
+  const row = listed(g);
+  assert.deepEqual(
+    [row.has_teams, row.has_captains, row.has_result], [true, true, true]);
+});
+
+test('one captain across two sides is half a record, not a full one', () => {
+  const g = game();
+  sided(g, player('Only captain'), 'Red', { captain: 1 });
+  sided(g, player('No captain'), 'Blue');
+  scored(g, 'Red win 5-3');
+  assert.equal(listed(g).has_captains, false, 'every side wants someone in the armband');
+});
+
+test('an empty score and a default scoreline both count as no result', () => {
+  const g = game();
+  sided(g, player('A side'), 'Red', { captain: 1 });
+  sided(g, player('B side'), 'Blue', { captain: 1 });
+  assert.equal(listed(g).has_result, false, 'nothing was recorded');
+
+  db.prepare("UPDATE gameweeks SET scoreline = '0-0' WHERE id = ?").run(g);
+  assert.equal(listed(g).has_result, false,
+    'every game is created with 0-0 — it is a placeholder, not a nil-nil draw');
+});
+
+test('a score naming a side that did not play cannot be a result', () => {
+  const g = game();
+  sided(g, player('Greens one'), 'Green', { captain: 1 });
+  sided(g, player('Greens two'), 'White', { captain: 1 });
+  scored(g, 'Red win 5-3');
+  assert.equal(listed(g).has_result, false, 'no Red played, so nobody won it');
+});
+
+test('a game with no sides on any charge is missing all three', () => {
+  const g = game();
+  charge(g, player('Turned up'), 0);
+  scored(g, 'Red win 5-3');
+  const row = listed(g);
+  assert.deepEqual([row.has_teams, row.has_captains, row.has_result], [false, false, false],
+    'without sides there is no captain to have and no winner to attribute');
+});
+
 process.on('exit', () => {
   try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ }
 });
