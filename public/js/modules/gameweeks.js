@@ -1,10 +1,10 @@
 // gameweeks.js — game history list + detail modal.
 import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal, rosterOptions } from '../util.js';
 import { fixtureDate, dayName, describeDays, loadSchedule, markNoGame, reopenDate } from '../schedule-ui.js';
 
-let contractId = 'sat';
+let contractId = null;   // resolved on first load — see defaultContract()
 
 /**
  * The season as a run of fixture dates, so a week that was never entered is
@@ -628,6 +628,7 @@ async function saveGameweekEdits(gameweekId) {
 export function initGameweeks() {}
 
 export function loadGameweeks() {
+  contractId ??= defaultContract();
   contractSeg($('gwContractSeg'), store.contracts, contractId, (id) => {
     contractId = id; render(); renderSchedule();
   });

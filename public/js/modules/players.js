@@ -1,12 +1,12 @@
 // players.js — per-contract ledger table + add player + timeline & stats detail.
 import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, balCell, contractSeg, openModal, closeModal, today, fmtDate } from '../util.js';
 import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 import { splitNote, wireSplitNotes } from './contributions.js';
 
-let contractId = 'sat';
+let contractId = null;   // resolved on first load — see defaultContract()
 let currentDetailPlayerId = null;
 let searchQuery = '';
 let sortBy = 'name';
@@ -885,6 +885,7 @@ export function initPlayers() {
 
 
 export function loadPlayers() {
+  contractId ??= defaultContract();
   if (isPlayer()) {
     // Hide admin-only chrome; "My Ledger" lists all contracts as rows.
     $('plAdd').style.display = 'none';

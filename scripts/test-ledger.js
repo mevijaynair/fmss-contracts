@@ -876,6 +876,42 @@ test('a charge settled on another contract leaves this timeline alone', () => {
   assert.equal(timelineBalance(p), balanceOf(p));
 });
 
+/* ===== A top-up is not profit =====
+   The Kitty screen's collect button used to write a kitty income row and stop
+   there, so the pot grew by money that was never profit and the member still
+   owed every fil of it. A top-up refills the balance the cashier funded; only
+   the surplus or shortfall on a game belongs in the kitty. */
+
+const { contributionsRepo } = await import('../server/repos/contributions.js');
+const kittyTotal = () => round2(db.prepare(
+  `SELECT COALESCE(SUM(CASE WHEN kind = 'income' THEN amount ELSE -amount END), 0) n
+   FROM kitty`).get().n);
+
+test('collecting a top-up credits the balance and leaves the kitty alone', () => {
+  const p = player('Owes a top-up', -120);
+  const before = kittyTotal();
+  assert.equal(balanceOf(p), -120);
+
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 120,
+    date: '2026-09-13', comments: 'Top-up collected' });
+
+  assert.equal(balanceOf(p), 0, 'the debt is cleared, which is the point of paying');
+  assert.equal(kittyTotal(), before, 'money passing through to a balance is not profit');
+});
+
+test('the cashier is never listed as owing the club', () => {
+  const cashier = player('The cashier', -400);
+  db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(cashier);
+  const row = ledgersRepo.get(cashier, CONTRACT);
+  assert.equal(row.special_role, 'cashier',
+    'the flag must reach the ledger row, or every screen has to look it up again');
+  assert.ok(row.present_balance < 0, 'their float shows as a negative balance');
+  // Which is exactly why the collect list filters on it: the club owes them.
+  assert.throws(() => contributionsRepo.create({ player_id: cashier,
+    contract_id: CONTRACT, amount: 400, date: '2026-09-13' }),
+  /Cashier cannot contribute/, 'and they cannot pay it in either');
+});
+
 process.on('exit', () => {
   try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ }
 });

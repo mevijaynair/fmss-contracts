@@ -1,7 +1,7 @@
 // main.js — bootstrap: load shared data, build nav, wire per-view loads.
 // Two-tier auth: admin (password) or player (email+password). Role-based nav.
 import { api } from './api.js';
-import { store, toast } from './store.js';
+import { store, toast, defaultContract } from './store.js';
 import { buildNav, showView } from './router.js';
 import { initTheme } from './theme.js';
 import { $, closeModal } from './util.js';
@@ -72,7 +72,7 @@ async function start() {
   document.body.classList.toggle('role-admin', user?.role === 'admin');
   buildNav(user?.role);
   [store.contracts, store.players] = await Promise.all([api.contracts(), api.players()]);
-  store.activeContract = store.contracts[0]?.id || 'sat';
+  store.activeContract = defaultContract();
   store.user = user;
 
   initReport(); initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();

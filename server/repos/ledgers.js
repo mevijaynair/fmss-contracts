@@ -113,6 +113,13 @@ const SELECT = `
          -- in afterwards, which meant anything calling this repo directly — the
          -- Standing sheet among them — could not tell a guest from a member.
          COALESCE(p.player_type, 'regular') AS player_type,
+         -- The cashier funds the contracts out of pocket, so their negative
+         -- balance is the club's float and not a debt to chase. Every screen
+         -- has to know that, and the dashboard was the only one that did —
+         -- it built its own cashier set while the Kitty screen went on listing
+         -- Vijay among the debtors. Same argument as player_type above: it
+         -- decides how a row should be treated, so it belongs on the row.
+         p.special_role,
          l.opening_balance, l.status,
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,

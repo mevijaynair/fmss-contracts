@@ -4,10 +4,10 @@
 // the period and its rules stated in the header, so a picture of it makes sense
 // to someone who cannot see the app.
 import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg } from '../util.js';
 
-let contractId = 'sat';
+let contractId = null;   // resolved on first load — see defaultContract()
 let data = null;
 
 const STATUS_CLASS = {
@@ -108,5 +108,6 @@ async function render() {
 export function initReport() {}
 
 export function loadReport() {
+  contractId ??= defaultContract();
   return render();
 }

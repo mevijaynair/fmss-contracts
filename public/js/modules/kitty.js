@@ -140,8 +140,14 @@ async function getPendingCollections() {
     // all. Reading only ledgers would have quietly lost them.
     const [ledgers, cash] = await Promise.all([api.ledgers(), api.cashOutstanding()]);
     const topups = (ledgers || [])
-      .filter(l => l.present_balance < 0 && l.player_type !== 'outside')
+      // The cashier is not a debtor. Their balance falls as they play because
+      // they put the money in up front and take the fees back in — the club
+      // owes them, not the reverse — so listing them here asked the cashier to
+      // chase themselves, and for the largest figure on the page.
+      .filter(l => l.present_balance < 0 && l.player_type !== 'outside'
+        && l.special_role !== 'cashier')
       .map(l => ({ player_id: l.player_id, player_name: l.player_name,
+        contract_id: l.contract_id, contract_name: l.contract_name,
         owes: -l.present_balance, kind: 'topup' }));
     const guests = (cash || []).map(c => ({ player_id: c.player_id,
       player_name: c.player_name || 'Guest', owes: c.owed, kind: 'cash' }));
@@ -152,21 +158,39 @@ async function getPendingCollections() {
   }
 }
 
-// Quick commit: Move collected amount from player to kitty
-async function quickCommitToKitty(playerId, amount, label) {
+/**
+ * A member has handed over their top-up. Record it where it actually goes.
+ *
+ * This used to write a free-standing KITTY INCOME row and nothing else, which
+ * was wrong twice over:
+ *
+ *   - Wrong destination. A top-up is not profit. The member is refilling the
+ *     balance the cashier funded up front, so the money goes back to the
+ *     cashier's float. The kitty is only where profit and loss flow — the
+ *     surplus or shortfall on a game, and what the club spends. Money that
+ *     merely passes through on its way to restoring a balance never touches it.
+ *   - The debt survived. Nothing credited the member, so after "committing" 409
+ *     from Jeetu the kitty was 409 richer, Jeetu still owed 409, and the two
+ *     numbers had no relationship to each other or to anything that happened.
+ *
+ * So it records a contribution on the contract the balance is short on, which
+ * credits the member and leaves the kitty alone. Nobody had pressed the old
+ * button — production carries no such kitty row — so there is nothing to undo.
+ */
+async function recordTopUp(playerId, contractId, amount, playerName) {
   try {
-    const finalLabel = label || `Collected from ${playerId}`;
-    await api.createKitty({
-      kind: 'income',
-      amount: amount,
-      label: finalLabel,
+    await api.createContribution({
+      player_id: playerId,
+      contract_id: contractId,
+      amount,
       date: today(),
+      comments: 'Top-up collected',
     });
-    toast(`✓ Committed ${money(amount)} to kitty`, false);
+    toast(`✓ ${money(amount)} added to ${playerName || 'their'} balance`, false);
     render();
     return true;
   } catch (e) {
-    toast(`Failed to commit: ${e.message}`, true);
+    toast(`Could not record it: ${e.message}`, true);
     return false;
   }
 }
@@ -199,21 +223,25 @@ async function renderPendingCollections() {
 
   const html = `
     <div class="panel panel-warn">
-      <div class="panel-title">💰 Pending Collections</div>
+      <div class="panel-title">💰 Still to collect</div>
       <div class="panel-body">
-        <strong>${pending.length}</strong> players owe <strong>${money(totalOwed)}</strong> total
+        <strong>${pending.length}</strong> to chase, <strong>${money(totalOwed)}</strong> in all.
+        A top-up goes back to the cashier's float, not into the kitty.
       </div>
       <div class="panel-scroll">
         ${pending.map(p => `
           <div class="panel-row">
             <strong>${esc(p.player_name)}</strong>
+            <span class="hint">${esc(p.contract_name || '')}</span>
             <span class="bal neg">${money(p.owes)}</span>
             ${p.kind === 'cash'
     // Marking the charge collected in Game History is what banks a guest's
     // cash, and it credits the kitty on its own. Offering a commit button
     // here as well would put the same 35 in the pot twice.
-    ? '<span class="hint">mark collected in Game History</span>'
-    : `<button class="btn btn-sm" data-quick-commit="${p.player_id}" data-amount="${p.owes}" title="Quick commit this amount to kitty">✓ Commit</button>`}
+    ? '<span class="hint">mark collected in Game history</span>'
+    : `<button class="btn btn-sm" data-topup="${p.player_id}" data-contract="${esc(p.contract_id)}"
+        data-amount="${p.owes}" data-name="${esc(p.player_name)}"
+        title="Record the top-up on their balance — this does not touch the kitty">Mark paid</button>`}
           </div>
         `).join('')}
       </div>
@@ -231,12 +259,19 @@ async function renderPendingCollections() {
     tableParent.querySelector('[data-pending-collections]').innerHTML = html;
   }
 
-  // Attach event listeners for quick commit buttons
-  document.querySelectorAll('[data-quick-commit]').forEach(btn => {
+  // Recording a top-up credits a balance, so it is worth a confirmation — the
+  // amount is whatever they were short, and that is not always what they handed
+  // over. Anything else belongs on the Contributions screen, where a partial
+  // payment can be typed in.
+  document.querySelectorAll('[data-topup]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const playerId = btn.dataset.quickCommit;
-      const amount = Number(btn.dataset.amount);
-      await quickCommitToKitty(playerId, amount);
+      const { topup, contract, amount, name } = btn.dataset;
+      const amt = Number(amount);
+      if (!confirm(`Record ${money(amt)} from ${name}?\n\n`
+        + `It is added to their balance and clears what they owe. `
+        + `The kitty is not affected.\n\n`
+        + `If they paid a different amount, use Contributions instead.`)) return;
+      await recordTopUp(topup, contract, amt, name);
     });
   });
 }

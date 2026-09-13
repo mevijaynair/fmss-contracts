@@ -1,11 +1,11 @@
 // gameday.js — paste WhatsApp teams → parse → editable preview → confirm & deduct.
 import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, today, contractSeg, rosterOptions } from '../util.js';
 import { loadDashboard } from './dashboard.js';
 import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.js';
 
-let contractId = 'sat';
+let contractId = null;   // resolved on first load — see defaultContract()
 let rows = [];                 // current preview rows (mutable amounts)
 let parseResult = null;        // full parser result with metadata
 
@@ -849,6 +849,7 @@ export function initGameday() {
 }
 
 export function loadGameday() {
+  contractId ??= defaultContract();
   // Keep the contract segment in sync if contracts loaded after init.
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
     contractId = id; recalcTotal(); renderFixture();

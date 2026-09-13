@@ -1,8 +1,8 @@
 import { api } from '../api.js';
-import { store, toast } from '../store.js';
+import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../util.js';
 
-let contractId = 'sat';
+let contractId = null;   // resolved on first load — see defaultContract()
 
 // Guests and irregulars are real players but distort a leaderboard: someone who
 // turned up once should not sit beside a regular on a rate table. Hide players
@@ -757,6 +757,7 @@ async function runImport(commit) {
 }
 
 export function loadResults() {
+  contractId ??= defaultContract();
   contractSeg($('resContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
   return render();
 }
