@@ -298,6 +298,14 @@ const sameSide = (a, b) => {
 const sidesOf = db.prepare(
   "SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND TRIM(team) <> ''");
 
+/* A game with three or more sides is a tournament and produces no head-to-head
+   result, so it belongs in nobody's win/loss column. Worked out here from the
+   charges rather than by importing the app's own helper — the point of this
+   file is not to share a definition with the thing it checks. */
+const gameType = db.prepare('SELECT game_type FROM gameweeks WHERE id = ?');
+const isTourney = (gw) => gameType.get(gw)?.game_type === 'tournament'
+  || new Set(sidesOf.all(gw).map(r => String(r.team).toLowerCase().trim())).size >= 3;
+
 const players = db.prepare(`SELECT DISTINCT p.id, p.name FROM players p
   JOIN charges ch ON ch.player_id = p.id ORDER BY p.name`).all();
 
@@ -312,7 +320,9 @@ for (const p of players) {
   let d = 0;
   let l = 0;
   let unknown = 0;
+  let tourneys = 0;
   for (const row of rows) {
+    if (isTourney(row.gw)) { tourneys++; continue; }
     const team = String(row.team || '').trim();
     if (!team) { unknown++; continue; }
 
@@ -336,11 +346,13 @@ for (const p of players) {
 
   const app = statsRepo.matchRecord(p.id);
   compared++;
-  if (app.wins === w && app.draws === d && app.losses === l) continue;
+  if (app.wins === w && app.draws === d && app.losses === l
+    && (app.tournaments ?? 0) === tourneys) continue;
   mismatched++;
   if (detail.length < 10) {
     detail.push(`${p.name}: app ${app.wins}W ${app.draws}D ${app.losses}L`
-      + ` / recomputed ${w}W ${d}D ${l}L (${unknown} this could not resolve)`);
+      + ` ${app.tournaments ?? 0}T / recomputed ${w}W ${d}D ${l}L ${tourneys}T`
+      + ` (${unknown} this could not resolve)`);
   }
 }
 checks++;
