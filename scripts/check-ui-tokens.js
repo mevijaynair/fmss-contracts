@@ -2,7 +2,9 @@
 /**
  * check-ui-tokens.js — UI regression guard for the FMSS front-end.
  *
- * Enforces the three rules from UI_REMEDIATION_PLAN.md:
+ * Enforces four rules:
+ *   0. Every JS file must PARSE. A file that does not is a blank page, and no
+ *      other rule here would notice — see Rule 0 below for the outage.
  *   1. No raw colour literals in view modules — they bypass the theme tokens
  *      and render light-on-light (or dark-on-dark) when the theme flips.
  *   2. No CSS variables that do not exist in styles.css (typos resolve to
@@ -15,6 +17,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +69,33 @@ function walk(dir, out = []) {
 
 const jsFiles = walk(JS_DIR);
 const sources = [...jsFiles, HTML];
+
+/* ---- Rule 0: every JS file must PARSE ----
+   This rule did not exist here, and on 2026-09-13 that took the whole site
+   down. render() in gameweeks.js already declared `const all`; a second one was
+   added at the top of the same function. A duplicate declaration is a PARSE
+   error, so the module never loaded — and because main.js imports it at boot,
+   NOTHING loaded: no nav, no dashboard, no data, just a header over an empty
+   card. Every other rule in this file passed, because none of them ask whether
+   the file is valid JavaScript.
+
+   The annual day app grew this same check after shipping a broken panel twice.
+   It was never ported back. It is first now because a file that does not parse
+   makes every other question about it meaningless.
+
+   The server and scripts are checked too: an admin screen that cannot load is
+   bad, an API that cannot boot is worse. */
+for (const file of [...jsFiles, ...walk(path.join(ROOT, 'server')),
+  ...walk(path.join(ROOT, 'scripts'))]) {
+  try {
+    execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+  } catch (e) {
+    const detail = (e.stderr?.toString() || e.message).split('\n')
+      .find(l => /SyntaxError|Invalid|Unexpected|already been declared/.test(l))
+      ?? 'does not parse';
+    violations.push(`[syntax] ${path.relative(ROOT, file)}  ${detail.trim()}`);
+  }
+}
 
 /* ---- Rule 1: no raw colour literals outside styles.css ---- */
 for (const file of jsFiles) {
