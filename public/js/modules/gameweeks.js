@@ -135,16 +135,19 @@ function showGapBar(games) {
 
 async function render() {
   const rows = await api.gameweeks(contractId);
-  const all = Array.isArray(rows) ? rows : [];
+  // NOT `all`: this function already declares one further down for the
+  // select-all checkbox, and the collision is a parse error that takes the
+  // whole bundle — and therefore the whole app — with it.
+  const allGames = Array.isArray(rows) ? rows : [];
   const gwTable = $('gwTable');
   if (!gwTable || !gwTable.querySelector('tbody')) return;
 
   // Counts are always over the whole season, so the chips do not change as you
   // filter — a count that shrinks when you click it is not a count.
-  showGapBar(all);
-  const rowsList = gapFilter === 'all' ? all
-    : gapFilter === 'incomplete' ? all.filter(g => gapsFor(g).length)
-      : all.filter(GAPS.find(f => f.key === gapFilter).missing);
+  showGapBar(allGames);
+  const rowsList = gapFilter === 'all' ? allGames
+    : gapFilter === 'incomplete' ? allGames.filter(g => gapsFor(g).length)
+      : allGames.filter(GAPS.find(f => f.key === gapFilter).missing);
 
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
