@@ -245,6 +245,26 @@ header { display: flex; justify-content: space-between; align-items: flex-end; m
   background: rgba(15, 19, 30, 0.5); backdrop-filter: blur(2px); }
 .modal-content { position: relative; background: var(--bg-card); border-radius: 16px;
   max-width: 520px; width: 90%; max-height: 82vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
+/* A working surface, not a question. 520px is right for "are you sure"; it is
+   not right for editing a dozen players and their money. */
+.modal-content.is-wide { max-width: min(1240px, 94vw); width: 94%; max-height: 90vh; }
+
+/* Game detail: the two things you read, side by side above the rows you work
+   in — so the rows get the whole width rather than sharing it with a rail. */
+.gw-detail { display: flex; flex-direction: column; gap: 0.9rem; }
+.gw-brief { display: grid; gap: 1.25rem; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .gw-brief { grid-template-columns: 1fr 1fr; } }
+.gw-brief-col { min-width: 0; }
+.gw-players-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+
+/* Folded away rather than deleted: the one thing here that is not self-evident,
+   and as three paragraphs it pushed the rows it describes off the screen. */
+.gw-help > summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted);
+  padding: 0.3rem 0; list-style: revert; }
+.gw-help > summary:hover { color: var(--sport-on-soft); }
+.gw-help p { font-size: 0.8rem; color: var(--text-faint); line-height: 1.55;
+  margin: 0.4rem 0 0; }
 .modal-header { display: flex; justify-content: space-between; align-items: center;
   padding: 1.4rem 1.5rem; border-bottom: 1px solid var(--border-color);
   background: var(--sport-soft); border-radius: 16px 16px 0 0; }
@@ -1120,18 +1140,66 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
    every dropdown read as a single letter. Two lines instead: who and how much on
    the first, the controls that change them on the second, wrapping rather than
    shrinking. An imported game renders the first line only. */
-.charge-row { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 0.7rem;
+/* ===== A game's players =====
+   On a phone each player is a small card: name and money on the first line,
+   then the controls beneath, each labelled by the column it would have been in.
+   From 1100px up the cards become table rows under a real header, because at a
+   dozen players a night the useful thing is to run the eye DOWN one control —
+   who is on which side, who is still to pay — and that is impossible when every
+   player is three stacked rows of their own. */
+.charge-row { display: grid; grid-template-columns: 1fr auto; gap: 0.4rem 0.7rem;
   padding: 0.6rem 0.7rem; border-radius: 8px; background: var(--bg-card);
-  border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem; }
-.charge-row .cr-who { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex-wrap: wrap; }
-.charge-row .cr-name { font-weight: 600; }
-.charge-row .cr-amount { font-weight: 700; text-align: right; white-space: nowrap; }
-.charge-row .cr-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap;
-  align-items: center; gap: 0.45rem; padding-top: 0.5rem;
-  border-top: 1px solid var(--border-color); }
-.charge-row .cr-controls select { width: auto; min-width: 8.5rem; flex: 0 1 auto;
-  font-size: 0.82rem; padding: 0.28rem 0.45rem; }
-.charge-row .cr-controls .cr-spacer { flex: 1 1 auto; }
+  border: 1px solid var(--border-color); margin-top: 0.45rem; font-size: 0.85rem;
+  align-items: center; }
+.charge-row .cr-name { font-weight: 600; min-width: 0; }
+/* Pinned beside the name: the settle cell between them spans the full width, so
+   auto-placement would otherwise push the amount down to a line of its own. */
+.charge-row .cr-amount { grid-row: 1; grid-column: 2; font-weight: 700;
+  text-align: right; white-space: nowrap; }
+.charge-row .cr-settles { grid-column: 1 / -1; }
+.charge-row .cr-cell { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.5rem; }
+.charge-row .cr-cell::before { content: attr(data-label); flex: 0 0 5.5rem;
+  font-size: 0.75rem; color: var(--text-faint); }
+.charge-row select { width: 100%; font-size: 0.82rem; padding: 0.28rem 0.45rem; }
+.charge-row .cr-actions { grid-column: 1 / -1; display: flex; align-items: center;
+  justify-content: flex-end; gap: 0.9rem; }
+.charge-row .cr-actions label { display: inline-flex; align-items: center; gap: 0.3rem;
+  white-space: nowrap; cursor: pointer; }
+.charge-row .cr-spacer { flex: 1 1 auto; }
+
+/* The column header, which only exists once the rows line up under it. */
+.charge-head { display: none; }
+
+@media (min-width: 1100px) {
+  .charge-head, .charge-row:not(.is-readonly) {
+    display: grid; align-items: center;
+    grid-template-columns:
+      minmax(6rem, 1fr)      /* player          */
+      minmax(5.5rem, 8rem)   /* settles         */
+      4.5rem                 /* amount          */
+      8.5rem                 /* how             */
+      minmax(7rem, 10rem)    /* whose money     */
+      8.5rem                 /* from            */
+      6rem                   /* side            */
+      4.5rem;                /* captain, remove */
+    gap: 0.5rem;
+  }
+  /* The transparent border matches the row's, so the header labels sit exactly
+     over the cells rather than one pixel to their left. */
+  .charge-head { padding: 0 0.7rem 0.4rem; border: 1px solid transparent; border-bottom-width: 1px;
+    font-size: 0.7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint);
+    border-bottom-color: var(--border-color); }
+  .charge-head .num { text-align: right; }
+  .charge-row .cr-settles,
+  .charge-row .cr-cell,
+  .charge-row .cr-actions { grid-column: auto; }
+  .charge-row .cr-amount { grid-row: auto; grid-column: auto; }
+  /* The labels belong to the stacked layout; here the header says it once. */
+  .charge-row .cr-cell::before { display: none; }
+  .charge-row .cr-actions { gap: 0.5rem; }
+  .charge-row .cr-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
 /* A place still owed is the only one that needs chasing, so it is the only one
    that carries a colour. */
 .charge-row.is-owing { border-color: color-mix(in srgb, var(--danger) 40%, var(--border-color));

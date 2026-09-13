@@ -74,9 +74,20 @@ export function rosterOptions(players, selectedId = '', { includeGuests = true }
       ? `<optgroup label="Guests">${keptGuests.map(opt).join('')}</optgroup>` : '');
 }
 
-export function openModal(title, bodyHtml) {
+/**
+ * @param {string} title
+ * @param {string} bodyHtml
+ * @param {{wide?: boolean}} [opts]  wide: for a working surface rather than a
+ *   question — the game detail edits a dozen players and their money, and at
+ *   520px each of them needed three stacked rows and the whole thing scrolled.
+ *   A confirmation stays narrow; anything you WORK in should use the screen.
+ */
+export function openModal(title, bodyHtml, { wide = false } = {}) {
   $('modalTitle').textContent = title;
   $('modalBody').innerHTML = bodyHtml;
+  // Always set, never toggled on: the element is reused by every modal, so a
+  // wide one would leave the next confirmation stretched across the screen.
+  document.querySelector('#modal .modal-content').classList.toggle('is-wide', wide);
   $('modal').hidden = false;
 
   // Add escape key support

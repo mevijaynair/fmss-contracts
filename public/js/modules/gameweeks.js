@@ -382,37 +382,45 @@ async function detail(id) {
     // it invites edits that cannot mean anything, and printing "0.00" twelve
     // times is noise standing in for information.
     const readOnly = g.historical;
+    // One cell per column, in the order the header above announces them, so on a
+    // desktop the twelve rows read as a table and the eye can run down any one
+    // control. They stack back into a card on a narrow screen.
     return `
-    <div class="charge-row${owing ? ' is-owing' : ''}" data-charge="${c.id}">
-      <div class="cr-who">
-        <span class="cr-name">${esc(c.player_name)}</span>
-        ${c.is_captain ? '<span class="tag">C</span>' : ''}
-        ${c.team ? `<span class="hint">${esc(c.team)}</span>` : ''}
-        ${settleCell(c)}
-      </div>
-      <div class="cr-amount">${readOnly && !c.amount
+    <div class="charge-row${owing ? ' is-owing' : ''}${readOnly ? ' is-readonly' : ''}"
+         data-charge="${c.id}">
+      <div class="cr-name">${esc(c.player_name)}${
+  c.is_captain ? ' <span class="tag">C</span>' : ''}</div>
+      <div class="cr-settles">${settleCell(c)}</div>
+      <div class="cr-amount num">${readOnly && !c.amount
     ? '<span class="hint">—</span>' : money(c.amount)}</div>
       ${readOnly ? '' : `
-      <div class="cr-controls">
+      <div class="cr-cell" data-label="How">
         <select class="ch-mode" data-charge="${c.id}"
                 title="Off a contract balance, cash still to collect, or carried by the club pot">
           <option value="balance" ${c.settle_mode === 'balance' ? 'selected' : ''}>off balance</option>
           <option value="cash" ${c.settle_mode === 'cash' ? 'selected' : ''}>cash to collect</option>
           <option value="kitty" ${c.settle_mode === 'kitty' ? 'selected' : ''}>kitty covers it</option>
         </select>
+      </div>
+      <div class="cr-cell" data-label="Whose money">
         <select class="ch-payer" data-charge="${c.id}"
                 title="Whose money settles this charge">${payerOptions(c)}</select>
+      </div>
+      <div class="cr-cell" data-label="From">
         <select class="ch-fund" data-charge="${c.id}" ${c.settle_mode === 'balance' ? '' : 'disabled'}
                 title="Which of their balances it comes off — a Mon/Thu regular playing one odd Saturday can pay from their Mon/Thu credit">
           ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
   ct.id === c.settle_contract_id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
         </select>
+      </div>
+      <div class="cr-cell" data-label="Side">
         <select class="ch-team" data-charge="${c.id}">${teamOptions(c.team)}</select>
-        <label class="hint" style="display:flex;align-items:center;gap:.3rem;white-space:nowrap">
-          <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> captain
+      </div>
+      <div class="cr-actions">
+        <label class="hint" title="Wears the armband for their side">
+          <input type="checkbox" class="ch-capt" data-charge="${c.id}" ${c.is_captain ? 'checked' : ''}> C
         </label>
-        <span class="cr-spacer"></span>
-        <button class="link-btn" data-remove="${c.id}" title="Remove from this game">✕ remove</button>
+        <button class="link-btn" data-remove="${c.id}" title="Remove from this game">✕</button>
       </div>`}
     </div>`;
   }).join('');
@@ -420,47 +428,69 @@ async function detail(id) {
   const players = (store.players || []).filter(p => !charges.some(c => c.player_id === p.id));
 
   openModal(`${fmtDate(g.date)} · ${esc(contract)}`, `
-    ${g.historical
-    ? (g.score ? `<p class="muted"><strong>Result:</strong> ${esc(g.score)}</p>` : '')
+   <div class="gw-detail">
+    <!-- The two things you READ sit side by side at the top, so the twelve rows
+         you WORK in get the full width underneath rather than sharing it with a
+         rail. At 520px this was one column and each player needed three stacked
+         rows; the whole game did not fit on a screen. -->
+    <div class="gw-brief">
+      <div class="gw-brief-col">
+        ${g.historical
+    ? (g.score ? `<h4 class="mini-h">Result</h4><p class="muted">${esc(g.score)}</p>` : '')
     : `
-    <!-- The score used to be two modals deep, in a form built for bulk charge
-         surgery. It is one short line of text about the game you already have
-         open, so it belongs here. -->
-    <div class="form-group">
-      <label for="gwScore">Result</label>
-      <input type="text" id="gwScore" value="${esc(g.score || '')}"
-             placeholder="7-5, or Blue win 7-5" autocomplete="off">
-      <p class="hint" id="gwScoreNote" style="margin:0.3rem 0 0">
-        Type the goals and it works the rest out. Naming the winner is optional —
-        "Blue win 7-5" and "7-5" both land. Empty clears the result.</p>
-    </div>`}
+        <!-- The score used to be two modals deep, in a form built for bulk
+             charge surgery. It is one short line of text about the game you
+             already have open, so it belongs here. -->
+        <div class="form-group">
+          <label for="gwScore">Result</label>
+          <input type="text" id="gwScore" value="${esc(g.score || '')}"
+                 placeholder="7-5, or Blue win 7-5" autocomplete="off">
+          <p class="hint" id="gwScoreNote" style="margin:0.3rem 0 0">
+            Type the goals and it works the rest out. Naming the winner is optional —
+            "Blue win 7-5" and "7-5" both land. Empty clears the result.</p>
+        </div>`}
+        ${possiblyMissing.length ? `
+          <div class="panel panel-warn mt">
+            <div class="panel-title">${possiblyMissing.length} name(s) in the text with no linked player</div>
+            <div class="panel-body">${possiblyMissing.map(esc).join(' · ')}</div>
+          </div>` : ''}
+      </div>
+      <div class="gw-brief-col">
+        <h4 class="mini-h">Original text</h4>
+        <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
+        ${g.captains_raw ? `<p class="hint">Captains column: ${esc(g.captains_raw)}</p>` : ''}
+      </div>
+    </div>
 
-    <h4 class="mini-h mt">Original text</h4>
-    <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
-    ${g.captains_raw ? `<p class="hint">Captains column: ${esc(g.captains_raw)}</p>` : ''}
-
-    ${possiblyMissing.length ? `
-      <div class="panel panel-warn mt">
-        <div class="panel-title">${possiblyMissing.length} name(s) in the text with no linked player</div>
-        <div class="panel-body">${possiblyMissing.map(esc).join(' · ')}</div>
-      </div>` : ''}
-
-    <h4 class="mini-h mt">Players (${charges.length}${total ? ` · ${money(total)} AED` : ''})</h4>
+    <div class="gw-players-head">
+      <h4 class="mini-h" style="margin:0">Players (${charges.length}${total ? ` · ${money(total)} AED` : ''})</h4>
+      ${g.historical ? '' : `<span class="hint">${toCollect > 0
+    ? `${money(total - toCollect)} off balances · <strong>${money(toCollect)}</strong> guest cash to collect`
+    : 'Saved as you go — nothing to submit'}</span>`}
+    </div>
     ${g.historical
     ? `<p class="hint">Imported from the results sheet — who played, not what it cost.
         These games were settled on the credit sheets and are already inside the
         opening balances, so there is nothing here to change.</p>`
-    : `${toCollect > 0
-      ? `<p class="hint">${money(total - toCollect)} came off balances when this game was
-          recorded. <strong>${money(toCollect)}</strong> is guest cash still to collect.</p>`
-      : ''}
-      <p class="hint">Every change here is saved the moment you make it — balances and
-        the kitty follow straight away. There is nothing to submit.</p>
-      <p class="hint">Each player has three money controls: <strong>how</strong> it
-        settles (off a balance, cash you collect, or the kitty covering it),
-        <strong>whose</strong> money pays it, and <strong>which</strong> of their
-        balances it comes off — so a Mon/Thu regular playing one odd Saturday can
-        pay from their Mon/Thu credit.</p>`}
+    : `
+      <!-- Folded away rather than deleted: it is the one thing about this screen
+           that is not self-evident, and it was three paragraphs above the rows
+           it describes, pushing them off the screen on every visit. -->
+      <details class="gw-help">
+        <summary>What the three money controls do</summary>
+        <p><strong>How</strong> it settles — off a balance, cash you collect, or the
+          kitty covering it. <strong>Whose</strong> money pays it, which need not be
+          the player: a member covering a guest is usually not on the pitch.
+          <strong>Which</strong> of their balances it comes off, so a Mon/Thu regular
+          playing one odd Saturday can pay from their Mon/Thu credit.</p>
+        <p>Every change is saved the moment you make it — balances and the kitty
+          follow straight away.</p>
+      </details>`}
+    ${g.historical ? '' : `
+    <div class="charge-head">
+      <span>Player</span><span>Settles</span><span class="num">Amount</span>
+      <span>How</span><span>Whose money</span><span>From</span><span>Side</span><span></span>
+    </div>`}
     <div id="gwCharges">${rows || '<p class="hint">Nobody linked yet.</p>'}</div>
 
     ${g.historical ? '' : `
@@ -481,7 +511,8 @@ async function detail(id) {
       <button class="btn btn-secondary" onclick="window.editGameweekClick('${g.id}')">Edit charge amounts</button>
       <span class="cr-spacer"></span>
       <button class="btn" data-gw-done>Done</button>
-    </div>`}`);
+    </div>`}
+   </div>`, { wide: true });
 
   const reopen = () => detail(id);
 
