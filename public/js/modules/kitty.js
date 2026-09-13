@@ -42,7 +42,7 @@ async function render() {
 
     const summaryHtml = `
       <div style="margin-top: 2rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px;">
-        <div style="font-weight: 600; margin-bottom: 1rem;">Breakdown by Category</div>
+        <div style="font-weight: 600; margin-bottom: 1rem;">Breakdown by category</div>
         <table style="width: 100%; font-size: 0.9rem;">
           <tbody>
             ${Object.entries(breakdown).sort().map(([cat, amt]) => `
@@ -62,11 +62,9 @@ async function render() {
     summaryContainer.setAttribute('data-kitty-summary', '');
     summaryContainer.innerHTML = summaryHtml;
 
-    const tableParent = $('kittyTable').parentElement;
-    if (!tableParent.querySelector('[data-kitty-summary]')) {
-      tableParent.appendChild(summaryContainer);
-    } else {
-      tableParent.querySelector('[data-kitty-summary]').innerHTML = summaryHtml;
+    // Below the ledger but outside its scroll box, like the two panels above it.
+    if (!summaryContainer.isConnected) {
+      $('kittyTable').closest('.sams-card').appendChild(summaryContainer);
     }
   }
 }
@@ -78,7 +76,7 @@ export function initKitty() {
   const bulkBtn = document.createElement('button');
   bulkBtn.type = 'button';
   bulkBtn.className = 'btn btn-secondary';
-  bulkBtn.textContent = '📥 Bulk Import';
+  bulkBtn.textContent = '📥 Bulk import';
   bulkBtn.addEventListener('click', bulkImportModal);
   $('kittyForm').parentElement.appendChild(bulkBtn);
 
@@ -97,11 +95,11 @@ export function initKitty() {
 }
 
 function bulkImportModal() {
-  openModal('Bulk Import Kitty Entries', `
+  openModal('Bulk import kitty entries', `
     <div style="margin-bottom: 1.5rem;">
-      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste Data (Label + Amount)</label>
+      <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">Paste data (label + amount)</label>
       <p class="hint" style="margin: 0 0 0.8rem; font-size: 0.85rem;">
-        Positive = Income, Negative = Expense. One per line.
+        Positive is income, negative is expense. One per line.
       </p>
       <textarea id="ki_data" placeholder="Abhi Handover&#9;640
 Mon/Thu Kitty 2025&#9;1381
@@ -117,7 +115,7 @@ Expenses&#9;-5512
     try {
       const result = await api.bulkImportKittyEntries(data);
       closeModal();
-      toast(`✓ Imported ${result.imported} Kitty entries`);
+      toast(`✓ Imported ${result.imported} kitty entries`);
       render();
     } catch (e) { toast(e.message, true); }
   });
@@ -252,11 +250,12 @@ async function renderPendingCollections() {
   container.setAttribute('data-pending-collections', '');
   container.innerHTML = html;
 
-  const tableParent = $('kittyTable').parentElement;
-  if (!tableParent.querySelector('[data-pending-collections]')) {
-    tableParent.insertBefore(container, $('kittyTable'));
-  } else {
-    tableParent.querySelector('[data-pending-collections]').innerHTML = html;
+  // The mount point lives in index.html, above the ledger and outside its
+  // scroll box. Inserting it beside the table put this control inside the
+  // horizontal scroller, where it slid away with the columns.
+  if (!container.isConnected) {
+    $('kittyTable').closest('.sams-card').insertBefore(
+      container, $('kittyTable').closest('.table-scroll'));
   }
 
   // Recording a top-up credits a balance, so it is worth a confirmation — the
@@ -296,11 +295,12 @@ function renderQuickWithdraw() {
   container.setAttribute('data-quick-withdraw', '');
   container.innerHTML = html;
 
-  const tableParent = $('kittyTable').parentElement;
-  if (!tableParent.querySelector('[data-quick-withdraw]')) {
-    tableParent.insertBefore(container, $('kittyTable'));
-  } else {
-    tableParent.querySelector('[data-quick-withdraw]').innerHTML = html;
+  // The mount point lives in index.html, above the ledger and outside its
+  // scroll box. Inserting it beside the table put this control inside the
+  // horizontal scroller, where it slid away with the columns.
+  if (!container.isConnected) {
+    $('kittyTable').closest('.sams-card').insertBefore(
+      container, $('kittyTable').closest('.table-scroll'));
   }
 
   // Quick withdraw button handlers

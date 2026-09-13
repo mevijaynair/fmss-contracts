@@ -85,24 +85,24 @@ async function render() {
   controlsPanel.innerHTML = `
     <input type="text" id="pl_search" placeholder="🔍 Search by name..." value="${searchQuery}">
     <select id="pl_sort">
-      <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Sort: Name</option>
-      <option value="balance" ${sortBy === 'balance' ? 'selected' : ''}>Sort: Balance</option>
-      <option value="status" ${sortBy === 'status' ? 'selected' : ''}>Sort: Status</option>
-      <option value="games" ${sortBy === 'games' ? 'selected' : ''}>Sort: Games</option>
+      <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Sort by name</option>
+      <option value="balance" ${sortBy === 'balance' ? 'selected' : ''}>Sort by balance</option>
+      <option value="status" ${sortBy === 'status' ? 'selected' : ''}>Sort by status</option>
+      <option value="games" ${sortBy === 'games' ? 'selected' : ''}>Sort by games</option>
     </select>
     <select id="pl_filter_status">
-      <option value="all" ${filterStatus === 'all' ? 'selected' : ''}>Status: All</option>
-      <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>Status: In Contract</option>
-      <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Status: Out</option>
+      <option value="all" ${filterStatus === 'all' ? 'selected' : ''}>All statuses</option>
+      <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>In contract</option>
+      <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Out of contract</option>
     </select>
     <label class="guest-toggle" title="Outside players who are not on a contract">
       <input type="checkbox" id="pl_show_guests" ${showGuests ? 'checked' : ''}>
       <span>Show guests<span id="pl_guest_count" class="hint"></span></span>
     </label>
     <select id="pl_filter_balance">
-      <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Balance: All</option>
-      <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>Balance: Positive</option>
-      <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>Balance: Negative</option>
+      <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Any balance</option>
+      <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>In credit</option>
+      <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>In the red</option>
     </select>
   `;
 
@@ -118,12 +118,13 @@ async function render() {
   const guestsOwing = cashOwed.filter(c => c.owed > 0);
   const guestDebt = guestsOwing.reduce((a, c) => a + c.owed, 0);
 
-  const tableContainer = $('playersTable').parentElement;
-
-  if (!tableContainer.querySelector('[data-player-controls]')) {
-    tableContainer.insertBefore(controlsPanel, $('playersTable'));
-  } else {
-    tableContainer.querySelector('[data-player-controls]').innerHTML = controlsPanel.innerHTML;
+  // The mount point is in index.html, outside the table's scroll box. It used to
+  // be created here and inserted beside the table, which put the search box and
+  // every filter INSIDE the horizontal scroller — so scrolling a nine-column
+  // table sideways slid the controls off the screen.
+  if (!controlsPanel.isConnected) {
+    $('playersTable').closest('.sams-card').insertBefore(
+      controlsPanel, $('playersTable').closest('.table-scroll'));
   }
 
   // Add event listeners

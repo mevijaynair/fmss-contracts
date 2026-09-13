@@ -241,6 +241,11 @@
                   title="The same balances, laid out as the sheet you send round">Standing sheet</button>
                 <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
               </div></div>
+            <!-- Search and filters live OUTSIDE the scroll box. players.js used
+                 to insert them next to the table, which put them inside it — so
+                 scrolling a nine-column table sideways carried the search box
+                 off the screen with it. -->
+            <div class="filter-bar" data-player-controls></div>
             <div class="table-scroll">
               <table class="sams-table" id="playersTable">
                 <thead><tr><th>Player</th><th>Status</th><th class="num">Opening</th>
@@ -350,20 +355,32 @@
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Add kitty entry</h3>
               <span class="card-sub">Club income or expense (BBQ, iftar, top-ups…)</span></div>
-            <form id="kittyForm">
-              <div class="form-row">
-                <div class="form-group"><label>Type</label><select id="kf_kind"><option value="expense">Expense</option><option value="income">Income</option></select></div>
-                <div class="form-group"><label>Amount (AED)</label><input type="number" id="kf_amount" step="1"></div>
-              </div>
-              <div class="form-row mt">
-                <div class="form-group"><label>Label</label><input type="text" id="kf_label" placeholder="e.g. Football top-up"></div>
-                <div class="form-group"><label>Date</label><input type="date" id="kf_date"></div>
-              </div>
-              <button type="submit" class="btn mt">Add entry</button>
+            <!-- Four short fields and a button. As two stacked pairs they took
+                 the height of a paragraph across a full-width card; on a desktop
+                 they are one line. The label gets the slack because it is the
+                 only one whose content varies in length. -->
+            <form id="kittyForm" class="kitty-form">
+              <div class="form-group"><label for="kf_kind">Type</label>
+                <select id="kf_kind"><option value="expense">Expense</option><option value="income">Income</option></select></div>
+              <div class="form-group"><label for="kf_amount">Amount (AED)</label>
+                <input type="number" id="kf_amount" step="1"></div>
+              <div class="form-group"><label for="kf_label">Label</label>
+                <input type="text" id="kf_label" placeholder="e.g. Football top-up"></div>
+              <div class="form-group"><label for="kf_date">Date</label>
+                <input type="date" id="kf_date"></div>
+              <button type="submit" class="btn">Add entry</button>
             </form>
           </div>
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Kitty ledger</h3></div>
+            <!-- Taking money out and chasing what is owed are two controls, not
+                 two rows of the ledger — and kitty.js was inserting both beside
+                 the table, which put them inside its horizontal scroller. Side
+                 by side above it on a desktop, stacked on a phone. -->
+            <div class="kitty-panels">
+              <div data-quick-withdraw></div>
+              <div data-pending-collections></div>
+            </div>
             <div class="table-scroll">
               <table class="sams-table" id="kittyTable">
                 <thead><tr><th>Date</th><th>Type</th><th>Label</th><th class="num">Amount</th><th></th></tr></thead>

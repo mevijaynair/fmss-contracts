@@ -999,6 +999,24 @@ body.role-admin .role-player-only { display: none !important; }
 .gd-fixture-pick { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 
 /* Everything nobody fills in on a normal night. */
+/* ===== Kitty ===== */
+/* One line of short fields on a desktop, stacked on a phone. align-items:end so
+   the button sits on the baseline of the inputs rather than their labels. */
+.kitty-form { display: grid; gap: 0.8rem 1rem; grid-template-columns: 1fr; }
+@media (min-width: 900px) {
+  .kitty-form { grid-template-columns: 9rem 9rem minmax(10rem, 1fr) 10rem auto;
+    align-items: end; }
+  .kitty-form .btn { height: 2.4rem; }
+}
+
+/* Taking money out and chasing what is owed: two controls, side by side above
+   the ledger rather than stacked inside its scroll box. */
+.kitty-panels { display: grid; gap: 1rem; grid-template-columns: 1fr; margin-bottom: 1rem; }
+.kitty-panels > div:empty { display: none; }
+@media (min-width: 1100px) {
+  .kitty-panels { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; }
+}
+
 /* ===== Game day =====
    One job in two halves: check who is being charged, then say what the game
    cost and confirm it. Stacked, that meant scrolling past the whole squad to
