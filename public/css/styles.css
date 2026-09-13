@@ -1090,6 +1090,27 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
   color: var(--sport-on-soft); }
 .res-val.is-win { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
 .res-val.is-capt { color: color-mix(in srgb, var(--warning) 72%, var(--text-main)); }
+/* ---- Tournaments ----
+   Three or more sides, so there is no opponent to have beaten and none of the
+   match tables apply. Listed plainly instead: when it was, who was in it, and
+   who came out on top. The winning side is the only thing allowed to stand
+   out, because it is the only result the game actually produced. */
+.trn-game { padding: 0.75rem 0; border-bottom: 1px solid var(--border-color); }
+.trn-game:last-of-type { border-bottom: none; }
+.trn-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  margin-bottom: 0.45rem; }
+.trn-date { font-weight: 700; font-size: 0.88rem; color: var(--text-main); }
+.trn-note { font-size: 0.78rem; color: var(--text-faint); }
+.trn-team { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.2rem 0.7rem; padding: 0.3rem 0; align-items: baseline; }
+.trn-side { font-weight: 600; font-size: 0.82rem; color: var(--text-muted); }
+.trn-team.is-champ .trn-side { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
+.trn-players { font-size: 0.82rem; color: var(--text-faint); min-width: 0; }
+.trn-team.is-champ .trn-players { color: var(--text-muted); }
+@media (max-width: 560px) {
+  .trn-team { grid-template-columns: 1fr; }
+}
+
 .res-quarter { padding: 1.1rem; border-radius: var(--radius); background: var(--bg-inset);
   border: 1px solid var(--border-color); border-top: 3px solid var(--sport); }
 .res-quarter.is-empty { border-top-color: var(--border-strong); opacity: 0.6; }

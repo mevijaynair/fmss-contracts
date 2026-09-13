@@ -24,7 +24,7 @@ import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { movementsRepo } from '../repos/movements.js';
 import { parseTeams } from '../parser.js';
-import { parseResultsSheet, normaliseScore, winningTeam } from '../results_import.js';
+import { parseResultsSheet, normaliseScore, winningTeam, isTournament } from '../results_import.js';
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
 
 const r = Router();
@@ -674,7 +674,7 @@ r.get('/results', wrap((req) => {
         goalsWin: Math.max(row.goals_team_a, row.goals_team_b),
         goalsLose: Math.min(row.goals_team_a, row.goals_team_b),
         known: true,
-        assumed: false,
+        goalsKnown: true,
       }
       // Same reason as statsRepo: scoreline is "0-0" on any game nobody scored,
       // so falling back to it turns "no result recorded" into a nil-nil draw.
@@ -683,6 +683,9 @@ r.get('/results', wrap((req) => {
       ...g,
       charges,
       teams,
+      // Three sides or more is a tournament, and the Results screen keeps those
+      // out of every match metric rather than scoring them as head-to-heads.
+      is_tournament: isTournament(g.game_type, teams),
       result: {
         ...score,
         winner_team: winningTeam(score.winner, teams),

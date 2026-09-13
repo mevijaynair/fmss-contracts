@@ -20,6 +20,7 @@ async function render() {
     showLeaderboards(stats);
     showTable(stats);
     showPartnerships(all);
+    showTournaments(all);
     showTrends(all);
   } catch (e) { toast(`Error: ${e.message}`, true); }
 }
@@ -65,10 +66,13 @@ function outcomeFor(gw, charge) {
   return charge.team === res.winner_team ? 'win' : 'loss';
 }
 
+/** Matches only — a tournament is a different game and is reported on its own. */
+const isMatch = (gw) => !gw.is_tournament;
+
 /** Per player: an ordered list of their games, oldest first. */
 function timelines(gws) {
   const byPlayer = {};
-  const sorted = [...gws].filter(g => inPeriod(g.date))
+  const sorted = [...gws].filter(g => inPeriod(g.date) && isMatch(g))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
   for (const gw of sorted) {
@@ -163,6 +167,9 @@ function buildStats(gws) {
     const s = {
       id, name, games: games.length,
       wins: 0, draws: 0, losses: 0, unknown: 0,
+      // Games whose goals were actually written down. Fewer than `decided`,
+      // because "Reds win" settles the result and says nothing about goals.
+      goalGames: 0, tournaments: 0,
       gf: 0, ga: 0, captainGames: 0, captainDecided: 0, captainWins: 0,
       first: games[0]?.date || null, last: games[games.length - 1]?.date || null,
     };
@@ -173,21 +180,39 @@ function buildStats(gws) {
       // denominator of a win rate. Counting every captained game there — including
       // ones with no score — quietly deflated every captain's record.
       if (g.captain) s.captainDecided++;
-      const w = Number(g.result.goalsWin) || 0;
-      const l = Number(g.result.goalsLose) || 0;
-      if (g.outcome === 'win') { s.wins++; s.gf += w; s.ga += l; if (g.captain) s.captainWins++; }
-      else if (g.outcome === 'loss') { s.losses++; s.gf += l; s.ga += w; }
-      else { s.draws++; s.gf += w; s.ga += w; }
+      // Goals only where goals exist. A winner with no scoreline used to be
+      // recorded as a 3–0, which put invented numbers in the goal table.
+      if (g.result.goalsKnown) {
+        s.goalGames++;
+        const w = Number(g.result.goalsWin) || 0;
+        const l = Number(g.result.goalsLose) || 0;
+        if (g.outcome === 'win') { s.gf += w; s.ga += l; }
+        else if (g.outcome === 'loss') { s.gf += l; s.ga += w; }
+        else { s.gf += w; s.ga += w; }
+      }
+      if (g.outcome === 'win') { s.wins++; if (g.captain) s.captainWins++; }
+      else if (g.outcome === 'loss') s.losses++;
+      else s.draws++;
     }
     s.decided = s.wins + s.draws + s.losses;
     s.winRate = s.decided ? Math.round((s.wins / s.decided) * 100) : null;
     s.gd = s.gf - s.ga;
-    s.gdPerGame = s.decided ? +(s.gd / s.decided).toFixed(2) : null;
+    s.gdPerGame = s.goalGames ? +(s.gd / s.goalGames).toFixed(2) : null;
     s.captainWinRate = s.captainDecided
       ? Math.round((s.captainWins / s.captainDecided) * 100) : null;
     Object.assign(s, streaks(games));
     s.form = form(games);
     out[id] = s;
+  }
+
+  // Tournament appearances are worth knowing about, so they are counted — they
+  // just never touch a result. Someone who has played nothing but tournaments
+  // has no match record to sit on these tables and appears only in that card.
+  for (const gw of gws) {
+    if (isMatch(gw) || !inPeriod(gw.date)) continue;
+    for (const c of gw.charges || []) {
+      if (out[c.player_id]) out[c.player_id].tournaments++;
+    }
   }
   return out;
 }
@@ -202,7 +227,7 @@ function buildStats(gws) {
 function partnerships(gws, { minGames = 4 } = {}) {
   const pair = {};
   for (const gw of gws) {
-    if (!inPeriod(gw.date)) continue;
+    if (!inPeriod(gw.date) || !isMatch(gw)) continue;
     const res = gw.result || {};
     if (!res.known || !(res.is_draw || res.winner_team)) continue;
 
@@ -243,15 +268,24 @@ function trendSeries(gws) {
   for (const gw of gws) {
     if (!gw.date) continue;
     const key = `${yOf(gw.date)}-${qOf(gw.date)}`;
-    const b = (buckets[key] ??= { key, games: 0, decided: 0, goals: 0, margins: [], players: 0, draws: 0 });
+    const b = (buckets[key] ??= {
+      key, games: 0, decided: 0, goals: 0, goalGames: 0,
+      margins: [], players: 0, draws: 0, tournaments: 0,
+    });
     b.games++;
     b.players += (gw.charges || []).length;
+    if (!isMatch(gw)) { b.tournaments++; continue; }
     const res = gw.result || {};
     if (res.known && (res.is_draw || res.winner_team)) {
       b.decided++;
       if (res.is_draw) b.draws++;
-      b.goals += (Number(res.goalsWin) || 0) + (Number(res.goalsLose) || 0);
-      if (!res.is_draw) b.margins.push(Number(res.margin) || 0);
+      // Average goals has to divide by the games that HAD goals, or the eight
+      // Saturdays with no scoreline drag every quarter's average toward zero.
+      if (res.goalsKnown) {
+        b.goalGames++;
+        b.goals += (Number(res.goalsWin) || 0) + (Number(res.goalsLose) || 0);
+        if (!res.is_draw) b.margins.push(Number(res.margin) || 0);
+      }
     }
   }
   return Object.values(buckets)
@@ -259,7 +293,7 @@ function trendSeries(gws) {
     .map(b => ({
       ...b,
       avgPlayers: b.games ? +(b.players / b.games).toFixed(1) : 0,
-      avgGoals: b.decided ? +(b.goals / b.decided).toFixed(1) : null,
+      avgGoals: b.goalGames ? +(b.goals / b.goalGames).toFixed(1) : null,
       avgMargin: b.margins.length ? +(b.margins.reduce((s, m) => s + m, 0) / b.margins.length).toFixed(1) : null,
       drawPct: b.decided ? Math.round((b.draws / b.decided) * 100) : null,
     }));
@@ -281,7 +315,7 @@ function showEmpty() {
       <div class="es-sub">Charge a game from Game Day, or bring in past results with Import.</div>
       <button class="btn btn-sm" id="emptyImportBtn">📥 Import Results</button>
     </div>`;
-  ['results-period','results-table','results-pairs','results-trends']
+  ['results-period','results-table','results-pairs','results-tourneys','results-trends']
     .forEach(k => { slot(k).innerHTML = ''; });
   $('emptyImportBtn')?.addEventListener('click', showImportResultsModal);
 }
@@ -327,6 +361,10 @@ function showPeriodBar(gws, stats) {
 function showLeaderboards(stats) {
   const all = Object.values(stats).filter(p => p.games >= minGames);
   const rated = all.filter(p => p.decided >= Math.max(3, Math.floor(minGames / 2)));
+  // Goal difference needs games whose goals were actually recorded, which is a
+  // smaller set than games with a result — "Reds win" decides a match without
+  // saying anything about goals.
+  const scored = all.filter(p => p.goalGames >= Math.max(3, Math.floor(minGames / 2)));
   // Captained games that were actually played out. A game with no score can be
   // captained but cannot be won, so it belongs in neither half of a win rate.
   const capts = all.filter(p => p.captainDecided >= 2);
@@ -343,7 +381,7 @@ function showLeaderboards(stats) {
     const out = fmt(p);
     const { v, meta } = typeof out === 'object' && out !== null ? out : { v: out, meta: '' };
     return `
-          <div class="res-row${meta ? ' has-meta' : ''}" data-player="${esc(p.name)}">
+          <div class="res-row${meta ? ' has-meta' : ''}" data-player="${esc(p.id)}">
             <span class="res-name">${i + 1}. ${esc(p.name)}</span>
             <span class="res-val ${tone}">${v}</span>
             ${meta ? `<span class="res-meta">${meta}</span>` : ''}
@@ -375,18 +413,18 @@ function showLeaderboards(stats) {
           meta: `won ${p.captainWins} of ${p.captainDecided} led${
             p.captainGames > p.captainDecided
               ? ` · ${p.captainGames - p.captainDecided} had no score` : ''}` }))}
-      ${board('⚽ Goal Difference', 'per game with a score', '',
-        [...rated].sort((a, b) => b.gdPerGame - a.gdPerGame),
+      ${board('⚽ Goal Difference', 'per game where goals were recorded', '',
+        [...scored].sort((a, b) => b.gdPerGame - a.gdPerGame),
         // Ranked per game, so the per-game figure is the one in bold. Leading
         // with the total while sorting by the rate put Rony's +19 below
         // Praveen's +7 and read as a broken sort.
         p => ({ v: `${signed(p.gdPerGame)}`,
-          meta: `${signed(p.gd)} across ${p.decided} games` }))}
+          meta: `${signed(p.gd)} across ${p.goalGames} games with goals` }))}
     </div>`;
 
   slot('results-lb').querySelectorAll('[data-player]').forEach(d =>
     d.addEventListener('click', () => {
-      const p = all.find(x => x.name === d.dataset.player);
+      const p = all.find(x => x.id === d.dataset.player);
       if (p) showPlayerDetail(p);
     }));
 }
@@ -460,6 +498,7 @@ function showPlayerDetail(p) {
     ${row('🤝 Drawn', p.draws)}
     ${row('❌ Lost', p.losses)}
     ${p.unknown ? row('❔ No result recorded', p.unknown) : ''}
+    ${p.tournaments ? row('🏆 Tournaments', `${p.tournaments} <span class="hint">listed separately — not scored</span>`) : ''}
     <h4 class="mini-h mt">Form &amp; streaks</h4>
     ${row('Last five', formDots(p.form))}
     ${row('Current win streak', p.currentWin || '—', 'is-win')}
@@ -471,8 +510,12 @@ function showPlayerDetail(p) {
       esc(shortSpan(p.longestUnbeatenFrom, p.longestUnbeatenTo))}</span>`
     : '—')}
     <h4 class="mini-h mt">Goals</h4>
-    ${row('Scored / conceded', `${p.gf} / ${p.ga}`)}
-    ${row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`, p.gd >= 0 ? 'is-win' : '')}
+    ${p.goalGames
+    ? row('Scored / conceded', `${p.gf} / ${p.ga} <span class="hint">over ${
+      p.goalGames} game${p.goalGames === 1 ? '' : 's'} where goals were written down</span>`)
+      + row('Goal difference', `${signed(p.gd)} (${signed(p.gdPerGame ?? 0)} per game)`,
+        p.gd >= 0 ? 'is-win' : '')
+    : row('Scored / conceded', '<span class="hint">no game of theirs has a recorded scoreline</span>')}
     <h4 class="mini-h mt">Captaincy</h4>
     ${row('👑 Games led', p.captainGames)}
     ${row('Won as captain', `${p.captainWins} of ${p.captainDecided} <span class="hint">${
@@ -515,6 +558,55 @@ function showTrends(gws) {
       number means closer matches. “Scored” is how many games have a usable result;
       the rest cannot contribute to any win rate.</p>
   </div>`;
+}
+
+/**
+ * Tournaments, kept entirely apart from the match tables above.
+ *
+ * A three-sided game is not a fixture with a winner and a loser: on 30 May the
+ * whites won, the blues were runners-up and the reds were third, and scoring it
+ * as a head-to-head made the last two identical. Nothing here feeds a win rate,
+ * a streak, a goal difference or a partnership — these games are listed, and
+ * that is all.
+ */
+function showTournaments(gws) {
+  const played = gws
+    .filter(g => !isMatch(g) && inPeriod(g.date))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!played.length) { slot('results-tourneys').innerHTML = ''; return; }
+
+  const card = (g) => {
+    const byTeam = {};
+    for (const c of g.charges || []) {
+      if (c.team) (byTeam[c.team] ??= []).push(c.player_name);
+    }
+    const champ = g.result?.winner_team || null;
+    // Winner first, then whoever else took part.
+    const order = Object.keys(byTeam).sort((a, b) =>
+      (b === champ) - (a === champ) || a.localeCompare(b));
+
+    return `
+      <div class="trn-game">
+        <div class="trn-head">
+          <span class="trn-date">${fmtDate(g.date)}</span>
+          <span class="trn-note">${esc(g.tournament_name || g.score || 'Tournament')}</span>
+        </div>
+        ${order.map(t => `
+          <div class="trn-team${t === champ ? ' is-champ' : ''}">
+            <span class="trn-side">${esc(t)}${t === champ ? ' 🏆' : ''}</span>
+            <span class="trn-players">${byTeam[t].map(esc).join(', ')}</span>
+          </div>`).join('')}
+      </div>`;
+  };
+
+  slot('results-tourneys').innerHTML = `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">🏆 Tournaments</h3>
+        <span class="card-sub">${played.length} game${played.length === 1 ? '' : 's'} with three or more sides</span></div>
+      ${played.map(card).join('')}
+      <p class="hint">Counted as appearances, but kept out of win rates, streaks and
+        goal difference — with three sides there is no single opponent to have beaten.</p>
+    </div>`;
 }
 
 // Who wins together. Useful for picking balanced sides.

@@ -739,6 +739,143 @@ test('a historical game contributes nothing — the opening snapshot already has
   assert.equal(kittyOf(gw.id), 0, 'historical money must never be banked twice');
 });
 
+/* ===== Match Results: what a game contributes to a record =====
+   These pin the three things that were wrong. A side-less helper is used so the
+   team on each charge can be set, which the `charge` helper above does not do. */
+
+const sided = (gid, pid, team, { captain = 0 } = {}) =>
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,?,?,'',0,?,0)`).run(`ch${++seq}`, gid, pid, team, captain, pid);
+const scored = (gid, text) =>
+  db.prepare('UPDATE gameweeks SET score = ? WHERE id = ?').run(text, gid);
+
+test('a winner with no scoreline counts as a win and contributes no goals', () => {
+  const w = player('Won it'); const l = player('Lost it');
+  const g = game();
+  sided(g, w, 'Red'); sided(g, l, 'Blue');
+  scored(g, 'Reds win');                    // no numbers anywhere in the text
+
+  const win = statsRepo.matchRecord(w, CONTRACT);
+  assert.equal(win.wins, 1, 'the result is known — it is a win');
+  assert.equal(win.goalGames, 0, 'no game of theirs has recorded goals');
+  assert.equal(win.gf, 0);
+  assert.equal(win.ga, 0, 'a 3-0 must not be invented to fill the gap');
+  assert.equal(win.gdPerGame, null, 'goal difference per game is undefined, not 0');
+  assert.equal(statsRepo.matchRecord(l, CONTRACT).losses, 1);
+});
+
+test('a margin without a scoreline is still not a scoreline', () => {
+  const w = player('By four'); const l = player('By four loser');
+  const g = game();
+  sided(g, w, 'Blue'); sided(g, l, 'Red');
+  scored(g, 'Blues win by 4');
+  const r = statsRepo.matchRecord(w, CONTRACT);
+  assert.equal(r.wins, 1);
+  assert.equal(r.goalGames, 0, '4-0 is a guess at which goals made the margin');
+  assert.equal(r.gf, 0);
+});
+
+test('a real scoreline does contribute goals', () => {
+  const w = player('Scorer'); const l = player('Conceder');
+  const g = game();
+  sided(g, w, 'Blue'); sided(g, l, 'Red');
+  scored(g, 'Blue win 7-5');
+  const win = statsRepo.matchRecord(w, CONTRACT);
+  assert.equal(win.goalGames, 1);
+  assert.deepEqual([win.gf, win.ga, win.gd], [7, 5, 2]);
+  const lose = statsRepo.matchRecord(l, CONTRACT);
+  assert.deepEqual([lose.gf, lose.ga, lose.gd], [5, 7, -2], 'the loser gets it the other way up');
+});
+
+test('a game with three sides is a tournament, not a match', () => {
+  const a = player('Champ'); const b = player('Runner up'); const c = player('Third');
+  const g = game();
+  sided(g, a, 'Red'); sided(g, b, 'Blue'); sided(g, c, 'White');
+  scored(g, 'Reds win');
+
+  for (const [who, label] of [[a, 'winner'], [b, 'runner up'], [c, 'third']]) {
+    const r = statsRepo.matchRecord(who, CONTRACT);
+    assert.equal(r.tournaments, 1, `${label} played a tournament`);
+    assert.equal(r.games, 0, `${label}: a tournament is not a match`);
+    assert.equal(r.wins + r.draws + r.losses, 0,
+      `${label}: three sides means there is no head-to-head to win or lose`);
+  }
+});
+
+test('an explicit tournament is kept out even with two sides', () => {
+  const a = player('Flagged'); const b = player('Flagged two');
+  const g = game();
+  sided(g, a, 'Red'); sided(g, b, 'Blue');
+  scored(g, 'Red win 3-1');
+  db.prepare("UPDATE gameweeks SET game_type = 'tournament' WHERE id = ?").run(g);
+  assert.equal(statsRepo.matchRecord(a, CONTRACT).tournaments, 1);
+  assert.equal(statsRepo.matchRecord(a, CONTRACT).games, 0);
+});
+
+test('every record still adds up once tournaments are held out', () => {
+  const p = player('Adds up');
+  const g1 = game(); sided(g1, p, 'Red'); scored(g1, 'Red win 4-2');
+  const g2 = game(); sided(g2, p, 'Red');                       // no score at all
+  const g3 = game(); sided(g3, p, 'Red');
+  sided(g3, player('T2'), 'Blue'); sided(g3, player('T3'), 'White');
+  scored(g3, 'Reds win');                                        // tournament
+  const r = statsRepo.matchRecord(p, CONTRACT);
+  assert.equal(r.wins + r.draws + r.losses + r.unknown, r.games,
+    'games must account for every match, and only matches');
+  assert.equal(r.games, 2);
+  assert.equal(r.tournaments, 1);
+});
+
+/* ===== The player's own page must agree with the Standing sheet ===== */
+
+const timelineBalance = (pid) => round2(statsRepo.playerTimeline(pid, CONTRACT).presentBalance);
+
+test('a player timeline reconciles to their ledger balance', () => {
+  const p = player('Reconciles', 200);
+  contribute(p, 60);
+  charge(game(), p, 35);
+  txn(p, 'adjustment', -10);
+  assert.equal(timelineBalance(p), balanceOf(p));
+  assert.equal(timelineBalance(p), 215);
+});
+
+test('a guest billed to their host does not appear on the guest own timeline', () => {
+  const host = player('Host', 100);
+  const guest = player('Brought along');
+  makeOutside(guest);
+  charge(game(), guest, 35, { chargedTo: host });
+  assert.equal(timelineBalance(guest), 0, 'the guest keeps no balance and was billed to nobody');
+  assert.equal(timelineBalance(guest), balanceOf(guest));
+  assert.equal(timelineBalance(host), balanceOf(host), 'the host carries it');
+  assert.equal(timelineBalance(host), 65);
+});
+
+test('cash and kitty-funded charges stay off the timeline, as they do off the ledger', () => {
+  const p = player('Cash night', 100);
+  const g = game();
+  charge(g, p, 35);
+  db.prepare('UPDATE charges SET settles_cash = 1 WHERE gameweek_id = ?').run(g);
+  assert.equal(timelineBalance(p), 100, 'paid on the night, never off a balance');
+  assert.equal(timelineBalance(p), balanceOf(p));
+
+  const k = player('Kitty carried', 100);
+  const g2 = game();
+  charge(g2, k, 35);
+  db.prepare('UPDATE charges SET settled_from_kitty = 1 WHERE gameweek_id = ?').run(g2);
+  assert.equal(timelineBalance(k), 100, 'the pot carried it');
+  assert.equal(timelineBalance(k), balanceOf(k));
+});
+
+test('a charge settled on another contract leaves this timeline alone', () => {
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('other','Other','{}',0,2)").run();
+  const p = player('Settles elsewhere', 100);
+  const g = game();
+  charge(g, p, 35);
+  db.prepare("UPDATE charges SET settle_contract_id = 'other' WHERE gameweek_id = ?").run(g);
+  assert.equal(timelineBalance(p), 100, 'it comes off the other contract, not this one');
+  assert.equal(timelineBalance(p), balanceOf(p));
+});
+
 process.on('exit', () => {
   try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ }
 });

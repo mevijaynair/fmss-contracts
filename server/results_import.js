@@ -137,44 +137,77 @@ export function parseSheetDate(raw) {
   return null;
 }
 
-// When a result names a winner but no margin ("Reds win"), assume this many
-// goals so the game still contributes a goal difference. Flagged as `assumed`
-// so it can be told apart from a real scoreline.
-export const ASSUMED_MARGIN = 3;
-
 /**
- * Turn a free-text result into concrete goals, applying the house rules:
- *   "12-9"          → 12–9   (exact)
- *   "Blues win by 4" → 4–0   (margin known, goals not)
- *   "Reds win"       → 3–0   (nothing known — assume a 3-goal win)
- *   "Draw 6-6"       → 6–6
- * Returns { winner, margin, goalsWin, goalsLose, known, assumed, text }.
+ * Turn a free-text result into a winner and, when the text really says so,
+ * goals:
+ *   "12-9"                 → blue? 12–9, goals known
+ *   "Red 5 - Blue 5 (draw)" → draw 5–5, goals known
+ *   "Blues win by 4"        → blue wins, margin 4, GOALS NOT KNOWN
+ *   "Reds win"              → red wins, no margin, GOALS NOT KNOWN
+ *
+ * Returns { winner, margin, goalsWin, goalsLose, known, goalsKnown, text }.
  * `winner` is the winning colour lowercased, 'draw', or null when unreadable.
+ * `known` says the OUTCOME can be resolved; `goalsKnown` says the goals were
+ * actually written down.
+ *
+ * It used to invent a 3–0 whenever a winner was named without a scoreline, on
+ * the reasoning that the game should still contribute a goal difference. Eight
+ * Saturdays were recorded that way — 24 goals across 106 appearances, about a
+ * third of the goal data on that contract — and although the result carried an
+ * `assumed` flag to mark it, nothing anywhere ever read the flag. So the Goal
+ * Difference leaderboard ranked players partly on numbers nobody had written,
+ * shown exactly like the real ones. A margin-only text ("won by 4") has the
+ * same problem in smaller form: the difference is real but 4–0 is a guess.
+ *
+ * Now the outcome is still counted — a win is a win — and the goals simply stay
+ * unknown, which is what the text actually says.
  */
 export function normaliseScore(raw) {
   const s = parseScoreText(raw);
   const out = {
     text: s.text, winner: s.winner, margin: s.margin,
-    goalsWin: null, goalsLose: null, known: false, assumed: false,
+    goalsWin: null, goalsLose: null, known: false, goalsKnown: false,
   };
   if (!s.text) return out;
 
+  const bothGoals = s.goalsA !== null && s.goalsB !== null;
+
   if (s.winner === 'draw') {
-    const level = s.goalsA !== null ? s.goalsA : 0;
+    if (!bothGoals) return { ...out, winner: 'draw', margin: 0, known: true };
+    const level = Math.max(s.goalsA, s.goalsB);
     return { ...out, winner: 'draw', margin: 0, goalsWin: level, goalsLose: level,
-      known: true, assumed: s.goalsA === null };
+      known: true, goalsKnown: true };
   }
   if (!s.winner) return out;                       // cannot tell who won
 
-  if (s.goalsA !== null && s.goalsB !== null) {    // a real scoreline
-    const hi = Math.max(s.goalsA, s.goalsB), lo = Math.min(s.goalsA, s.goalsB);
-    return { ...out, margin: hi - lo, goalsWin: hi, goalsLose: lo, known: true };
+  if (bothGoals) {
+    const hi = Math.max(s.goalsA, s.goalsB);
+    const lo = Math.min(s.goalsA, s.goalsB);
+    return { ...out, margin: hi - lo, goalsWin: hi, goalsLose: lo,
+      known: true, goalsKnown: true };
   }
-  if (s.margin !== null) {                          // "won by 4" → 4–0
-    return { ...out, margin: s.margin, goalsWin: s.margin, goalsLose: 0, known: true };
-  }
-  return { ...out, margin: ASSUMED_MARGIN, goalsWin: ASSUMED_MARGIN, goalsLose: 0,
-    known: true, assumed: true };
+  // A winner, and at most a margin. The outcome counts; the goals do not exist.
+  return { ...out, margin: s.margin, known: true };
+}
+
+/**
+ * A game with three or more sides is a tournament, not a match.
+ *
+ * Two of these are in the record — "Reds win Tourney" (21 Mar) and "whites win,
+ * blues runners up, and whites" (30 May), eighteen players apiece in three
+ * teams — and every metric on the Results screen treated them as head-to-heads.
+ * Anything that was not the winning side was marked a LOSS, so on 30 May the
+ * runners-up and the third team came out identical, in a text that says
+ * outright they were not. It is a different game and it is kept apart.
+ *
+ * The explicit game_type wins where it is set; otherwise the shape of the game
+ * decides, which is what catches the two imported ones that predate the flag.
+ */
+export const TOURNAMENT_MIN_TEAMS = 3;
+export function isTournament(gameType, teams = []) {
+  if (String(gameType || '') === 'tournament') return true;
+  return new Set(teams.filter(Boolean).map(t => String(t).toLowerCase().trim())).size
+    >= TOURNAMENT_MIN_TEAMS;
 }
 
 /** Which of `teams` the winning colour refers to. Null for a draw or no match. */
@@ -189,29 +222,104 @@ export function winningTeam(winner, teams = []) {
  * Returns { text, teamA, teamB, goalsA, goalsB, winner, margin, known }.
  * `winner` is the colour named as winning, lowercased, or 'draw', or null.
  */
+const COLOUR = 'red|blue|white|black|green|yellow|orange|purple';
+const COLOUR_RE = new RegExp(`\\b(${COLOUR})s?\\b`, 'gi');
+// A colour with its own number against it: "Red 5", "Blue: 7".
+const ANCHORED_RE = new RegExp(`\\b(${COLOUR})s?\\b\\s*[:\\-–—]?\\s*(\\d+)`, 'gi');
+const WIN_VERB_RE = /\b(wins?|won|beats?)\b/i;
+
 export function parseScoreText(raw) {
   const text = String(raw || '').trim();
   const out = { text, goalsA: null, goalsB: null, winner: null, margin: null, known: false };
   if (!text) return out;
 
-  const exact = text.match(/(\d+)\s*[-–—:]\s*(\d+)/);
-  if (exact) {
-    out.goalsA = +exact[1];
-    out.goalsB = +exact[2];
+  const colours = [...text.matchAll(COLOUR_RE)]
+    .map(m => ({ name: m[1].toLowerCase(), at: m.index }));
+  const distinct = [...new Set(colours.map(c => c.name))];
+
+  /* ---- The goals ----
+     Three shapes, most explicit first. The third exists because "Red wins by 10
+     to blues 9" was being read as a MARGIN of 10 and recorded 10–0: the second
+     number, which is the other side's score, was thrown away. "won by 10 to 9"
+     is a scoreline, not a margin. */
+  let sideGoals = null;                                   // colour → goals, when stated
+  const anchored = [...text.matchAll(ANCHORED_RE)]
+    .map(m => ({ name: m[1].toLowerCase(), goals: +m[2] }));
+  if (anchored.length >= 2 && anchored[0].name !== anchored[1].name) {
+    sideGoals = anchored.slice(0, 2);
+    out.goalsA = sideGoals[0].goals;
+    out.goalsB = sideGoals[1].goals;
+  } else {
+    // The "to" form is kept deliberately tight — only an article or a side's
+    // name may sit between the two numbers. Allowing any filler turned
+    // "Reds win by 2 to make it 3 in a row" into a 3–2 scoreline.
+    const TO_PAIR = new RegExp(
+      `(\\d+)\\s*(?:goals?\\s*)?\\bto\\b\\s*(?:the\\s+)?(?:(?:${COLOUR})s?(?:'s)?\\s*)?(\\d+)`, 'i');
+    const pair = text.match(/(\d+)\s*[-–—:]\s*(\d+)/) || text.match(TO_PAIR);
+    if (pair) { out.goalsA = +pair[1]; out.goalsB = +pair[2]; }
+  }
+  if (out.goalsA !== null && out.goalsB !== null) {
     out.margin = Math.abs(out.goalsA - out.goalsB);
     out.known = true;
   }
 
-  const by = text.match(/\bby\s+(\d+)\b/i);
-  if (by && out.margin === null) { out.margin = +by[1]; out.known = true; }
+  /* ---- The margin, when only that was written ----
+     "by 4" was understood; "1 goal" was not, so "Reds win 1 goal" — a text that
+     states its margin outright — was recorded as a three-goal win. */
+  if (out.margin === null) {
+    const by = text.match(/\bby\s+(\d+)\b/i) || text.match(/\b(\d+)\s*goals?\b/i);
+    if (by) { out.margin = +by[1]; out.known = true; }
+  }
 
-  if (/\bdraw\b|\btie[ds]?\b/i.test(text)) { out.winner = 'draw'; out.known = true; return out; }
-  if (out.goalsA !== null && out.goalsA === out.goalsB) { out.winner = 'draw'; return out; }
+  /* ---- Who won ---- */
+  if (/\bdraws?\b|\bdrew\b|\btie[ds]?\b/i.test(text)) {
+    out.winner = 'draw';
+    out.known = true;
+    return out;
+  }
+  if (out.goalsA !== null && out.goalsA === out.goalsB) {
+    out.winner = 'draw';
+    out.known = true;
+    return out;
+  }
+  if (!colours.length) return out;
 
-  const colour = text.match(/\b(red|blue|white|black|green|yellow|orange|purple)s?\b/i);
-  if (colour && /\bwin|\bwon|\bbeat/i.test(text)) { out.winner = colour[1].toLowerCase(); out.known = true; }
-  else if (colour && out.goalsA !== null) { out.winner = colour[1].toLowerCase(); }
+  // 1. Each side's goals were written against its name — nothing to infer.
+  if (sideGoals) {
+    out.winner = (sideGoals[0].goals > sideGoals[1].goals ? sideGoals[0] : sideGoals[1]).name;
+    out.known = true;
+    return out;
+  }
 
+  // 2. Two sides named and a scoreline present: match them up in the order they
+  //    appear. This is what makes "Red lost to Blue 9-12" come out as a Blue
+  //    win. It used to take the FIRST colour mentioned and hand it the HIGHER
+  //    number regardless of where either sat, so any phrasing that named the
+  //    loser first recorded the result backwards.
+  if (distinct.length >= 2 && out.goalsA !== null) {
+    const order = distinct.map(n => ({ n, at: colours.find(c => c.name === n).at }))
+      .sort((x, y) => x.at - y.at);
+    out.winner = out.goalsA >= out.goalsB ? order[0].n : order[1].n;
+    out.known = true;
+    return out;
+  }
+
+  // 3. "Blues win", "whites win, blues runners up" — the side that owns the
+  //    verb, which is the one written immediately before it.
+  const verb = text.match(WIN_VERB_RE);
+  if (verb) {
+    const before = colours.filter(c => c.at < verb.index).pop();
+    out.winner = (before ?? colours[0]).name;
+    out.known = true;
+    return out;
+  }
+
+  // 4. One side named beside a scoreline and no verb at all: "8-7 BLUES",
+  //    "12-9 to the blues". Naming one side after a score credits it.
+  if (distinct.length === 1 && out.goalsA !== null) {
+    out.winner = distinct[0];
+    out.known = true;
+  }
   return out;
 }
 
