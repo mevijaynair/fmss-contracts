@@ -58,10 +58,25 @@ if (!apply) {
   process.exit(0);
 }
 
+/* Re-deriving is meant to restate the SAME money in the right rows, so unless
+   legacy entries are being retired the pot must come out where it went in.
+   Checked inside the transaction and rolled back on drift — a guard that runs
+   afterwards only tells you the damage is done. --allow-change is for the case
+   where the change IS the point, and it prints the delta either way. */
+const allowChange = process.argv.includes('--allow-change');
+const legacyNet = legacy.reduce((s, r) => s + (r.kind === 'income' ? r.amount : -r.amount), 0);
+
 db.exec('BEGIN IMMEDIATE');
 try {
   for (const r of legacy) db.prepare('DELETE FROM kitty WHERE id = ?').run(r.id);
   for (const g of games) gameweeksRepo.recomputeGameKitty(g.id);
+
+  const moved = kittyRepo.balance().balance - before.balance;
+  const expected = -legacyNet;            // only the retired rows may move it
+  if (!allowChange && Math.abs(moved - expected) > 0.005) {
+    throw new Error(`the pot moved ${money(moved)} and only ${money(expected)} was accounted for`
+      + ' — re-run with --allow-change if that is intended');
+  }
   db.exec('COMMIT');
 } catch (e) {
   db.exec('ROLLBACK');

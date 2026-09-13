@@ -41,25 +41,25 @@ function writeKittyRow(id, net, label, date, scope, contractId = null) {
  * Safe to call for a charge that no longer exists — it clears the row and stops,
  * which is what removing a player from a game needs.
  */
+/**
+ * Remove the per-charge kitty row a guest payment used to own.
+ *
+ * A guest's cash was banked as its own kitty INCOME line — "Suresh paid for the
+ * game on 2026-08-08", +40 — which read as though the pot had received it. It
+ * had not: the guest hands the cash to the cashier, who has already paid for the
+ * pitch out of pocket. The kitty is where profit and loss flow, so a guest's
+ * payment belongs in the game's profit as revenue, not in the pot as a receipt.
+ * recomputeGameKitty folds it in now, so this only clears what it used to write.
+ *
+ * The arithmetic is unchanged: the game line was `contracted - pitch - water`
+ * with the cash beside it, and is now `contracted + cash - pitch - water` on one
+ * line. Same number, one row, and it says what it is.
+ *
+ * Kept as a function rather than deleted because three charge-mutation paths
+ * call it, and a charge that stops being cash still has to lose its old row.
+ */
 function syncGuestCashToKitty(chargeId) {
-  const row = db.prepare(`SELECT ch.*, g.date AS game_date, g.historical, g.contract_id,
-      p.name AS payer_name,
-      CASE WHEN ch.settled_from_kitty = 0
-             AND (ch.settles_cash = 1
-                  OR COALESCE(p.player_type,'regular') = 'outside')
-           THEN 1 ELSE 0 END AS is_cash
-    FROM charges ch
-    JOIN gameweeks g ON g.id = ch.gameweek_id
-    LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
-    WHERE ch.id = ?`).get(chargeId);
-  const kittyId = `k_charge_${chargeId}`;
-  if (!row) { db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId); return; }
-
-  const amount = row.historical || !row.paid || !row.is_cash
-    ? 0 : Number(row.amount) || 0;
-  writeKittyRow(kittyId, amount,
-    `${row.payer_name || 'Guest'} paid for the game on ${row.game_date}`,
-    row.game_date, row.gameweek_id, row.contract_id);
+  db.prepare('DELETE FROM kitty WHERE id = ?').run(`k_charge_${chargeId}`);
 }
 
 /**
@@ -84,7 +84,7 @@ function recomputeGameKitty(gameweekId) {
   const gw = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(gameweekId);
   if (!gw) return;
 
-  const charges = db.prepare(`SELECT ch.id, ch.amount, ch.settled_from_kitty,
+  const charges = db.prepare(`SELECT ch.id, ch.amount, ch.settled_from_kitty, ch.paid,
       CASE WHEN ch.settled_from_kitty = 0
              AND (ch.settles_cash = 1
                   OR COALESCE(p.player_type,'regular') = 'outside')
@@ -93,19 +93,25 @@ function recomputeGameKitty(gameweekId) {
     WHERE ch.gameweek_id = ?`).all(gameweekId);
 
   let contracted = 0;
+  let guestCash = 0;
   for (const ch of charges) {
-    // Every charge, not only the cash ones. syncGuestCashToKitty writes the row
-    // or clears it, so calling it unconditionally is what removes the entry from
-    // a charge that has stopped being cash — corrected to come off a balance, or
-    // reassigned to a member. Calling it only for cash charges left the old row
-    // standing beside the new balance figure, counting the same money twice.
+    // Clears any k_charge_ row this charge still owns. Guest cash used to be
+    // banked as its own kitty income line; it is folded into the game below now,
+    // so the only job left here is to take the old rows away.
     syncGuestCashToKitty(ch.id);
     // A charge the pot carries brings in nothing. There is no separate expense
     // for it: the kitty pays by simply not collecting, which is what leaving it
     // out of the game's income already does. Adding an expense on top would
     // charge the pot twice for one free place.
-    if (!ch.is_cash && !ch.settled_from_kitty) contracted += Number(ch.amount) || 0;
+    if (ch.settled_from_kitty) continue;
+    // Guest cash counts once the guest has actually handed it over. Until then
+    // the game is short by exactly that much, which is true — the cashier is out
+    // of pocket for it, and "has the guest paid up" is the one thing left to
+    // chase. It is reported as cash to collect, never as kitty income.
+    if (ch.is_cash) { if (ch.paid) guestCash += Number(ch.amount) || 0; }
+    else contracted += Number(ch.amount) || 0;
   }
+  const takings = round2(contracted + guestCash);
   // A game that becomes historical — pulled behind a closed baseline — must give
   // its entry back rather than keep it. Writing zero is how that row is removed,
   // so the check lands here and not as an early return that leaves it standing.
@@ -117,10 +123,14 @@ function recomputeGameKitty(gameweekId) {
   // player. Who paid changes where the cost lands, not how much it was.
   const payer = gw.game_cost_paid_by || 'self';
   const water = payer === 'self' ? Number(gw.game_cost) || 0 : 0;
+  // One line per gameweek, and it is the profit or the loss — nothing else. The
+  // pot is not a till the night's takings pass through; it is what is left when
+  // the game has paid for itself.
   writeKittyRow(`k_gw_${gameweekId}`,
-    gw.historical ? 0 : round2(contracted - pitch - water),
-    `Game on ${gw.date}: charged ${round2(contracted)} less pitch ${pitch}`
-    + (water ? ` and water ${water}` : ''),
+    gw.historical ? 0 : round2(takings - pitch - water),
+    `Game on ${gw.date}: collected ${takings}`
+    + (guestCash ? ` (incl. ${round2(guestCash)} guest cash)` : '')
+    + ` less pitch ${pitch}` + (water ? ` and water ${water}` : ''),
     gw.date, gameweekId, gw.contract_id);
 }
 
@@ -313,7 +323,12 @@ export const gameweeksRepo = {
     db.prepare('UPDATE charges SET paid = ?, paid_at = ?, paid_method = ? WHERE id = ?')
       .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, paid ? method : null, chargeId);
 
-    syncGuestCashToKitty(chargeId);
+    // Collecting a guest's cash turns it from money owed into revenue for that
+    // game, so the game's own line has to be rebuilt. This called
+    // syncGuestCashToKitty alone, which was enough while guest cash had a kitty
+    // row of its own and is not now — the cash would have been collected and
+    // the game's profit left standing at the figure from before it arrived.
+    recomputeGameKitty(gameweekId);
     return this.get(gameweekId);
   },
 

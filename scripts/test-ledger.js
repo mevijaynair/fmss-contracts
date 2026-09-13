@@ -715,7 +715,9 @@ test('deleting a game takes its kitty entries with it', () => {
   const gw = playGame({ pitch: 10, players: [
     { player_id: a, amount: 40 }, { player_id: guest, amount: 35, paid: 1 },
   ] });
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 2);
+  // One row, not two: the guest's cash is revenue inside the game line now
+  // rather than a receipt of its own.
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 1);
   gameweeksRepo.remove(gw.id);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM kitty WHERE scope = ?').get(gw.id).n, 0,
     'no kitty row may outlive the game that justified it');
@@ -910,6 +912,55 @@ test('the cashier is never listed as owing the club', () => {
   assert.throws(() => contributionsRepo.create({ player_id: cashier,
     contract_id: CONTRACT, amount: 400, date: '2026-09-13' }),
   /Cashier cannot contribute/, 'and they cannot pay it in either');
+});
+
+/* ===== Guest cash is revenue, not a receipt in the pot =====
+   It used to be banked as its own kitty income line, which read as though the
+   pot had received it. It had not — the guest hands the cash to the cashier,
+   who has already paid for the pitch. It counts towards the game's profit and
+   nowhere else. */
+
+const kittyRowsFor = (gwId) => db.prepare(
+  'SELECT id, label, amount, kind FROM kitty WHERE scope = ? ORDER BY id').all(gwId);
+
+test('a guest payment lands in the game line, not a line of its own', () => {
+  const member = player('Member');
+  const guest = player('Paying guest');
+  makeOutside(guest);
+  const gw = playGame({ pitch: 100, water: 15, players: [
+    { player_id: member, amount: 40 }, { player_id: guest, amount: 35, paid: 1 },
+  ] });
+
+  assert.equal(kittyOf(gw.id), 40 + 35 - 100 - 15, 'profit is everything in, less what it cost');
+  const rows = kittyRowsFor(gw.id);
+  assert.equal(rows.length, 1, 'one line per gameweek — the profit or the loss');
+  assert.ok(rows[0].id.startsWith('k_gw_'), 'and it is the game row');
+  assert.match(rows[0].label, /incl\. 35 guest cash/,
+    'the line says the guest cash is in there, since it is not obvious otherwise');
+});
+
+test('a guest who has not paid yet leaves the game short by exactly that much', () => {
+  const member = player('Member two');
+  const guest = player('Slow guest');
+  makeOutside(guest);
+  const gw = playGame({ pitch: 100, players: [
+    { player_id: member, amount: 40 }, { player_id: guest, amount: 35 },
+  ] });
+  assert.equal(kittyOf(gw.id), 40 - 100, 'uncollected cash is not profit yet');
+
+  const charge = gameweeksRepo.get(gw.id).charges.find(c => c.player_id === guest);
+  gameweeksRepo.setChargePaid(gw.id, charge.id, { paid: true });
+  assert.equal(kittyOf(gw.id), 40 + 35 - 100, 'collecting it moves the pot by the cash, once');
+  assert.equal(kittyRowsFor(gw.id).length, 1, 'and still without adding a row');
+});
+
+test('no charge ever owns a kitty row of its own', () => {
+  const guest = player('Another guest');
+  makeOutside(guest);
+  const gw = playGame({ pitch: 30, players: [{ player_id: guest, amount: 35, paid: 1 }] });
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM kitty WHERE id LIKE 'k_charge_%'").get().n, 0,
+    'guest cash is revenue in the game line, never a receipt in the pot');
+  assert.equal(kittyOf(gw.id), 35 - 30);
 });
 
 process.on('exit', () => {

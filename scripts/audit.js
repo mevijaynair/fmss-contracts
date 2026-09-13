@@ -248,7 +248,19 @@ ok('no kitty row carries a negative amount', negativeKitty === 0, `${negativeKit
 const badKind = db.prepare(
   "SELECT COUNT(*) c FROM kitty WHERE kind NOT IN ('income','expense')").get().c;
 ok('every kitty row is income or expense', badKind === 0, `${badKind} row(s)`);
-sectionDone(4);
+
+/* A row with no contract belongs to no total. Nineteen of them had built up —
+   written before kitty.contract_id existed and never rewritten — so every
+   per-contract kitty figure on screen was short by 131 between them, and the
+   money was invisible rather than wrong, which is worse. */
+const unattributed = db.prepare('SELECT COUNT(*) c FROM kitty WHERE contract_id IS NULL').get().c;
+ok('every kitty row names its contract', unattributed === 0,
+  `${unattributed} row(s) belong to no contract total — run reconcile-kitty.js`);
+
+/* Guest cash is revenue inside a game's line, never a receipt of its own. */
+const perCharge = db.prepare("SELECT COUNT(*) c FROM kitty WHERE id LIKE 'k_charge_%'").get().c;
+ok('no charge owns a kitty row of its own', perCharge === 0, `${perCharge} row(s)`);
+sectionDone(6);
 
 for (const c of contracts) {
   const net = db.prepare(`SELECT
