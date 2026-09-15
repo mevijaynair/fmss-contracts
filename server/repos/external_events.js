@@ -118,6 +118,7 @@ export const externalEventsRepo = {
     // The reimbursement depends on actual_amount and on who fronted it, so any
     // edit to either has to redraw it.
     this.syncFrontedCredit(db, eventId);
+    this.repostIfBanked(db, eventId);
     return this.getEvent(db, eventId);
   },
 
@@ -194,6 +195,7 @@ export const externalEventsRepo = {
     ).run(id, eventId, player_id, guest_name, host_player_id, tier, due, pay_method, notes, new Date().toISOString());
 
     this.syncAttendeeTxn(db, eventId, id);
+    this.repostIfBanked(db, eventId);
     return db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(id);
   },
 
@@ -225,6 +227,7 @@ export const externalEventsRepo = {
 
     // Switching to cash must clear a debit that is no longer owed.
     this.syncAttendeeTxn(db, att.event_id, attendeeId);
+    this.repostIfBanked(db, att.event_id);
     return db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(attendeeId);
   },
 
@@ -237,6 +240,7 @@ export const externalEventsRepo = {
     // longer attending.
     db.prepare('DELETE FROM transactions WHERE id = ?').run(attendeeTxnId(attendeeId));
     db.prepare('DELETE FROM event_attendees WHERE id = ?').run(attendeeId);
+    this.repostIfBanked(db, att.event_id);
   },
 
   // Cash only. A balance attendee is settled the moment they are added, so a
@@ -249,6 +253,7 @@ export const externalEventsRepo = {
     }
     db.prepare('UPDATE event_attendees SET paid = ?, paid_at = ? WHERE id = ?')
       .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, attendeeId);
+    this.repostIfBanked(db, att.event_id);
     return db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(attendeeId);
   },
 
@@ -365,6 +370,25 @@ export const externalEventsRepo = {
   // Deliberate, never automatic: the surplus or shortfall only reaches the club
   // fund when someone decides it should. Keyed to the event so posting twice
   // replaces the entry rather than doubling it.
+  /**
+   * Keep a BANKED event's kitty line in step with the event.
+   *
+   * postNetToKitty was a one-shot: bank what the do made, then take somebody
+   * off the guest list, and the pot went on holding the old figure while the
+   * event's real net moved underneath it. Found by the fuzz — after 256 random
+   * operations an event had posted 240 to a pot that its own summary said was
+   * 120 — and it is the same mistake the game lines had: a kitty figure that is
+   * written once rather than derived.
+   *
+   * Only re-posts when a line already exists. Banking stays a deliberate act:
+   * an event nobody has banked should not quietly appear in the pot because
+   * somebody edited the guest list.
+   */
+  repostIfBanked(db, eventId) {
+    const banked = db.prepare('SELECT 1 x FROM kitty WHERE id = ?').get(`k_event_${eventId}`);
+    if (banked) this.postNetToKitty(db, null, eventId);
+  },
+
   postNetToKitty(db, kittyRepo, eventId) {
     const event = this.getEvent(db, eventId);
     if (!event) throw new Error('Event not found');
@@ -374,13 +398,17 @@ export const externalEventsRepo = {
     if (!s.net) return { posted: 0, net: 0 };
 
     const now = new Date().toISOString();
+    // contract_id was left off entirely, so an event's surplus landed in the
+    // pot belonging to no contract — invisible to every per-contract kitty
+    // figure on screen, which is how 131 AED of game lines went missing before.
+    // The event knows its contract; the money it makes or loses belongs there.
     db.prepare(
-      `INSERT INTO kitty (id, kind, label, amount, date, scope, historical, created_at)
-       VALUES (?, ?, ?, ?, ?, '', 0, ?)`
+      `INSERT INTO kitty (id, kind, label, amount, date, scope, contract_id, historical, created_at)
+       VALUES (?, ?, ?, ?, ?, '', ?, 0, ?)`
     ).run(
       kittyId, s.net > 0 ? 'income' : 'expense',
       `${event.title} (${s.net > 0 ? 'surplus' : 'shortfall'})`,
-      Math.abs(s.net), event.event_date, now
+      Math.abs(s.net), event.event_date, event.contract_id, now
     );
     return { posted: Math.abs(s.net), net: s.net, kind: s.net > 0 ? 'income' : 'expense' };
   },

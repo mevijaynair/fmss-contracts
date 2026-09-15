@@ -96,7 +96,13 @@ export const movementsRepo = {
       throw new Error('A transfer between players needs a contract — balances are per contract');
     }
 
-    const id = `mv_${Date.now()}`;
+    // A millisecond is not unique enough to be a primary key. Two movements
+    // recorded inside the same one — a script, a double-click, a fast machine —
+    // collide, and the second dies on "UNIQUE constraint failed: movements.id".
+    // It fails safely, because the whole thing is inside a transaction and rolls
+    // back, but it fails for a reason the user cannot act on. contributions.js
+    // hit this exact wall and added a random suffix; movements never got it.
+    const id = `mv_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const when = date || new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
     const label = describe({ from, to, note });

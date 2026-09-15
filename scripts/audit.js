@@ -249,13 +249,33 @@ const badKind = db.prepare(
   "SELECT COUNT(*) c FROM kitty WHERE kind NOT IN ('income','expense')").get().c;
 ok('every kitty row is income or expense', badKind === 0, `${badKind} row(s)`);
 
-/* A row with no contract belongs to no total. Nineteen of them had built up —
+/* A DERIVED row with no contract belongs to no total. Nineteen had built up —
    written before kitty.contract_id existed and never rewritten — so every
-   per-contract kitty figure on screen was short by 131 between them, and the
-   money was invisible rather than wrong, which is worse. */
-const unattributed = db.prepare('SELECT COUNT(*) c FROM kitty WHERE contract_id IS NULL').get().c;
-ok('every kitty row names its contract', unattributed === 0,
+   per-contract figure on screen was short by 131 between them, and the money
+   was invisible rather than wrong, which is worse.
+
+   Scoped to the rows that are derived from a game or an event, deliberately.
+   A movement leg may face the CLUB-WIDE pot — paying the cashier back for a
+   BBQ out of the kitty is exactly that — and its NULL contract is the correct
+   answer, not a gap. Written as a blanket rule this would have failed the first
+   time that happened, and a check that cries wolf is a check that gets turned
+   off. */
+const unattributed = db.prepare(`SELECT COUNT(*) c FROM kitty
+  WHERE contract_id IS NULL AND (id LIKE 'k_gw_%' OR id LIKE 'k_event_%')`).get().c;
+ok('every derived kitty row names its contract', unattributed === 0,
   `${unattributed} row(s) belong to no contract total — run reconcile-kitty.js`);
+
+/* Both halves of a movement, or neither. The record and its legs are written in
+   one transaction, so a movement whose legs have gone missing means something
+   deleted them from underneath it. */
+const halfMoved = db.prepare(`SELECT COUNT(*) c FROM movements m
+  WHERE NOT EXISTS (SELECT 1 FROM kitty k WHERE k.scope = m.id)
+    AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.id IN ('t_'||m.id||'_out', 't_'||m.id||'_in'))`).get().c;
+ok('no movement has lost both its legs', halfMoved === 0, `${halfMoved} movement(s)`);
+
+const strayLegs = db.prepare(`SELECT COUNT(*) c FROM kitty k
+  WHERE k.scope LIKE 'mv_%' AND NOT EXISTS (SELECT 1 FROM movements m WHERE m.id = k.scope)`).get().c;
+ok('no movement leg outlived its movement', strayLegs === 0, `${strayLegs} row(s)`);
 
 /* Guest cash is revenue inside a game's line, never a receipt of its own. */
 const perCharge = db.prepare("SELECT COUNT(*) c FROM kitty WHERE id LIKE 'k_charge_%'").get().c;

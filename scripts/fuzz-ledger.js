@@ -35,6 +35,8 @@ if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
 const { gameweeksRepo } = await import('../server/repos/gameweeks.js');
 const { ledgersRepo } = await import('../server/repos/ledgers.js');
 const { statsRepo } = await import('../server/repos/stats.js');
+const { movementsRepo } = await import('../server/repos/movements.js');
+const { externalEventsRepo } = await import('../server/repos/external_events.js');
 initSchema();
 // Production runs with foreign keys ON, which is what makes ON DELETE CASCADE
 // clear a deleted game's charges. Turning them off — as scripts/test-ledger.js
@@ -123,8 +125,7 @@ function invariants(label) {
   const orphan = db.prepare(`SELECT COUNT(*) n FROM kitty k WHERE k.id LIKE 'k_gw_%'
     AND NOT EXISTS (SELECT 1 FROM gameweeks g WHERE k.id = 'k_gw_' || g.id)`).get().n;
   if (orphan) problems.push(`${orphan} kitty row(s) outlived their game`);
-  const noContract = db.prepare('SELECT COUNT(*) n FROM kitty WHERE contract_id IS NULL').get().n;
-  if (noContract) problems.push(`${noContract} kitty row(s) belong to no contract`);
+  // (attribution is checked in 8, which exempts the club-wide pot on purpose)
 
   // 3. A charge is settled exactly one way.
   const both = db.prepare('SELECT COUNT(*) n FROM charges WHERE settles_cash = 1 AND settled_from_kitty = 1').get().n;
@@ -156,6 +157,38 @@ function invariants(label) {
     }
   }
 
+  // 7. A movement is two legs or none, and never invents or destroys money.
+  for (const m of db.prepare('SELECT id FROM movements').all()) {
+    const legs = db.prepare('SELECT COUNT(*) n FROM kitty WHERE scope = ?').get(m.id).n
+      + db.prepare('SELECT COUNT(*) n FROM transactions WHERE id IN (?,?)')
+        .get(`t_${m.id}_out`, `t_${m.id}_in`).n;
+    if (legs === 0) problems.push(`movement ${m.id} has no legs at all`);
+  }
+  const strayLeg = db.prepare(`SELECT COUNT(*) n FROM kitty k WHERE k.scope LIKE 'mv_%'
+    AND NOT EXISTS (SELECT 1 FROM movements m WHERE m.id = k.scope)`).get().n;
+  if (strayLeg) problems.push(`${strayLeg} movement leg(s) outlived their movement`);
+  const strayTxn = db.prepare(`SELECT COUNT(*) n FROM transactions t WHERE t.id LIKE 't_mv_%'
+    AND NOT EXISTS (SELECT 1 FROM movements m WHERE t.id IN ('t_'||m.id||'_out','t_'||m.id||'_in'))`).get().n;
+  if (strayTxn) problems.push(`${strayTxn} movement transaction(s) outlived their movement`);
+
+  // 8. Derived rows must name their contract. A movement leg facing the
+  //    CLUB-WIDE pot correctly has none, so it is excluded on purpose.
+  const unattributed = db.prepare(`SELECT COUNT(*) n FROM kitty
+    WHERE contract_id IS NULL AND (id LIKE 'k_gw_%' OR id LIKE 'k_event_%')`).get().n;
+  if (unattributed) problems.push(`${unattributed} derived kitty row(s) name no contract`);
+
+  // 9. What an event posted to the pot is what its summary says it made.
+  for (const e of db.prepare('SELECT id, title FROM external_events').all()) {
+    const sum = externalEventsRepo.summary(db, e.id);
+    const posted = db.prepare('SELECT kind, amount FROM kitty WHERE id = ?').get(`k_event_${e.id}`);
+    if (posted) {
+      const signed = r2(posted.kind === 'income' ? posted.amount : -posted.amount);
+      if (Math.abs(signed - r2(sum.net)) > 0.005) {
+        problems.push(`event ${e.title}: posted ${signed}, summary says ${r2(sum.net)}`);
+      }
+    }
+  }
+
   if (problems.length) {
     console.log(`\nFAIL after step ${label}`);
     for (const p of problems.slice(0, 8)) console.log(`   ${p}`);
@@ -167,7 +200,9 @@ function invariants(label) {
 /* ---- the moves ---- */
 let step = 0;
 let broke = false;
+const refusals = new Map();
 const liveGames = [];
+const liveEvents = [];
 
 function makeGame() {
   const contract = pick(CONTRACTS);
@@ -224,6 +259,67 @@ const MOVES = [
     gameweeksRepo.updateGameAccounting(g, { game_cost: pick([0, 15, 30]),
       game_cost_paid_by: pick(['self', squad[1]]) });
   }],
+  ['move money about', () => {
+    // Every pairing the club actually uses: the pot paying somebody, somebody
+    // paying into the pot, one contract's share carrying another's, and a
+    // straight transfer between two members.
+    const parties = [...squad, 'kitty', ...CONTRACTS.map(c => `kitty:${c}`)];
+    const from = pick(parties);
+    const to = pick(parties.filter(x => x !== from));
+    movementsRepo.create({ from, to, amount: pick([5, 27, 100, 250]),
+      contract_id: pick(CONTRACTS), note: 'fuzz' });
+  }],
+  ['undo a movement', () => {
+    const ms = db.prepare('SELECT id FROM movements').all();
+    if (!ms.length) return;
+    movementsRepo.remove(pick(ms).id);
+  }],
+  ['plan an event', () => {
+    const e = externalEventsRepo.createEvent(db, null, null, {
+      title: `Do ${step}`, event_type: pick(['dinner', 'tour', 'other']),
+      event_date: '2026-06-01', contract_id: pick(CONTRACTS),
+      budget_amount: pick([0, 500, 1200]),
+      tiers: { adult: 120, child: 60 } });
+    liveEvents.push(e.id);
+  }],
+  ['put somebody on an event', () => {
+    const e = pick(liveEvents); if (!e) return;
+    const taken = new Set(externalEventsRepo.listAttendees(db, e)
+      .map(a => a.player_id).filter(Boolean));
+    const free = squad.filter(p => !taken.has(p));
+    if (rnd() < 0.5 && free.length) {
+      externalEventsRepo.addAttendee(db, e, { player_id: pick(free),
+        tier: pick(['adult', 'child']), pay_method: pick(['cash', 'balance']) });
+    } else {
+      externalEventsRepo.addAttendee(db, e, { guest_name: `Plus ${step}`,
+        host_player_id: pick(squad), tier: 'adult', pay_method: pick(['cash', 'balance']) });
+    }
+  }],
+  ['settle or unsettle an event attendee', () => {
+    const e = pick(liveEvents); if (!e) return;
+    const a = pick(externalEventsRepo.listAttendees(db, e)); if (!a) return;
+    externalEventsRepo.setAttendeePaid(db, a.id, rnd() < 0.5);
+  }],
+  ['take somebody off an event', () => {
+    const e = pick(liveEvents); if (!e) return;
+    const a = pick(externalEventsRepo.listAttendees(db, e)); if (!a) return;
+    externalEventsRepo.removeAttendee(db, a.id);
+  }],
+  ['bank what an event made or lost', () => {
+    const e = pick(liveEvents); if (!e) return;
+    externalEventsRepo.postNetToKitty(db, null, e);
+  }],
+  ['close or reopen an event', () => {
+    const e = pick(liveEvents); if (!e) return;
+    const ev = externalEventsRepo.getEvent(db, e);
+    if (ev.status === 'closed') externalEventsRepo.reopen(db, e);
+    else externalEventsRepo.close(db, e);
+  }],
+  ['scrap an event', () => {
+    if (liveEvents.length < 2) return;
+    const i = Math.floor(rnd() * liveEvents.length);
+    externalEventsRepo.deleteEvent(db, liveEvents[i]); liveEvents.splice(i, 1);
+  }],
   ['delete a game', () => {
     if (liveGames.length < 2) return;
     const i = Math.floor(rnd() * liveGames.length);
@@ -236,7 +332,8 @@ const MOVES = [
 // move is repeated in proportion to how often it really happens.
 const WEIGHTED = [];
 for (const m of MOVES) {
-  const times = m[0] === 'delete a game' ? 1 : m[0] === 'create a game' ? 4 : 5;
+  const times = /delete a game|scrap an event|undo a movement/.test(m[0]) ? 1
+    : /create a game|plan an event/.test(m[0]) ? 3 : 4;
   for (let i = 0; i < times; i++) WEIGHTED.push(m);
 }
 
@@ -248,11 +345,19 @@ for (let i = 0; i < RUNS && !broke; i++) {
   const [name, fn] = pick(WEIGHTED);
   step++;
   try { fn(); } catch (e) {
-    // A refusal is fine — an exception that is NOT a deliberate refusal is not.
-    if (!/not found|Refus|refus|cannot|Cannot|Unknown|Invalid|exist/.test(e.message)) {
-      console.log(`\nFAIL step ${step} (${name}) threw: ${e.message}`);
+    /* A domain refusal is the app working: "this event is closed", "that member
+       is already on this event", "money cannot move to where it already is".
+       What is NOT fine is a crash or a constraint violation — those are bugs
+       wearing an exception. Discriminated on the KIND of error rather than the
+       wording, because matching phrases meant every new refusal message looked
+       like a failure. */
+    const bug = /TypeError|ReferenceError|RangeError|SyntaxError/.test(e.name)
+      || /SQLITE|constraint|is not a function|of undefined|of null/i.test(e.message);
+    if (bug) {
+      console.log(`\nFAIL step ${step} (${name}) threw ${e.name}: ${e.message}`);
       broke = true; break;
     }
+    refusals.set(e.message, (refusals.get(e.message) ?? 0) + 1);
   }
   if (!invariants(`${step} (${name})`)) broke = true;
 }
@@ -261,7 +366,11 @@ console.log(broke
   ? `\nFAIL — broke after ${step} operations (seed ${process.argv[2] || 20260915})`
   : `\nOK — ${step} random operations, books balanced after every one`
     + `\n   ${liveGames.length} games live, ${db.prepare('SELECT COUNT(*) n FROM charges').get().n} charges,`
-    + ` ${db.prepare('SELECT COUNT(*) n FROM kitty').get().n} kitty rows`);
+    + ` ${db.prepare('SELECT COUNT(*) n FROM kitty').get().n} kitty rows,`
+    + ` ${db.prepare('SELECT COUNT(*) n FROM movements').get().n} movements,`
+    + ` ${db.prepare('SELECT COUNT(*) n FROM external_events').get().n} events`
+    + `
+   refused, correctly, ${[...refusals.values()].reduce((a, b) => a + b, 0)} times`);
 
 try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* still open */ }
 process.exit(broke ? 1 : 0);
