@@ -40,7 +40,7 @@ if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
 }
 
 initSchema();
-db.exec('PRAGMA foreign_keys = OFF');
+db.exec('PRAGMA foreign_keys = ON');
 
 const CONTRACT = 'testc';
 db.prepare("INSERT INTO contracts (id, name, rates, cost_per_gw, sort) VALUES (?, 'Test', '{}', 0, 1)").run(CONTRACT);
