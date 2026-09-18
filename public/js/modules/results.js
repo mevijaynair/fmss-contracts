@@ -271,6 +271,13 @@ function buildStats(gws) {
  * share one winning side are not a great partnership.
  */
 function partnerships(gws, { minGames = 4 } = {}) {
+  // The same people the tables above are about. A pair is two players, so it
+  // has to answer to the same rules they do: with only the standings filtered,
+  // a guest hidden from every other board still turned up in "best
+  // partnerships", which reads as the screen contradicting itself.
+  const excluded = new Set();
+  if (!showGuests) for (const id of guestIds()) excluded.add(id);
+  if (!showLeft) for (const id of departedIds()) excluded.add(id);
   const pair = {};
   for (const gw of gws) {
     if (!inPeriod(gw.date) || !isMatch(gw)) continue;
@@ -279,7 +286,7 @@ function partnerships(gws, { minGames = 4 } = {}) {
 
     const byTeam = {};
     for (const c of gw.charges || []) {
-      if (!c.team) continue;
+      if (!c.team || excluded.has(c.player_id)) continue;
       (byTeam[c.team] ??= []).push(c);
     }
     for (const [team, mates] of Object.entries(byTeam)) {
@@ -663,7 +670,11 @@ function showTournaments(gws) {
     return `
       <div class="trn-game">
         <div class="trn-head">
-          <span class="trn-date">${fmtDate(g.date)}</span>
+          <span class="trn-date">${fmtDate(g.date)}${
+  // Reading both contracts at once, a bare date does not say which night this
+  // was. Only added there, because on a single contract it is already known.
+  contractId ? '' : ` <span class="hint">${esc(
+    (store.contracts || []).find(c => c.id === g.contract_id)?.name || g.contract_id)}</span>`}</span>
           <span class="trn-note">${esc(g.tournament_name || g.score || 'Tournament')}</span>
         </div>
         ${order.map(t => `
