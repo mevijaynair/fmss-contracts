@@ -32,7 +32,6 @@ import { initKitty, loadKitty } from './modules/kitty.js';
 import { initSettings, loadSettings } from './modules/settings.js';
 import { initLogins, loadLogins } from './modules/logins.js';
 import { initExternalEvents, loadExternalEvents } from './modules/external_events.js';
-import { initReport, loadReport } from './modules/report.js';
 import { initTransfers, loadTransfers } from './modules/transfers.js';
 import { initOpeningBalances, loadOpeningBalances } from './modules/opening_balances.js';
 
@@ -45,7 +44,6 @@ const LOADERS = {
   gameweeks: loadGameweeks,
   kitty: loadKitty,
   events: loadExternalEvents,
-  report: loadReport,
   transfers: loadTransfers,
   logins: loadLogins,
   'opening-balances': loadOpeningBalances,
@@ -75,7 +73,7 @@ async function start() {
   store.activeContract = defaultContract();
   store.user = user;
 
-  initReport(); initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
+  initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
   if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); }
   initTransfers();
 

@@ -5,11 +5,13 @@
 // memory. What is left is a match night, the money, and the once-in-a-while
 // admin.
 //
-// Three screens are routable but not drawn. They are things you touch once a
-// season — PINs, transfer approvals — or a second view of data that already has
-// a home, and each held a permanent line in the sidebar competing with Game Day
-// for attention. `hidden` keeps them reachable from the screen they belong to:
-// Standing from Players, the rest from Settings.
+// Two screens are routable but not drawn: things you touch once a season —
+// PINs, transfer approvals — that each held a permanent line in the sidebar
+// competing with Game Day for attention. `hidden` keeps them reachable from
+// Settings, which is where you go looking for them.
+//
+// The standing sheet used to be a third. It is not a destination at all now —
+// it is the other shape of the Players screen, switched there.
 const ADMIN_NAV = [
   { view: 'dashboard',     label: 'Dashboard',     title: 'Dashboard' },
 
@@ -27,9 +29,7 @@ const ADMIN_NAV = [
   { group: 'Running it' },
   { view: 'settings',      label: 'Settings',      title: 'Contract settings & admin' },
 
-  // Reachable, not listed. Each is linked from the screen it belongs to:
-  // Standing from Players, the rest from Settings.
-  { view: 'report',        label: 'Standing',      title: 'Credit tracking — the sheet players see', hidden: true },
+  // Reachable, not listed. Linked from Settings, which is where you look.
   { view: 'logins',        label: 'Player logins', title: 'Player logins', hidden: true },
   { view: 'transfers',     label: 'Transfers',     title: 'Player transfers', hidden: true },
 ];

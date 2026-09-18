@@ -5,8 +5,25 @@ import { $, esc, money, balCell, contractSeg, openModal, closeModal, today, fmtD
 import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 import { splitNote, wireSplitNotes } from './contributions.js';
+import { renderStandingSheet } from './report.js';
 
 let contractId = null;   // resolved on first load — see defaultContract()
+
+// One screen, two shapes of the same money.
+//
+// The working ledger is what you act in: every player, filters, a Pay button
+// and a ⋮ menu on each row. The standing sheet is the same balances laid out
+// to be screenshotted and sent round, so it drops the guests, the dormant and
+// the retired and carries its own period header.
+//
+// They were two destinations with a link and a back link, which meant the
+// contract you had chosen did not follow you between them. One shape shows at
+// a time — the sheet is not much use as a screenshot with a filter bar and an
+// actions column in it.
+let viewMode = 'ledger';   // 'ledger' | 'sheet'
+const MODES = [['ledger', 'Working', 'Every player, with filters and actions'],
+  ['sheet', 'Standing sheet', 'The same balances, laid out as the sheet you send round']];
+
 let currentDetailPlayerId = null;
 let searchQuery = '';
 let sortBy = 'name';
@@ -51,8 +68,51 @@ function statusFromBalance(balance, gamesLeft) {
   return { text: `✓ ${gamesLeft} games left`, cls: 'tag-paid' };
 }
 
+/**
+ * The strip above the content: which contract, and which shape.
+ *
+ * Redrawn on every render rather than once on load, because both controls
+ * reflect state either of them can change.
+ */
+function drawScreenControls() {
+  contractSeg($('plContractSeg'), store.contracts, contractId,
+    (id) => { contractId = id; render(); });
+
+  document.querySelectorAll('[data-pl-modeseg]').forEach(seg => {
+    seg.innerHTML = MODES.map(([id, label, why]) =>
+      `<button data-pl-mode="${id}" class="${viewMode === id ? 'active' : ''}"
+        title="${esc(why)}">${label}</button>`).join('');
+    seg.querySelectorAll('[data-pl-mode]').forEach(b =>
+      b.addEventListener('click', () => {
+        if (viewMode === b.dataset.plMode) return;
+        viewMode = b.dataset.plMode;
+        render();
+      }));
+  });
+}
+
 async function render() {
   if (isPlayer()) return renderPlayerLedger();
+
+  const ledgerCard = $('plLedgerCard');
+  const sheetHost = $('reportRoot');
+  // Adding a player and importing a roster are things you do to the ledger.
+  // They mean nothing on a sheet you are about to send to the club.
+  $('plLedgerActions').style.display = viewMode === 'sheet' ? 'none' : 'flex';
+
+  if (viewMode === 'sheet') {
+    // The detail panel belongs to the working ledger — leaving it open under a
+    // sheet you are about to screenshot puts one player's timeline in it.
+    closePlayerDetail();
+    ledgerCard.hidden = true;
+    sheetHost.hidden = false;
+    await renderStandingSheet(sheetHost, contractId);
+    drawScreenControls();
+    return;
+  }
+
+  ledgerCard.hidden = false;
+  sheetHost.hidden = true;
 
   // Guest debt comes from the charges, not from ledger rows: a guest who pays
   // cash is given no account at all now, so there is no row of theirs to read.
@@ -312,6 +372,8 @@ async function render() {
         render();
       } catch (e) { toast(e.message, true); }
     }));
+
+  drawScreenControls();
 }
 
 // Player "My Ledger": their own balances across all contracts (read-only), and
@@ -946,13 +1008,13 @@ export function loadPlayers() {
   contractId ??= defaultContract();
   if (isPlayer()) {
     // Hide admin-only chrome; "My Ledger" lists all contracts as rows.
-    $('plAdd').style.display = 'none';
-    $('plContractSeg').innerHTML = '';
+    // The standing sheet is the club's view of everybody, so a player has no
+    // shape to switch to and the switch itself would be a dead control.
+    $('plScreenControls').hidden = true;
     const banner = $('setupBanner');
     if (banner) banner.style.display = 'none';
     return render();
   }
 
-  contractSeg($('plContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
   return render();
 }

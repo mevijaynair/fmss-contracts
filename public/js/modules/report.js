@@ -3,12 +3,15 @@
 // Deliberately built to be screenshotted: a dense, self-explanatory table with
 // the period and its rules stated in the header, so a picture of it makes sense
 // to someone who cannot see the app.
+//
+// This is one of two shapes of the Players screen, not a destination of its
+// own — the working ledger is the other. It therefore owns no state: which
+// contract is showing and which shape is on are the Players screen's business,
+// and it is handed the first and renders empty slots for the controls of both.
+// It used to keep its own `contractId`, which meant switching contract on one
+// shape and flipping to the other showed you the wrong club.
 import { api } from '../api.js';
-import { store, toast, defaultContract } from '../store.js';
-import { $, esc, money, fmtDate, contractSeg } from '../util.js';
-
-let contractId = null;   // resolved on first load — see defaultContract()
-let data = null;
+import { esc, money, fmtDate } from '../util.js';
 
 const STATUS_CLASS = {
   'In contract': 'rep-in',
@@ -29,11 +32,17 @@ function balanceCell(v, gamesLeft) {
   return `<td class="num rep-bal ${cls}">${money(v)}</td>`;
 }
 
-async function render() {
-  const host = $('reportRoot');
+/**
+ * Draw the standing sheet for one contract into `host`.
+ *
+ * Returns nothing and wires nothing: the caller owns the contract and the
+ * shape, and wires the two control slots this leaves in the header.
+ */
+export async function renderStandingSheet(host, contractId) {
   if (!host) return;
   host.innerHTML = '<p class="hint">Loading…</p>';
 
+  let data;
   try { data = await api.report(contractId); }
   catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
 
@@ -62,7 +71,6 @@ async function render() {
             counts reset when a new contract starts
           </span>
         </div>
-        <span class="seg" id="repContractSeg"></span>
       </div>
 
       <div class="rep-summary">
@@ -106,13 +114,4 @@ async function render() {
       : ''}
       </p>
     </div>`;
-
-  contractSeg($('repContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
-}
-
-export function initReport() {}
-
-export function loadReport() {
-  contractId ??= defaultContract();
-  return render();
 }

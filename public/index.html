@@ -231,16 +231,21 @@
 
         <!-- PLAYERS -->
         <section class="view" data-view="players" hidden>
-          <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Player ledger</h3>
-              <div style="display:flex; gap:0.6rem; align-items:center;">
-                <span class="seg" id="plContractSeg"></span>
-                <!-- Standing is this same ledger in the shape the club shares, so
-                     it belongs beside it rather than as its own destination. -->
-                <button class="btn btn-secondary btn-sm" data-goto="report"
-                  title="The same balances, laid out as the sheet you send round">Standing sheet</button>
-                <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
-              </div></div>
+          <!-- One control strip for both shapes of this screen: which contract,
+               and which shape. It sits ABOVE the content rather than in a card
+               header, because the standing sheet below is built to be
+               screenshotted and sent to the players — app chrome inside that
+               card ends up in the picture. -->
+          <div class="filter-bar" id="plScreenControls">
+            <span class="seg" id="plContractSeg"></span>
+            <span class="seg" data-pl-modeseg></span>
+            <span id="plLedgerActions" style="display:flex; gap:0.6rem;">
+              <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
+            </span>
+          </div>
+
+          <div class="sams-card" id="plLedgerCard">
+            <div class="card-header"><h3 class="card-title">Player ledger</h3></div>
             <!-- Search and filters live OUTSIDE the scroll box. players.js used
                  to insert them next to the table, which put them inside it — so
                  scrolling a nine-column table sideways carried the search box
@@ -257,6 +262,11 @@
               </table>
             </div>
           </div>
+
+          <!-- The standing sheet renders here, in place of the ledger card
+               above rather than beside it: one shape at a time, so the sheet
+               is still a clean screenshot. -->
+          <div id="reportRoot" hidden></div>
 
           <!-- Player detail panel (timeline + stats) -->
           <div class="sams-card" id="playerDetailCard" hidden>
@@ -439,10 +449,6 @@
         </section>
 
         <!-- EXTERNAL EVENTS (admin) — restaurant bills, venue costs, etc. -->
-        <section class="view" data-view="report" hidden>
-            <p class="hint" style="margin:0 0 0.9rem"><button class="link-btn" data-goto="players">← back to Players</button></p>
-          <div id="reportRoot"></div>
-        </section>
 
         <section class="view" data-view="events" hidden>
           <div id="eventsRoot"></div>
