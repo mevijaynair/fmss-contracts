@@ -261,15 +261,24 @@ export const gameweeksRepo = {
              -- the list otherwise: you have to open the game to find out.
              COUNT(DISTINCT CASE WHEN TRIM(ch.team) <> '' THEN ch.team END) AS teams_count,
              COUNT(DISTINCT CASE WHEN ch.is_captain = 1 AND TRIM(ch.team) <> ''
-               THEN ch.team END) AS captained_teams
+               THEN ch.team END) AS captained_teams,
+             -- WHO wore the armband, not just how many sides had one. The list
+             -- could say a captain was missing but never who the captains were,
+             -- so the one question you ask of a past game — who led which side
+             -- — meant opening it. Packed side|name, same idiom and the same
+             -- reasoning as pending_names above. pl, not sp: the armband
+             -- belongs to whoever played, never to whoever settles their bill.
+             GROUP_CONCAT(CASE WHEN ch.is_captain = 1
+               THEN TRIM(ch.team) || '|' || pl.name END, ';') AS captain_names
       FROM charges ch
       LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+      LEFT JOIN players pl ON pl.id = ch.player_id
       WHERE ch.gameweek_id IN (${placeholders})
       GROUP BY ch.gameweek_id
     `).all(...ids);
     const statsById = new Map(stats.map(s => [s.gameweek_id, s]));
     const empty = { charges_count: 0, charged: 0, paid_count: 0, pending_amount: 0,
-      pending_names: null, teams_count: 0, captained_teams: 0 };
+      pending_names: null, teams_count: 0, captained_teams: 0, captain_names: null };
 
     // Whether the result is actually resolvable, which is not the same question
     // as whether the score box has something typed in it: "0-0" is the default
@@ -278,6 +287,22 @@ export const gameweeksRepo = {
     const resultRows = new Set(db.prepare(
       `SELECT gameweek_id FROM game_results WHERE gameweek_id IN (${placeholders})`)
       .all(...ids).map(r => r.gameweek_id));
+
+    // Which game of the season this was, counted from the first one played.
+    //
+    // Worked out here rather than read from a column, because the stored
+    // gw_number is the order games were ENTERED, not the order they were
+    // played: Mon/Thu was typed up out of sequence and only 3 of its 13 games
+    // carried a number matching their own date. contract_number, which the
+    // Season list was actually displaying, is 0 on every game there has ever
+    // been — which is why every row read "#—".
+    //
+    // Deliberately computed over the whole table and not just the rows being
+    // returned: game 7 is the seventh game of its contract whether or not a
+    // filter happens to be hiding the six before it.
+    const ordinals = new Map(db.prepare(
+      `SELECT id, ROW_NUMBER() OVER (PARTITION BY contract_id ORDER BY date, id) AS n
+       FROM gameweeks`).all().map(r => [r.id, r.n]));
 
     // charges_count alongside the charged total: the stored num_players counts
     // everyone named in the message, including people who were never matched to
@@ -301,6 +326,7 @@ export const gameweeksRepo = {
         // Every side wants someone wearing the armband; one captain across two
         // teams is half a record.
         has_captains: s.teams_count > 0 && s.captained_teams >= s.teams_count,
+        gw_index: ordinals.get(g.id) ?? null,
       };
     });
   },

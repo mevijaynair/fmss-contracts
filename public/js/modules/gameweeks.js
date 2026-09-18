@@ -4,7 +4,11 @@ import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal, rosterOptions } from '../util.js';
 import { fixtureDate, dayName, describeDays, loadSchedule, markNoGame, reopenDate } from '../schedule-ui.js';
 
-let contractId = null;   // resolved on first load — see defaultContract()
+// undefined = not chosen yet, resolved on first load from defaultContract().
+// null = deliberately BOTH contracts. Two different values on purpose: with
+// both spelled null, `??=` reads "the user asked for both" as "nothing chosen
+// yet" and puts them back on one contract every time they leave and return.
+let contractId;
 
 /**
  * The season as a run of fixture dates, so a week that was never entered is
@@ -14,6 +18,18 @@ let contractId = null;   // resolved on first load — see defaultContract()
 async function renderSchedule() {
   const host = $('gwSchedule');
   if (!host) return;
+
+  // A fixture day belongs to one contract: Mon/Thu plays on Mondays, Saturdays
+  // on Saturdays, and "which days should we have played" has no answer for the
+  // two of them at once. The list above reads across both perfectly well; this
+  // does not, so it says so rather than showing one contract's fixtures under a
+  // heading that claims to cover both.
+  if (!contractId) {
+    host.innerHTML = `<p class="hint" style="margin:0 0 1rem;">
+      Pick a single contract to see its fixture days — Mon/Thu and Saturdays
+      keep different calendars, so there is no combined schedule.</p>`;
+    return;
+  }
 
   const s = await loadSchedule(contractId);
   if (!s) {
@@ -149,6 +165,24 @@ async function render() {
     : gapFilter === 'incomplete' ? allGames.filter(g => gapsFor(g).length)
       : allGames.filter(GAPS.find(f => f.key === gapFilter).missing);
 
+  // Two columns earn their place only sometimes, and a column of dashes is
+  // worse than no column: it takes width from the ones that are saying
+  // something and invites the reader to look for money that is not owed.
+  const anyOutstanding = allGames.some(g => Number(g.pending_amount) > 0);
+  const showContract = !contractId;
+  $('gwHead').innerHTML = `<tr>
+    <th style="width:2rem"><input type="checkbox" id="gwSelectAll" title="Select all"></th>
+    <th>Date</th>
+    ${showContract ? '<th>Contract</th>' : ''}
+    <th class="num" title="Which game of the season this was, counted from the first one played">GW</th>
+    <th class="num">Players</th><th class="num">Charged</th>
+    <th>Settlement</th><th class="num">Collected</th>
+    ${anyOutstanding ? '<th>To collect</th>' : ''}
+    <th>Captains</th><th>Result</th><th></th></tr>`;
+
+  const contractName = (id) =>
+    (store.contracts || []).find(c => c.id === id)?.name || id;
+
   const tbody = gwTable.querySelector('tbody');
   tbody.innerHTML = rowsList.map(g => {
     // The gameweeks LIST used to carry no payment-status data at all — only
@@ -197,15 +231,30 @@ async function render() {
       <tr data-gw="${g.id}" style="cursor:pointer;">
         <td><input type="checkbox" class="gw-pick" data-id="${g.id}" title="Select for bulk delete"></td>
         <td class="num"><strong>${esc(fmtDate(g.date))}</strong></td>
-        <td class="num">#${g.contract_number || '—'}</td>
+        ${showContract ? `<td>${esc(contractName(g.contract_id))}</td>` : ''}
+        <td class="num">${g.gw_index ? `#${g.gw_index}` : '<span class="hint">—</span>'}</td>
         <td class="num">${playerCount} players</td>
         <td class="num"><strong>${money(totalCharged)}</strong></td>
         <td><span style="color: ${statusColor}; font-weight: 600;">${statusText}</span></td>
         <td class="num" style="font-size: 0.85rem; color: var(--text-muted);">${collectionRate === null ? '—' : collectionRate + '%'}</td>
-        <td>${owing.length
+        ${anyOutstanding ? `<td>${owing.length
     ? owing.map(o => `<div style="white-space:nowrap">${esc(o.name)}
           <strong style="color: var(--danger)">${money(o.amount)}</strong></div>`).join('')
-    : '<span class="hint">—</span>'}</td>
+    : '<span class="hint">—</span>'}</td>` : ''}
+        <td>${(() => {
+    // Side and name, so "who led the Reds" is answerable from the list. A
+    // side with nobody wearing the armband is called out rather than left to
+    // be inferred from a short list.
+    const capts = (g.captain_names || '').split(';').filter(Boolean)
+      .map((pair) => { const cut = pair.indexOf('|');
+        return { team: pair.slice(0, cut), name: pair.slice(cut + 1) }; })
+      .sort((a, b) => a.team.localeCompare(b.team));
+    if (!capts.length) return '<span class="tag tag-due">none</span>';
+    const short = capts.map(c => `<div style="white-space:nowrap">${
+      c.team ? `<span class="team-dot team-${esc(c.team)}"></span>` : ''}${esc(c.name)}</div>`).join('');
+    return short + (g.teams_count > capts.length
+      ? ` <span class="tag tag-due">${g.teams_count - capts.length} side(s) without</span>` : '');
+  })()}</td>
         <td>${(() => {
     const gaps = gapsFor(g);
     const score = g.score ? esc(g.score) : '';
@@ -220,7 +269,12 @@ async function render() {
           ${!g.historical ? `<button class="btn btn-sm" data-gw-edit="${g.id}" style="padding: 0.3rem 0.6rem;">✏️</button>` : '<span class="hint">📋</span>'}
         </td>
       </tr>`;
-  }).join('') || '<tr><td colspan="10" class="hint">No gameweeks recorded.</td></tr>';
+  }).join('') || `<tr><td colspan="${
+    // Counted from the header rather than written as a literal, which is how it
+    // came to say 10 while the header grew to 11: a short colspan leaves the
+    // message boxed into one column with empty cells beside it.
+    gwTable.querySelectorAll('thead th').length
+  }" class="hint">No gameweeks recorded.</td></tr>`;
 
   gwTable.querySelectorAll('tr[data-gw]').forEach(tr => {
     tr.addEventListener('click', (e) => {
@@ -748,9 +802,12 @@ async function saveGameweekEdits(gameweekId) {
 export function initGameweeks() {}
 
 export function loadGameweeks() {
-  contractId ??= defaultContract();
+  if (contractId === undefined) contractId = defaultContract();
+  // Both, like Results: a season read across the two nights answers "what have
+  // we actually played" without asking twice. The fixture panel below cannot
+  // follow — see renderSchedule — because a fixture day belongs to one contract.
   contractSeg($('gwContractSeg'), store.contracts, contractId, (id) => {
-    contractId = id; render(); renderSchedule();
-  });
+    contractId = id || null; render(); renderSchedule();
+  }, { allLabel: 'Both' });
   return Promise.all([render(), renderSchedule()]);
 }

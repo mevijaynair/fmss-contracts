@@ -361,7 +361,11 @@
                 <button class="btn btn-danger btn-sm" id="gwBulkDelete">Delete selected</button>
               </div>
               <table class="sams-table" id="gwTable">
-                <thead><tr><th style="width:2rem"><input type="checkbox" id="gwSelectAll" title="Select all"></th><th>Date</th><th>GW</th><th class="num">Players</th><th class="num">Charged</th><th>Settlement</th><th class="num">Collected</th><th>To collect</th><th>Result</th><th></th></tr></thead>
+                <!-- The header is written by gameweeks.js, because two of the
+                     columns come and go: "To collect" is dropped when the
+                     season has nothing outstanding, and "Contract" only
+                     appears when both are being shown at once. -->
+                <thead id="gwHead"></thead>
                 <tbody></tbody>
               </table>
             </div>
