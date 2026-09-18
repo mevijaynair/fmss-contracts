@@ -2,7 +2,12 @@ import { api } from '../api.js';
 import { store, toast, defaultContract } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal } from '../util.js';
 
-let contractId = null;   // resolved on first load — see defaultContract()
+// undefined = not chosen yet, resolved on first load from defaultContract().
+// null = deliberately BOTH contracts. They have to be different values: with
+// both spelled null, `??=` treated "the user asked for both" as "nothing chosen
+// yet" and quietly put them back on one contract every time they left the
+// screen and came back.
+let contractId;
 
 // Guests and irregulars are real players but distort a leaderboard: someone who
 // turned up once should not sit beside a regular on a rate table. Hide players
@@ -16,9 +21,23 @@ let minGames = 6;
 // filter that drops people silently is how a leaderboard starts lying.
 let showLeft = false;
 
+// One-off walk-ups. Twenty of the fifty-nine people who have ever appeared in
+// these tables are guests, most of them with a single game, and at a low
+// appearance threshold they take the top of every rate board on one lucky
+// night. They played, so their games are real and nothing is deleted — but a
+// table about how the squad is playing is about the squad. Same default and
+// the same visible count as the Players screen, which hides them for the same
+// reason.
+let showGuests = false;
+
 /** Ids of players marked as having left. Read fresh — the flag is toggled elsewhere. */
 function departedIds() {
   return new Set((store.players || []).filter(p => p.hide_from_sheet).map(p => p.id));
+}
+
+/** Ids of outside players — guests, who keep no contract. */
+function guestIds() {
+  return new Set((store.players || []).filter(p => p.player_type === 'outside').map(p => p.id));
 }
 
 /**
@@ -29,8 +48,11 @@ function departedIds() {
  */
 function ranked(stats) {
   const gone = departedIds();
+  const guests = guestIds();
   return Object.values(stats).filter(p =>
-    p.games >= minGames && (showLeft || !gone.has(p.id)));
+    p.games >= minGames
+    && (showLeft || !gone.has(p.id))
+    && (showGuests || !guests.has(p.id)));
 }
 
 
@@ -358,19 +380,32 @@ function showPeriodBar(gws, stats) {
     `<button data-period="${val}" class="${period === val ? 'active' : ''}">${label}</button>`;
   const shown = ranked(stats).length;
   const gone = departedIds();
-  // Counted among players who would otherwise qualify, so the number matches
-  // what appears when you click it rather than counting departed one-timers.
+  const guests = guestIds();
+  // Each count is of players who would otherwise qualify, so the number matches
+  // what appears when you click it rather than counting hidden one-timers.
+  const qualifies = (p) => p.games >= minGames;
   const departed = Object.values(stats)
-    .filter(p => p.games >= minGames && gone.has(p.id)).length;
+    .filter(p => qualifies(p) && gone.has(p.id) && (showGuests || !guests.has(p.id))).length;
+  const guestCount = Object.values(stats)
+    .filter(p => qualifies(p) && guests.has(p.id) && (showLeft || !gone.has(p.id))).length;
   const occasional = Object.values(stats)
-    .filter(p => p.games < minGames && (showLeft || !gone.has(p.id))).length;
+    .filter(p => !qualifies(p) && (showLeft || !gone.has(p.id))
+      && (showGuests || !guests.has(p.id))).length;
 
   slot('results-period').innerHTML = `
-    <div class="filter-bar" style="grid-template-columns: 1fr auto auto auto;">
+    <div class="filter-bar" style="grid-template-columns: 1fr auto auto auto auto;">
       <div class="hint">
         Ranking <strong>${shown}</strong> player(s) with ${minGames}+ appearance(s)${
-          occasional ? ` &middot; ${occasional} occasional hidden` : ''}
+          occasional ? ` &middot; ${occasional} occasional hidden` : ''}${
+          contractId ? '' : ' &middot; both contracts together'}
       </div>
+      ${guestCount || showGuests ? `<span class="seg" id="resGuests">
+        <button data-guests="${showGuests ? '0' : '1'}" class="${showGuests ? 'active' : ''}"
+          title="One-off outside players. Their games are real, but a table about how the squad is playing is about the squad.">
+          ${showGuests ? `Hide ${guestCount} guest${guestCount === 1 ? '' : 's'}`
+    : `Show ${guestCount} guest${guestCount === 1 ? '' : 's'}`}
+        </button>
+      </span>` : ''}
       ${departed || showLeft ? `<span class="seg" id="resLeft">
         <button data-left="${showLeft ? '0' : '1'}" class="${showLeft ? 'active' : ''}"
           title="Players marked on the Players screen as having left the club">
@@ -392,6 +427,8 @@ function showPeriodBar(gws, stats) {
     b.addEventListener('click', () => { period = b.dataset.period; render(); }));
   slot('results-period').querySelectorAll('#resLeft button').forEach(b =>
     b.addEventListener('click', () => { showLeft = b.dataset.left === '1'; render(); }));
+  slot('results-period').querySelectorAll('#resGuests button').forEach(b =>
+    b.addEventListener('click', () => { showGuests = b.dataset.guests === '1'; render(); }));
   slot('results-period').querySelectorAll('#resMinGames button').forEach(b =>
     b.addEventListener('click', () => { minGames = Number(b.dataset.min); render(); }));
 }
@@ -721,6 +758,13 @@ Blue: Aws Zaki Rakesh Saheer Toby Sikku&quot;&#9;&#9;Reds win"></textarea>
 async function runImport(commit) {
   const text = $('ir_data')?.value.trim();
   if (!text) { toast('Paste the sheet first', true); return; }
+  // Reading both contracts at once is a fine way to look at records; it is no
+  // way to file new games, which each belong to one night. Refuse rather than
+  // post a blank contract and let the server decide where a season lands.
+  if (!contractId) {
+    toast('Pick which contract these games belong to first — "Both" cannot receive an import', true);
+    return;
+  }
   const out = $('ir_result');
   out.innerHTML = '<p class="hint">Working&hellip;</p>';
 
@@ -795,7 +839,13 @@ async function runImport(commit) {
 }
 
 export function loadResults() {
-  contractId ??= defaultContract();
-  contractSeg($('resContractSeg'), store.contracts, contractId, (id) => { contractId = id; render(); });
+  if (contractId === undefined) contractId = defaultContract();
+  // "Both" is the empty string, and the only screen that offers it. A record is
+  // a fact about a person, not about a contract: somebody who turns out on both
+  // nights has one way of playing, and asking how they are doing should not
+  // have to be asked twice and added up by hand. Money is the opposite — see
+  // contractSeg — which is why no balance screen offers this.
+  contractSeg($('resContractSeg'), store.contracts, contractId,
+    (id) => { contractId = id || null; render(); }, { allLabel: 'Both' });
   return render();
 }
