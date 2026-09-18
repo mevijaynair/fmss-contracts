@@ -410,8 +410,8 @@ async function detail(id) {
                 title="Whose money settles this charge">${payerOptions(c)}</select>
       </div>
       <div class="cr-cell" data-label="From">
-        <select class="ch-fund" data-charge="${c.id}" ${c.settle_mode === 'balance' ? '' : 'disabled'}
-                title="Which of their balances it comes off — a Mon/Thu regular playing one odd Saturday can pay from their Mon/Thu credit">
+        <select class="ch-fund" data-charge="${c.id}"
+                title="Which of their balances it comes off. Naming another contract makes this a balance settlement at that game's out-of-contract rate — somebody with Saturdays credit and nothing on Mon/Thu can pay for a Mon/Thu place out of the pot they actually have.">
           ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
   ct.id === c.settle_contract_id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
         </select>
@@ -591,16 +591,41 @@ async function detail(id) {
     const mode = document.querySelector(`.ch-mode[data-charge="${chargeId}"]`);
     const payer = document.querySelector(`.ch-payer[data-charge="${chargeId}"]`);
     const fund = document.querySelector(`.ch-fund[data-charge="${chargeId}"]`);
+
+    // Naming another contract IS choosing to settle off a balance — there is no
+    // such thing as a cash charge that comes out of a pot. The From control used
+    // to be disabled until How had been set to "off balance", which made the one
+    // case it exists for a two-step edit: the first step charged the game's own
+    // contract, which is the wrong pot, and anyone interrupted between the two
+    // left it there. One control, one decision, one write.
+    const fromOther = fund && fund.value !== g.contract_id;
+    const wanted = fromOther ? 'balance' : mode.value;
+
     try {
-      await api.setChargeSettlement(id, chargeId, {
-        mode: mode.value,
+      const res = await api.setChargeSettlement(id, chargeId, {
+        mode: wanted,
         charged_to: payer.value || null,
         // Only send it when it differs from the game's own contract, so an
         // ordinary charge keeps a NULL and behaves exactly as before.
-        settle_contract_id: fund && fund.value !== g.contract_id ? fund.value : null,
+        settle_contract_id: fromOther ? fund.value : null,
+        // Moving a place onto another contract's pot changes what it costs, and
+        // moving it back changes it again. The server only does it when asked,
+        // and tells us what it did so the message can name the figure rather
+        // than let it move quietly under a "saved".
+        reprice: true,
       });
-      toast({ cash: 'Now cash to collect', kitty: 'The kitty covers this place',
-        balance: 'Now settled off a balance' }[mode.value]);
+      const where = fromOther
+        ? `off their ${fund.selectedOptions[0].textContent.replace(/^from\s+/, '')} balance`
+        : null;
+      if (res?.repriced) {
+        toast(`${where ? `Now ${where} · ` : ''}`
+          + `re-priced ${money(res.repriced.from)} → ${money(res.repriced.amount)} `
+          + `(${res.repriced.rate_type === 'noncontract' ? 'out of contract' : 'contract rate'})`);
+      } else {
+        toast(where ? `Now ${where}`
+          : { cash: 'Now cash to collect', kitty: 'The kitty covers this place',
+            balance: 'Now settled off a balance' }[wanted]);
+      }
     } catch (e) {
       toast(e.message, true);
     }

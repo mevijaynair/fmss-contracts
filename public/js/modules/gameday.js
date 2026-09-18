@@ -114,14 +114,32 @@ function currentBucket(meta) {
   return derived;
 }
 
+/**
+ * True when this place is being paid for out of a DIFFERENT contract's pot.
+ *
+ * Someone with Saturdays credit and nothing on Mon/Thu can play a Mon/Thu game
+ * from the Saturdays balance they actually hold, instead of opening a Mon/Thu
+ * account at zero and going straight into the red.
+ */
+const fundedElsewhere = (r) => !!r.settle_contract_id && r.settle_contract_id !== contractId;
+
 function applyRate(r, meta) {
   const rates = rateCard(contractId);
   const bucket = currentBucket(meta);
-  const outside = r.player_type === 'outside';
+  // Paying out of another contract's pot means you have not prepaid into this
+  // one, so this game is priced at the non-contract rate — and the captain
+  // discount goes with it, because that too is something being in the contract
+  // buys. Same rule as rateForCharge() in server/repos/gameweeks.js; both must
+  // agree or a place costs one figure here and another once it is saved.
+  const outside = r.player_type === 'outside' || fundedElsewhere(r);
 
   if (outside) {
     r.rate_type = 'noncontract';
-    r.amount = Number(r.outside_cost) > 0
+    // A guest can have a rate of their own agreed with them. A member dipping
+    // into their other pot has no such thing — outside_cost is a fact about a
+    // walk-up, so it must not be applied to a regular player just because this
+    // one game is priced as non-contract.
+    r.amount = r.player_type === 'outside' && Number(r.outside_cost) > 0
       ? Number(r.outside_cost)
       : Number(rates.noncontract ?? 0);
   } else if (r.is_captain) {
@@ -298,9 +316,13 @@ function settlementOf(r) {
   const payer = rows.find(x => x.player_id === payerId)
     || (store.players || []).find(p => p.id === payerId);
   const payerName = payer?.display_name || payer?.name;
-  const paysCash = !payerId
+  // `noncontract` normally means "no balance to draw on, so it is cash". Naming
+  // a funding contract overrides that: the place is priced as non-contract
+  // because they have not prepaid into THIS contract, but it still comes off a
+  // real balance on the other one.
+  const paysCash = !fundedElsewhere(r) && (!payerId
     || (payer?.player_type === 'outside')
-    || (payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract'));
+    || (payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract')));
 
   if (paysCash) {
     // Cash can already be in your pocket by the time the game is entered, so
@@ -400,6 +422,16 @@ function renderPreview(meta) {
         ${playerOptions}
       </select>`;
 
+    // Which of their balances pays. Almost always this game's own contract, so
+    // that is the default and the first option; the others are there for the
+    // player who holds credit on one night and none on the other.
+    const fundControl = `
+      <select class="fund-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;"
+        title="Which balance this comes off. Paying from another contract means they have not prepaid into this one, so the place is priced at the out-of-contract rate — you can still type over the amount.">
+        ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
+  (r.settle_contract_id || contractId) === ct.id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
+      </select>`;
+
     const s = settlementOf(r);
 
     return `
@@ -408,10 +440,17 @@ function renderPreview(meta) {
         !r.matched ? ' <span class="miss-badge">new / unmatched</span>' : ''}</td>
       <td><span class="team-dot team-${esc(r.team)}"></span>${esc(r.team)}</td>
       <td>${typeControl}</td>
-      <td><span class="tag">${RATE_LABEL[r.rate_type] || r.rate_type}</span></td>
+      <td><span class="tag">${
+        // Same rate, different reason, and the reason is what the reader needs.
+        // A member paying from their other pot is on the non-contract rate but
+        // is emphatically not a guest, and calling them one is how somebody
+        // ends up "correcting" it back.
+        fundedElsewhere(r) ? 'Out of contract' : (RATE_LABEL[r.rate_type] || r.rate_type)
+      }</span></td>
       <td style="text-align:right;"><input class="amt-input" type="number" step="1" data-i="${i}" value="${r.amount}"></td>
       <td style="text-align:center; font-size:0.85rem;">
         <span class="hint">Charged to:</span><br>${chargedToControl}${introNote}
+        <div style="margin-top:0.3rem;">${fundControl}</div>
       </td>
       <td style="text-align:center;">
         <span class="settle-badge ${s.cls}${s.cash ? ' is-toggle' : ''}"
@@ -421,6 +460,19 @@ function renderPreview(meta) {
       <td class="row-actions"><button class="link-btn" data-del="${i}" title="Remove">✕</button></td>
     </tr>`;
   }).join('');
+
+  // Changing which pot pays re-prices the row on the spot, because the rate
+  // depends on it. The amount stays editable afterwards — the rate card is the
+  // usual answer, not the only one.
+  $('gdTable').querySelectorAll('.fund-select').forEach(sel =>
+    sel.addEventListener('change', () => {
+      const row = rows[sel.dataset.i];
+      row.settle_contract_id = sel.value === contractId ? null : sel.value;
+      applyRate(row, meta);
+      renderPreview(meta);
+      const other = (store.contracts || []).find(c => c.id === row.settle_contract_id);
+      if (other) toast(`${row.display_name}: ${other.name} balance, at the out-of-contract rate`);
+    }));
 
   $('gdTable').querySelectorAll('.player-type-select').forEach(sel =>
     sel.addEventListener('change', () => {
@@ -743,6 +795,8 @@ async function doConfirm() {
     // Who actually settles this charge. Usually the player, but an outside guest
     // is billed to the contracted player who brought them.
     charged_to: r.charged_to || r.player_id,
+    // Which of their balances pays, when it is not this game's own contract.
+    settle_contract_id: r.settle_contract_id || null,
     // Whether this one is cash is decided here, on the night, and must travel
     // with the charge. It used to be inferred server-side from the player's
     // permanent record, so marking a regular player as a cash guest for one game

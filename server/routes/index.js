@@ -327,6 +327,8 @@ r.put('/gameweeks/:id/charges/:chargeId/settlement', wrap((req) => {
     settles_cash: req.body?.settles_cash,
     charged_to: req.body?.charged_to,
     settle_contract_id: req.body?.settle_contract_id,
+    mode: req.body?.mode,
+    reprice: req.body?.reprice,
   });
 }));
 r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {

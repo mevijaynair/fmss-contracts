@@ -1019,6 +1019,110 @@ test('a game with no sides on any charge is missing all three', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Playing one contract's game out of another contract's pot.
+//
+// Somebody with Saturdays credit and nothing on Mon/Thu can pay for a Mon/Thu
+// place from the balance they actually hold, instead of opening a Mon/Thu
+// account at zero and going straight into the red.
+
+test('a charge funded from another contract comes off that contract balance', () => {
+  const other = 'otherc';
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES (?,'Other','{}',0,2)")
+    .run(other);
+  const p = player('Two pots', 0);
+  db.prepare('INSERT INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,?,?,\'\')')
+    .run(p, other, 300);
+
+  const g = game();
+  charge(g, p, 35);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'balance', settle_contract_id: other });
+
+  assert.equal(balanceOf(p), 0, 'their account on the game\'s own contract is untouched');
+  assert.equal(ledgersRepo.get(p, other).present_balance, 265,
+    'the money comes off the pot that is actually paying');
+});
+
+test('funding from another contract is not turned into a cash debt', () => {
+  const other = 'otherc';
+  const p = player('Not a debtor', 0);
+  db.prepare('INSERT INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,?,?,\'\')')
+    .run(p, other, 200);
+  const g = game();
+  charge(g, p, 35);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'balance', settle_contract_id: other });
+
+  assert.ok(!ledgersRepo.cashOutstanding(CONTRACT).some(r => r.player_id === p),
+    'it came off a balance — nobody is holding the club money for it');
+  assert.equal(ledgersRepo.get(p, other).cash_owed, 0);
+});
+
+test('paying from another pot is priced at the out-of-contract rate', () => {
+  // The contract rates are what prepaying into THIS contract buys. Somebody
+  // dipping in from elsewhere has not, so they pay what a guest pays.
+  db.prepare(`UPDATE contracts SET rates = '{"contracted_10":30,"contracted_12":27,
+    "captain_10":25,"captain_12":20,"noncontract":35}' WHERE id = ?`).run(CONTRACT);
+  const g = game();
+  const priced = gameweeksRepo.rateForCharge({
+    gameweekId: g, isCaptain: false, fromOtherContract: true, players: 12,
+  });
+  assert.equal(priced.rate_type, 'noncontract');
+  assert.equal(priced.amount, 35, 'not the 27 a contracted player pays');
+});
+
+test('the captain discount does not survive paying from another pot', () => {
+  const g = game();
+  const asCaptain = gameweeksRepo.rateForCharge({
+    gameweekId: g, isCaptain: true, fromOtherContract: false, players: 12,
+  });
+  const dipping = gameweeksRepo.rateForCharge({
+    gameweekId: g, isCaptain: true, fromOtherContract: true, players: 12,
+  });
+  assert.equal(asCaptain.amount, 20, 'a contracted captain pays the captain rate');
+  assert.equal(dipping.amount, 35,
+    'the captain rate is a contract benefit, so it goes with the contract');
+});
+
+test('re-pricing only happens when asked, and only when the pot actually changes', () => {
+  const other = 'otherc';
+  const p = player('Priced by hand', 0);
+  db.prepare('INSERT INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,?,?,\'\')')
+    .run(p, other, 500);
+  const g = game();
+  charge(g, p, 99);                                  // a figure somebody typed
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'balance', settle_contract_id: other });
+  assert.equal(db.prepare('SELECT amount FROM charges WHERE id = ?').get(ch).amount, 99,
+    'without reprice, a hand-set amount stands');
+
+  const moved = gameweeksRepo.setChargeSettlement(g, ch,
+    { mode: 'balance', settle_contract_id: null, reprice: true });
+  assert.ok(moved.repriced, 'coming back onto this contract re-prices');
+  assert.equal(moved.repriced.from, 99);
+
+  const again = gameweeksRepo.setChargeSettlement(g, ch,
+    { mode: 'balance', settle_contract_id: null, reprice: true });
+  assert.equal(again.repriced, null,
+    'asking again when nothing moved must not keep re-pricing');
+});
+
+test('the settlement mode actually reaches the charge', () => {
+  // The route dropped `mode`, so the Season control reported a change it had
+  // not made and snapped back on the next read.
+  const p = player('Mode mover', 100);
+  const g = game();
+  charge(g, p, 30);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'kitty' });
+  assert.equal(db.prepare('SELECT settled_from_kitty k FROM charges WHERE id = ?').get(ch).k, 1);
+  assert.equal(balanceOf(p), 100, 'the club pot carried it, so their balance is untouched');
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'balance' });
+  assert.equal(balanceOf(p), 70, 'and back off their balance again');
+});
+
+// ---------------------------------------------------------------------------
 // The shared snapshots.
 //
 // These are the only figures in the system that leave it. Once a picture is in

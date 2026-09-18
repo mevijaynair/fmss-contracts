@@ -389,7 +389,47 @@ export const gameweeksRepo = {
    * `settles_cash` is still accepted as a boolean for callers that only know the
    * older two-way choice.
    */
-  setChargeSettlement(gameweekId, chargeId, { mode, settles_cash, charged_to, settle_contract_id } = {}) {
+  /**
+   * What a place costs, given which pot is paying for it.
+   *
+   * The contract rates are the members' rates: they are what you get for having
+   * prepaid into that contract. Somebody playing a Mon/Thu game out of their
+   * Saturdays credit has not prepaid into Mon/Thu, so they are outside it for
+   * that game and pay the non-contract rate, exactly like a guest. The captain
+   * discount goes with it, because that too is a contract benefit.
+   *
+   * The same rule is applied in the browser while a game is being entered — see
+   * applyRate() in public/js/modules/gameday.js. Both must agree, or a place
+   * costs one figure in the preview and another once it is saved.
+   */
+  rateForCharge({ gameweekId, isCaptain, fromOtherContract, players }) {
+    const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
+    if (!gw) throw new Error('Gameweek not found');
+    const c = db.prepare('SELECT rates FROM contracts WHERE id = ?').get(gw.contract_id);
+    let rates = {};
+    try { rates = typeof c?.rates === 'string' ? JSON.parse(c.rates || '{}') : (c?.rates || {}); }
+    catch { rates = {}; }
+
+    if (fromOtherContract) {
+      return { rate_type: 'noncontract', amount: Number(rates.noncontract ?? 0) };
+    }
+    // `??` not `||` throughout: a rate card may legitimately set a rate to 0.
+    const n = players ?? this.chargeCount(gameweekId);
+    const bucket = n >= 11 ? '12' : '10';
+    if (isCaptain) {
+      return {
+        rate_type: `captain_${bucket}`,
+        amount: Number(rates[`captain_${bucket}`] ?? rates[`contracted_${bucket}`] ?? 0),
+      };
+    }
+    return {
+      rate_type: `contracted_${bucket}`,
+      amount: Number(rates[`contracted_${bucket}`] ?? rates.noncontract ?? 0),
+    };
+  },
+
+  setChargeSettlement(gameweekId, chargeId,
+    { mode, settles_cash, charged_to, settle_contract_id, reprice } = {}) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
     if (!row) throw new Error('Charge not found');
@@ -420,13 +460,35 @@ export const gameweeksRepo = {
     // charge lands nowhere.
     if (!cash && !fromKitty) ledgersRepo.ensure(payer, settleContract || gw.contract_id);
 
+    // Moving a charge onto another contract's pot changes what it costs, because
+    // the contract rates are the members' rates — see rateForCharge(). The
+    // caller has to ask for it: correcting a mis-entered allocation should not
+    // silently move money, and an amount that was set by hand is a decision
+    // somebody made that this has no business overwriting. The UI asks, and
+    // then says what it changed.
+    let priced = null;
+    if (reprice) {
+      const wasOther = !!row.settle_contract_id && row.settle_contract_id !== gw.contract_id;
+      const nowOther = !!settleContract && settleContract !== gw.contract_id;
+      if (wasOther !== nowOther) {
+        priced = this.rateForCharge({
+          gameweekId, isCaptain: !!row.is_captain, fromOtherContract: nowOther,
+        });
+      }
+    }
+
     db.prepare(`UPDATE charges SET settles_cash = ?, settled_from_kitty = ?, charged_to = ?,
-                settle_contract_id = ?, paid = ?, paid_at = ?, paid_method = ? WHERE id = ?`)
+                settle_contract_id = ?, paid = ?, paid_at = ?, paid_method = ?,
+                rate_type = ?, amount = ? WHERE id = ?`)
       .run(cash, fromKitty, payer, settleContract, cash ? row.paid : 0,
-        cash ? row.paid_at : null, cash ? row.paid_method : null, chargeId);
+        cash ? row.paid_at : null, cash ? row.paid_method : null,
+        priced ? priced.rate_type : row.rate_type,
+        priced ? priced.amount : row.amount, chargeId);
 
     recomputeGameKitty(gameweekId);
-    return this.get(gameweekId);
+    // What the caller told the user changed, so the message can be specific
+    // rather than "saved" over a figure that moved.
+    return { ...this.get(gameweekId), repriced: priced && { from: row.amount, ...priced } };
   },
 
   removeCharge(gameweekId, chargeId) {
@@ -532,8 +594,9 @@ export const gameweeksRepo = {
         gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0);
 
       const insCharge = db.prepare(`INSERT INTO charges
-        (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`);
+        (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash,
+         settle_contract_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
       charges.forEach((ch, i) => {
         const settledBy = ch.charged_to || ch.player_id;
         // Whether this charge is cash is a fact about the night, not about the
@@ -546,19 +609,39 @@ export const gameweeksRepo = {
         // the server thought came off a balance.
         const settlerType = db.prepare(
           "SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?").get(settledBy)?.t;
+
+        // Which of their balances pays, when it is not this game's own contract.
+        // Somebody with Saturdays credit and nothing on Mon/Thu can play a
+        // Mon/Thu game out of the Saturdays pot rather than opening a Mon/Thu
+        // account at zero and going straight into the red. Stored as NULL when
+        // it is the game's own contract, so an ordinary charge is untouched.
+        const settleOn = ch.settle_contract_id && ch.settle_contract_id !== gw.contract_id
+          ? ch.settle_contract_id : null;
+        if (settleOn && !db.prepare('SELECT id FROM contracts WHERE id = ?').get(settleOn)) {
+          throw new Error(`No such contract to settle from: ${settleOn}`);
+        }
+
+        // `noncontract` is read here as "no balance to draw on, so it is cash".
+        // That inference has to yield to an explicit funding contract: a place
+        // paid for out of another pot IS priced at the non-contract rate — the
+        // member rates are what prepaying into THIS contract buys — but it
+        // comes off a real balance, and filing it as cash would leave the money
+        // sitting in their Saturdays credit and the club chasing them for it.
         const cash = ch.settles_cash ? 1
           : (settlerType === 'outside'
-            || ((ch.player_type === 'outside' || ch.rate_type === 'noncontract')
+            || (!settleOn
+              && (ch.player_type === 'outside' || ch.rate_type === 'noncontract')
               && settledBy === ch.player_id)) ? 1 : 0;
         // Only somebody whose balance this actually touches gets an account.
         // Every charged player used to get a ledger row, so a guest paying cash
         // once was handed a balance they will never use, on every contract, and
         // then appeared in every list built from ledgers. What they owe is read
         // from the charges instead, so nothing is lost by leaving them out.
-        if (!cash) ledgersRepo.ensure(settledBy, gw.contract_id);
+        // The account has to be on whichever contract actually pays.
+        if (!cash) ledgersRepo.ensure(settledBy, settleOn || gw.contract_id);
         insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
           ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
-          settledBy, ch.paid ? 1 : 0, cash);
+          settledBy, ch.paid ? 1 : 0, cash, settleOn);
 
         // Remember who covered a guest, so the next game can suggest them
         // rather than asking again — losing that link is losing who came from

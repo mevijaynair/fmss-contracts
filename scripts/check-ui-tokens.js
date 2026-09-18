@@ -33,7 +33,7 @@ const HOOK_CLASSES = new Set([
   // The participant-* classes belonged to the old split-the-bill events panel,
   // which the programmes rewrite replaced; att-* are its successors.
   'att-tier', 'att-amt', 'att-method', 'att-paid',
-  'player-type-select', 'charged-to-select', 'charge-delta',
+  'player-type-select', 'charged-to-select', 'charge-delta', 'fund-select',
   'ch-team', 'ch-capt', 'ch-paid', 'ch-mode', 'ch-payer', 'ch-fund', 'gw-pick',
 ]);
 
