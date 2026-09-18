@@ -125,13 +125,49 @@ const gapsFor = (g) => GAPS.filter(f => f.missing(g));
 
 let gapFilter = 'all';            // 'all' | 'incomplete' | one of GAPS[].key
 
-function showGapBar(games) {
+// Which night. Mon/Thu is two different games in one contract — six Mondays and
+// seven Thursdays, different people free on each — and until now there was no
+// way to look at one of them.
+//
+// Built from the dates rather than from a "Monday and Thursday" written into
+// the code, so it is right for whatever a contract actually plays: Saturdays
+// gets no control at all, because splitting one day into one day is a button
+// that does nothing.
+let dayFilter = 'all';            // 'all' | a getUTCDay() number as a string
+
+// Parsed as UTC. `new Date('2026-09-07')` is already UTC midnight, but
+// `new Date('2026-09-07 00:00')` is local — and west of Greenwich that lands on
+// the 6th, which would file every Monday game under Sunday.
+const dayOf = (iso) => new Date(`${String(iso).slice(0, 10)}T00:00:00Z`).getUTCDay();
+const DAY_LABEL = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays',
+  'Thursdays', 'Fridays', 'Saturdays'];
+
+/**
+ * The filter bar: which night, and what a game is missing.
+ *
+ * `all` is every game on the current contract; `games` is what the day filter
+ * has left of it. The gap counts are of the latter, because the day is a SCOPE
+ * — narrowing it should narrow the counts — while the gaps are a filter within
+ * that scope, and a count that shrinks when you click it is not a count.
+ */
+function showGapBar(all, games) {
   const bar = $('gwGapBar');
   if (!bar) return;
   const incomplete = games.filter(g => gapsFor(g).length);
+  // A gap with nothing in it is not worth clicking — but the one already
+  // selected stays live, or narrowing to a night where it happens to be empty
+  // leaves the active chip disabled and no way back off it.
   const chip = (key, label, n) =>
     `<button data-gap="${key}" class="${gapFilter === key ? 'active' : ''}"
-       ${n === 0 && key !== 'all' ? 'disabled' : ''}>${label} <strong>${n}</strong></button>`;
+       ${n === 0 && key !== 'all' && gapFilter !== key ? 'disabled' : ''}>${label} <strong>${n}</strong></button>`;
+
+  // Only the days this contract actually plays on, and only when there is more
+  // than one of them to choose between.
+  const byDay = new Map();
+  for (const g of all) byDay.set(dayOf(g.date), (byDay.get(dayOf(g.date)) ?? 0) + 1);
+  const days = [...byDay.keys()].sort((a, b) => a - b);
+  const dayChip = (key, label, n) =>
+    `<button data-day="${key}" class="${dayFilter === key ? 'active' : ''}">${label} <strong>${n}</strong></button>`;
 
   bar.innerHTML = `
     <div class="hint" style="flex:1">
@@ -139,6 +175,10 @@ function showGapBar(games) {
     ? `<strong>${incomplete.length}</strong> of ${games.length} games are missing something.`
     : `All ${games.length} games have sides, captains and a result.`}
     </div>
+    ${days.length > 1 ? `<span class="seg" id="gwDaySeg">
+      ${dayChip('all', 'Every night', all.length)}
+      ${days.map(d => dayChip(String(d), DAY_LABEL[d], byDay.get(d))).join('')}
+    </span>` : ''}
     <span class="seg" id="gwGapSeg">
       ${chip('all', 'All', games.length)}
       ${chip('incomplete', 'Needs data', incomplete.length)}
@@ -147,6 +187,8 @@ function showGapBar(games) {
 
   bar.querySelectorAll('#gwGapSeg button').forEach(b =>
     b.addEventListener('click', () => { gapFilter = b.dataset.gap; render(); }));
+  bar.querySelectorAll('#gwDaySeg button').forEach(b =>
+    b.addEventListener('click', () => { dayFilter = b.dataset.day; render(); }));
 }
 
 async function render() {
@@ -158,17 +200,26 @@ async function render() {
   const gwTable = $('gwTable');
   if (!gwTable || !gwTable.querySelector('tbody')) return;
 
-  // Counts are always over the whole season, so the chips do not change as you
-  // filter — a count that shrinks when you click it is not a count.
-  showGapBar(allGames);
-  const rowsList = gapFilter === 'all' ? allGames
-    : gapFilter === 'incomplete' ? allGames.filter(g => gapsFor(g).length)
-      : allGames.filter(GAPS.find(f => f.key === gapFilter).missing);
+  // A day that this contract does not play on is not a filter, it is an empty
+  // screen. Switching from Mon/Thu to Saturdays leaves "Mondays" selected
+  // against a season that has none, so the scope falls back to every night.
+  if (dayFilter !== 'all' && !allGames.some(g => String(dayOf(g.date)) === dayFilter)) {
+    dayFilter = 'all';
+  }
+  const inScope = dayFilter === 'all'
+    ? allGames : allGames.filter(g => String(dayOf(g.date)) === dayFilter);
+
+  // Gap counts are of the current night, so narrowing the scope narrows them —
+  // but they do not change as you click between the gaps themselves.
+  showGapBar(allGames, inScope);
+  const rowsList = gapFilter === 'all' ? inScope
+    : gapFilter === 'incomplete' ? inScope.filter(g => gapsFor(g).length)
+      : inScope.filter(GAPS.find(f => f.key === gapFilter).missing);
 
   // Two columns earn their place only sometimes, and a column of dashes is
   // worse than no column: it takes width from the ones that are saying
   // something and invites the reader to look for money that is not owed.
-  const anyOutstanding = allGames.some(g => Number(g.pending_amount) > 0);
+  const anyOutstanding = inScope.some(g => Number(g.pending_amount) > 0);
   const showContract = !contractId;
   $('gwHead').innerHTML = `<tr>
     <th style="width:2rem"><input type="checkbox" id="gwSelectAll" title="Select all"></th>
