@@ -316,13 +316,19 @@ function settlementOf(r) {
   const payer = rows.find(x => x.player_id === payerId)
     || (store.players || []).find(p => p.id === payerId);
   const payerName = payer?.display_name || payer?.name;
-  // `noncontract` normally means "no balance to draw on, so it is cash". Naming
-  // a funding contract overrides that: the place is priced as non-contract
-  // because they have not prepaid into THIS contract, but it still comes off a
-  // real balance on the other one.
-  const paysCash = !fundedElsewhere(r) && (!payerId
-    || (payer?.player_type === 'outside')
-    || (payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract')));
+  // A guest keeps no balance ANYWHERE, so naming a contract for them settles
+  // nothing — the server drops it and files the charge as cash. Letting it
+  // override here would have made the preview promise a balance settlement and
+  // the saved game do something else, which is the one thing this preview
+  // exists to rule out.
+  const noBalanceAnywhere = !payerId || payer?.player_type === 'outside';
+  // Otherwise `noncontract` normally means "no balance to draw on, so it is
+  // cash", and naming a funding contract overrides that: the place is priced as
+  // non-contract because they have not prepaid into THIS contract, but it still
+  // comes off a real balance on the other one.
+  const paysCash = noBalanceAnywhere
+    || (!fundedElsewhere(r)
+      && payer === r && (r.player_type === 'outside' || r.rate_type === 'noncontract'));
 
   if (paysCash) {
     // Cash can already be in your pocket by the time the game is entered, so
@@ -425,7 +431,15 @@ function renderPreview(meta) {
     // Which of their balances pays. Almost always this game's own contract, so
     // that is the default and the first option; the others are there for the
     // player who holds credit on one night and none on the other.
-    const fundControl = `
+    // Only meaningful when somebody's balance is actually paying. Whoever
+    // settles this is the one who needs a balance, which is not always the
+    // player: a guest billed to the member who brought them is settled from
+    // that member's credit, so the control belongs on that row too.
+    const settler = (store.players || []).find(p => p.id === settlesId);
+    const settlerHasNoBalance = !settlesId || settler?.player_type === 'outside';
+    const fundControl = settlerHasNoBalance
+      ? '<span class="hint" title="A guest keeps no balance on any contract — they pay cash on the day">cash on the day</span>'
+      : `
       <select class="fund-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;"
         title="Which balance this comes off. Paying from another contract means they have not prepaid into this one, so the place is priced at the out-of-contract rate — you can still type over the amount.">
         ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${

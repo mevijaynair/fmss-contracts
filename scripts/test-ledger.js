@@ -1122,6 +1122,79 @@ test('the settlement mode actually reaches the charge', () => {
   assert.equal(balanceOf(p), 70, 'and back off their balance again');
 });
 
+test('a charge that uses no balance may not name one', () => {
+  // settle_contract_id says WHICH BALANCE pays. cashOutstanding groups by it,
+  // so leaving it on a cash charge files the debt under a contract that has
+  // nothing to do with the game — a guest at a Mon/Thu game turned up as
+  // Saturdays cash owed, where nobody chasing that game would ever see them.
+  const other = 'otherc';
+  const guest = player('Cash walk-up', 0);
+  makeOutside(guest);
+  const g = game();
+  charge(g, guest, 35);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'cash', settle_contract_id: other });
+  assert.equal(db.prepare('SELECT settle_contract_id s FROM charges WHERE id = ?').get(ch).s, null,
+    'a cash charge settles no balance, so it names none');
+  assert.ok(ledgersRepo.cashOutstanding(CONTRACT).some(r => r.player_id === guest),
+    'and is chased on the contract whose game it was');
+  assert.ok(!ledgersRepo.cashOutstanding(other).some(r => r.player_id === guest));
+
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'kitty', settle_contract_id: other });
+  assert.equal(db.prepare('SELECT settle_contract_id s FROM charges WHERE id = ?').get(ch).s, null,
+    'nor does one the club pot carries');
+});
+
+test('what a guest owes in cash is never raised by a rate card', () => {
+  // A walk-up who agreed 20 on the night owes 20. Re-pricing answers "which
+  // contract's rates apply", which is a question about a balance — it must not
+  // reach a charge that settles none, least of all as a side effect of
+  // clearing a funding contract they were never going to use.
+  const other = 'otherc';
+  const guest = player('Agreed twenty', 0);
+  makeOutside(guest);
+  const g = game();
+  charge(g, guest, 20);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch,
+    { mode: 'balance', settle_contract_id: other, reprice: true });
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'cash', reprice: true });
+  assert.equal(db.prepare('SELECT amount FROM charges WHERE id = ?').get(ch).amount, 20,
+    'they owe what was agreed, not what the card says');
+});
+
+test('an imported game keeps its value when its settlement is edited', () => {
+  // Games behind a closed baseline carry a charge worth 0 — an attendance
+  // record, not a bill, with the opening balances already netting them out.
+  // Re-pricing one put 35 on it: money invented behind a closed baseline.
+  const p = player('Was there in 2025', 0);
+  const g = game(1);                                  // historical
+  charge(g, p, 0);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch,
+    { mode: 'balance', settle_contract_id: 'otherc', reprice: true });
+  assert.equal(db.prepare('SELECT amount FROM charges WHERE id = ?').get(ch).amount, 0,
+    'the baseline says nobody was charged for this, and that stands');
+  assert.equal(balanceOf(p), 0, 'and no balance moved');
+});
+
+test('a game funded from elsewhere still credits the contract it was played on', () => {
+  const other = 'otherc';
+  const p = player('Dipper', 0);
+  db.prepare('INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status) VALUES (?,?,?,\'\')')
+    .run(p, other, 400);
+  const g = game();
+  charge(g, p, 35);
+  const ch = db.prepare('SELECT id FROM charges WHERE gameweek_id = ?').get(g).id;
+  gameweeksRepo.setChargeSettlement(g, ch, { mode: 'balance', settle_contract_id: other });
+
+  const row = db.prepare('SELECT contract_id, amount, kind FROM kitty WHERE id = ?').get(`k_gw_${g}`);
+  assert.equal(row.contract_id, CONTRACT,
+    'the night was this contract\'s, whatever pot paid for the place');
+  assert.equal(ledgersRepo.get(p, other).present_balance, 365, 'and the money came off that pot');
+});
+
 // ---------------------------------------------------------------------------
 // The shared snapshots.
 //

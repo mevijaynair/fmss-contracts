@@ -409,12 +409,18 @@ async function detail(id) {
         <select class="ch-payer" data-charge="${c.id}"
                 title="Whose money settles this charge">${payerOptions(c)}</select>
       </div>
-      <div class="cr-cell" data-label="From">
+      <div class="cr-cell" data-label="From">${
+  // A guest keeps no balance on any contract, so there is nothing for this to
+  // choose between — the server drops whatever it is told and the control
+  // would snap back on the next read. Say why instead of offering a dead one.
+  (store.players || []).find(p => p.id === c.settled_by)?.player_type === 'outside'
+    ? '<span class="hint" title="A guest keeps no balance on any contract — they pay cash on the day">cash on the day</span>'
+    : `
         <select class="ch-fund" data-charge="${c.id}"
                 title="Which of their balances it comes off. Naming another contract makes this a balance settlement at that game's out-of-contract rate — somebody with Saturdays credit and nothing on Mon/Thu can pay for a Mon/Thu place out of the pot they actually have.">
           ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
   ct.id === c.settle_contract_id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
-        </select>
+        </select>`}
       </div>
       <div class="cr-cell" data-label="Side">
         <select class="ch-team" data-charge="${c.id}">${teamOptions(c.team)}</select>

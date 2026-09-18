@@ -442,20 +442,42 @@ export const gameweeksRepo = {
       ? (mode === 'cash' ? 1 : 0)
       : (settles_cash === undefined ? row.settles_cash : (settles_cash ? 1 : 0));
     let payer = charged_to === undefined ? row.charged_to : (charged_to || null);
-    const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
-    const settleContract = settle_contract_id === undefined
+    const gwRow = db.prepare('SELECT contract_id, historical FROM gameweeks WHERE id = ?')
+      .get(gameweekId);
+    const gw = gwRow;
+    let settleContract = settle_contract_id === undefined
       ? row.settle_contract_id
       : (settle_contract_id || null);
     if (settleContract
         && !db.prepare('SELECT id FROM contracts WHERE id = ?').get(settleContract)) {
       throw new Error(`No such contract: ${settleContract}`);
     }
+    // Resolve WHO pays before asking anything about them. The fallback to the
+    // player themselves used to happen further down, so every question asked
+    // above it — not least "are they a guest?" — was asked about null whenever
+    // the charge was settled by whoever played it, which is the ordinary case.
     if (payer) {
       const exists = db.prepare('SELECT id FROM players WHERE id = ?').get(payer);
       if (!exists) throw new Error('No such player to bill this to');
     } else {
       payer = row.player_id;
     }
+
+    // Whether this charge actually comes off a balance, decided the way the
+    // LEDGER decides it — with three facts, not two. A guest is cash however
+    // the charge is marked, because they keep no balance to draw on. Reading
+    // only the two flags disagreed with every screen that reads the money.
+    const settlerIsGuest = db.prepare(
+      "SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?")
+      .get(payer)?.t === 'outside';
+    const onABalance = !cash && !fromKitty && !settlerIsGuest;
+
+    // settle_contract_id names WHICH BALANCE pays, so on a charge that comes
+    // off none it is not merely unused — it is actively wrong. cashOutstanding
+    // groups by it, so a charge carrying one is chased on the wrong contract's
+    // collect list: a guest at a Mon/Thu game appeared as Saturdays cash owed,
+    // where nobody looking at that game would ever find them.
+    if (!onABalance) settleContract = null;
     // The account has to exist on whichever contract actually pays, or the
     // charge lands nowhere.
     if (!cash && !fromKitty) ledgersRepo.ensure(payer, settleContract || gw.contract_id);
@@ -466,8 +488,19 @@ export const gameweeksRepo = {
     // silently move money, and an amount that was set by hand is a decision
     // somebody made that this has no business overwriting. The UI asks, and
     // then says what it changed.
+    //
+    // Two things it must never touch, both found by testing rather than by
+    // reading the code:
+    //
+    //   - a HISTORICAL charge. Imported games sit behind a closed baseline and
+    //     carry an amount of 0: they are an attendance record, not a bill.
+    //     Re-pricing one put 35 on it, inventing money the baseline says was
+    //     never charged.
+    //   - a charge that is not settled off a balance. What a guest owes was
+    //     agreed with them on the night; a rate card has no business raising it
+    //     to the card rate because a field they have nothing to do with moved.
     let priced = null;
-    if (reprice) {
+    if (reprice && onABalance && !gwRow.historical) {
       const wasOther = !!row.settle_contract_id && row.settle_contract_id !== gw.contract_id;
       const nowOther = !!settleContract && settleContract !== gw.contract_id;
       if (wasOther !== nowOther) {
@@ -615,10 +648,10 @@ export const gameweeksRepo = {
         // Mon/Thu game out of the Saturdays pot rather than opening a Mon/Thu
         // account at zero and going straight into the red. Stored as NULL when
         // it is the game's own contract, so an ordinary charge is untouched.
-        const settleOn = ch.settle_contract_id && ch.settle_contract_id !== gw.contract_id
+        const asked = ch.settle_contract_id && ch.settle_contract_id !== gw.contract_id
           ? ch.settle_contract_id : null;
-        if (settleOn && !db.prepare('SELECT id FROM contracts WHERE id = ?').get(settleOn)) {
-          throw new Error(`No such contract to settle from: ${settleOn}`);
+        if (asked && !db.prepare('SELECT id FROM contracts WHERE id = ?').get(asked)) {
+          throw new Error(`No such contract to settle from: ${asked}`);
         }
 
         // `noncontract` is read here as "no balance to draw on, so it is cash".
@@ -629,9 +662,15 @@ export const gameweeksRepo = {
         // sitting in their Saturdays credit and the club chasing them for it.
         const cash = ch.settles_cash ? 1
           : (settlerType === 'outside'
-            || (!settleOn
+            || (!asked
               && (ch.player_type === 'outside' || ch.rate_type === 'noncontract')
               && settledBy === ch.player_id)) ? 1 : 0;
+        // Only a charge that actually comes off a balance may name which one.
+        // On a cash charge the field is not unused but wrong: cashOutstanding
+        // groups by it, so the debt would be chased on a contract that has
+        // nothing to do with the game. A guest settles for cash however they
+        // were entered, so this is the common way to reach that state.
+        const settleOn = cash ? null : asked;
         // Only somebody whose balance this actually touches gets an account.
         // Every charged player used to get a ledger row, so a guest paying cash
         // once was handed a balance they will never use, on every contract, and

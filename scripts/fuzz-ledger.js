@@ -75,6 +75,9 @@ const everyone = [...squad, ...guests];
 const SETTLER = "COALESCE(NULLIF(ch.charged_to,''), ch.player_id)";
 const IS_CASH = "(ch.settles_cash = 1 OR COALESCE(s.player_type,'regular') = 'outside')";
 
+// Things an operation spotted as it ran, drained by the next invariant sweep.
+const noticed = [];
+
 function invariants(label) {
   const problems = [];
 
@@ -116,9 +119,19 @@ function invariants(label) {
       WHERE ch.gameweek_id = ?`).get(g.id);
     const water = (g.game_cost_paid_by || 'self') === 'self' ? Number(g.game_cost) || 0 : 0;
     const want = g.historical ? 0 : r2(s.contracted + s.guest - (Number(g.cost_per_gw) || 0) - water);
-    const row = db.prepare('SELECT kind, amount FROM kitty WHERE id = ?').get(`k_gw_${g.id}`);
+    const row = db.prepare('SELECT kind, amount, contract_id FROM kitty WHERE id = ?')
+      .get(`k_gw_${g.id}`);
     const got = row ? r2(row.kind === 'income' ? row.amount : -row.amount) : 0;
     if (Math.abs(got - want) > 0.005) problems.push(`kitty ${g.id}: stored ${got}, rules say ${want}`);
+    // The profit belongs to the contract whose game it was, whoever paid for
+    // their place and out of which pot. Someone spending Saturdays credit on a
+    // Mon/Thu night is Mon/Thu income — filing it under Saturdays because that
+    // is where the money came from would credit the wrong contract and leave
+    // both per-contract figures wrong by the same amount, in opposite
+    // directions, while the club total still looked right.
+    if (row && row.contract_id !== g.contract_id) {
+      problems.push(`kitty ${g.id}: filed under ${row.contract_id}, the game was ${g.contract_id}`);
+    }
   }
   const stray = db.prepare("SELECT COUNT(*) n FROM kitty WHERE id LIKE 'k_charge_%'").get().n;
   if (stray) problems.push(`${stray} per-charge kitty row(s) reappeared`);
@@ -130,6 +143,43 @@ function invariants(label) {
   // 3. A charge is settled exactly one way.
   const both = db.prepare('SELECT COUNT(*) n FROM charges WHERE settles_cash = 1 AND settled_from_kitty = 1').get().n;
   if (both) problems.push(`${both} charge(s) are cash AND kitty-funded`);
+
+  // 3a. settle_contract_id names WHICH BALANCE pays, so it may only exist on a
+  //     charge that comes off one. On a cash charge it is not merely unused:
+  //     cashOutstanding groups by it, so the debt gets chased on a contract
+  //     that has nothing to do with the game, where nobody will look for it.
+  //     Decided with the LEDGER's rule, which takes three facts and not two: a
+  //     guest is cash however the charge is marked, because they keep no
+  //     balance to draw on. Reading only the two flags agreed with the schema
+  //     and disagreed with every screen that reads the money.
+  const misfiled = db.prepare(`SELECT COUNT(*) n FROM charges ch
+    LEFT JOIN players s ON s.id = ${SETTLER}
+    WHERE ch.settle_contract_id IS NOT NULL
+      AND (ch.settled_from_kitty = 1 OR ${IS_CASH})`).get().n;
+  if (misfiled) problems.push(`${misfiled} charge(s) name a funding contract but do not use one`);
+
+  // 3b. Every charge lands in EXACTLY ONE place, and the four places between
+  //     them account for every charge there is. This is the "no gaps" check:
+  //     the sums in 1, 2 and 4 each verify one bucket, and are only a complete
+  //     account of the money if the buckets partition the charges.
+  const buckets = db.prepare(`SELECT
+      COUNT(*) total,
+      SUM(CASE WHEN ch.settled_from_kitty = 1 THEN 1 ELSE 0 END) carried,
+      SUM(CASE WHEN ch.settled_from_kitty = 0 AND ${IS_CASH} AND ch.paid = 0 THEN 1 ELSE 0 END) owed,
+      SUM(CASE WHEN ch.settled_from_kitty = 0 AND ${IS_CASH} AND ch.paid = 1 THEN 1 ELSE 0 END) handed,
+      SUM(CASE WHEN ch.settled_from_kitty = 0 AND NOT ${IS_CASH} THEN 1 ELSE 0 END) offBalance
+    FROM charges ch LEFT JOIN players s ON s.id = ${SETTLER}`).get();
+  const counted = (buckets.carried || 0) + (buckets.owed || 0)
+    + (buckets.handed || 0) + (buckets.offBalance || 0);
+  if (counted !== buckets.total) {
+    problems.push(`${buckets.total} charges but ${counted} accounted for — some land nowhere or twice`);
+  }
+
+  // 3c. Anything an operation noticed for itself. A few rules are about a
+  //     TRANSITION rather than a state — "this edit must not change that
+  //     figure" — which no amount of looking at the database afterwards can
+  //     see, because both the before and the after are legal on their own.
+  problems.push(...noticed.splice(0));
 
   // 4. Cash to collect, recomputed.
   for (const c of CONTRACTS) {
@@ -212,7 +262,12 @@ function makeGame() {
       cost_per_gw: pick([0, 100, 275, 346]), game_cost: pick([0, 15]),
       game_cost_paid_by: pick(['self', squad[0]]), score: pick(['', 'Blue win 7-5', 'Draw 4-4', 'Reds win']) },
     who.map(p => ({ player_id: p, team: pick(['Blue', 'Red', 'White', '']),
-      is_captain: rnd() < 0.2, rate_type: 'manual', amount: pick([0, 20, 27, 35]) })));
+      is_captain: rnd() < 0.2, rate_type: 'manual', amount: pick([0, 20, 27, 35]),
+      // Somebody paying for this place out of their OTHER contract's pot, which
+      // is what Game day now offers on every row. Offered here to guests too,
+      // who have no balance anywhere — the server has to refuse to record it
+      // rather than file their cash against a contract they are not on.
+      settle_contract_id: rnd() < 0.25 ? pick(CONTRACTS) : null })));
   liveGames.push(gw.id);
   return gw.id;
 }
@@ -227,10 +282,68 @@ const MOVES = [
   ['change how a charge settles', () => {
     const g = pick(liveGames); if (!g) return;
     const ch = pick(gameweeksRepo.get(g).charges || []); if (!ch) return;
+    const was = db.prepare('SELECT amount FROM charges WHERE id = ?').get(ch.id);
     const mode = pick(['balance', 'cash', 'kitty']);
     gameweeksRepo.setChargeSettlement(g, ch.id, { mode,
       charged_to: rnd() < 0.3 ? pick(squad) : null,
-      settle_contract_id: mode === 'balance' && rnd() < 0.4 ? pick(CONTRACTS) : null });
+      // Deliberately offered on cash and kitty charges too, not just balance
+      // ones: the Season control can reach that combination, and naming a
+      // funding contract on a charge that uses no balance must be dropped
+      // rather than stored and later acted on.
+      settle_contract_id: rnd() < 0.4 ? pick(CONTRACTS) : null,
+      // Half the time ask for the rate to follow the pot, which is what the
+      // Season control does.
+      reprice: rnd() < 0.5 });
+
+    // Re-pricing follows the POT: it is the answer to "which contract's rates
+    // apply", so it only means anything for a charge that comes off a balance.
+    // What a guest owes in cash was agreed with them on the night and a rate
+    // card must never raise it — least of all as a side effect of clearing a
+    // funding contract they were never going to use. Both amounts look legal
+    // afterwards, so only watching the change can see it.
+    const now = db.prepare(
+      'SELECT amount, settles_cash, settled_from_kitty FROM charges WHERE id = ?').get(ch.id);
+    if (now && (now.settles_cash || now.settled_from_kitty)
+        && r2(now.amount) !== r2(was.amount)) {
+      noticed.push(`${mode} charge ${ch.id} re-priced ${was.amount} → ${now.amount}`
+        + ' — it settles no balance, so no rate card applies to it');
+    }
+  }],
+  ['re-settle a charge on an imported game', () => {
+    // Imported games sit behind the closed baseline. Their charges are worth 0
+    // and the settlement controls are hidden, but the repo is reachable from a
+    // script and must protect the baseline itself.
+    const hist = db.prepare('SELECT id FROM gameweeks WHERE historical = 1').all();
+    if (!hist.length) return;
+    const g = pick(hist).id;
+    const ch = pick(db.prepare('SELECT id, amount FROM charges WHERE gameweek_id = ?').all(g));
+    if (!ch) return;
+    gameweeksRepo.setChargeSettlement(g, ch.id, {
+      mode: pick(['balance', 'cash', 'kitty']),
+      settle_contract_id: rnd() < 0.5 ? pick(CONTRACTS) : null, reprice: true });
+    // Whatever else that edit did, it must not have changed what the game cost
+    // anybody. The baseline behind it is closed and its opening balances
+    // already net these out, so a new figure here is money invented from
+    // nothing — and both the old and new amounts look perfectly legal in the
+    // database afterwards, so only watching the change can catch it.
+    const after = db.prepare('SELECT amount FROM charges WHERE id = ?').get(ch.id);
+    if (after && r2(after.amount) !== r2(ch.amount)) {
+      noticed.push(`imported charge ${ch.id} re-priced ${ch.amount} → ${after.amount}`);
+    }
+  }],
+  ['pull a game behind the baseline, or bring it back', () => {
+    const g = pick(liveGames); if (!g) return;
+    // Straight SQL because nothing in the repo exposes this: closing a baseline
+    // does it in bulk (server/db.js), and reopening one is a rare admin act.
+    // It still has to be reachable here, because a game crossing that line is
+    // what makes a charge stop being money and start being a record.
+    db.prepare('UPDATE gameweeks SET historical = ? WHERE id = ?')
+      .run(rnd() < 0.5 ? 1 : 0, g);
+    // Crossing that line changes what the game is worth to the pot, so something
+    // has to recompute it. Any real edit does; this is the cheapest.
+    const cur = db.prepare('SELECT game_cost, game_cost_paid_by FROM gameweeks WHERE id = ?').get(g);
+    gameweeksRepo.updateGameAccounting(g,
+      { game_cost: cur.game_cost, game_cost_paid_by: cur.game_cost_paid_by });
   }],
   ['move a player between sides', () => {
     const g = pick(liveGames); if (!g) return;
