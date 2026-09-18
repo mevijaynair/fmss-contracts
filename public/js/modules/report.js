@@ -98,6 +98,11 @@ async function render() {
         game is out of contract, under ${data.refill_below_games} needs a refill.${data.dormant_hidden
       ? ` ${data.dormant_hidden} player${data.dormant_hidden === 1 ? '' : 's'} holding no money and
          with nothing this period ${data.dormant_hidden === 1 ? 'is' : 'are'} not listed.`
+      : ''}${data.flag_hidden
+      ? ` ${data.flag_hidden} player${data.flag_hidden === 1 ? '' : 's'} marked as having left
+         ${data.flag_hidden === 1 ? 'is' : 'are'} not listed${data.flag_hidden_balance
+    ? `, still holding ${money(data.flag_hidden_balance)} between them` : ''} —
+         you can put them back from the Players screen.`
       : ''}
       </p>
     </div>`;

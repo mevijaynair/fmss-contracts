@@ -9,6 +9,30 @@ let contractId = null;   // resolved on first load — see defaultContract()
 // below this many appearances; the control in the Results header changes it.
 let minGames = 6;
 
+// Players marked on the Players screen as having left the club. Their record
+// stands — nothing is deleted — but a table of who is playing well is about the
+// people still turning up, and a season's worth of departed names buries them.
+// Off by default, one click to see them, and the count is always stated: a
+// filter that drops people silently is how a leaderboard starts lying.
+let showLeft = false;
+
+/** Ids of players marked as having left. Read fresh — the flag is toggled elsewhere. */
+function departedIds() {
+  return new Set((store.players || []).filter(p => p.hide_from_sheet).map(p => p.id));
+}
+
+/**
+ * The players a ranking should contain: enough appearances, and still here.
+ *
+ * Every table on this screen has to agree about who is in, or the header count,
+ * the leaderboards and the standings table each rank a different population.
+ */
+function ranked(stats) {
+  const gone = departedIds();
+  return Object.values(stats).filter(p =>
+    p.games >= minGames && (showLeft || !gone.has(p.id)));
+}
+
 
 async function render() {
   try {
@@ -332,15 +356,27 @@ function showPeriodBar(gws, stats) {
   const { years, quarters } = periodOptions(gws);
   const btn = (val, label) =>
     `<button data-period="${val}" class="${period === val ? 'active' : ''}">${label}</button>`;
-  const ranked = Object.values(stats).filter(p => p.games >= minGames).length;
-  const hidden = Object.keys(stats).length - ranked;
+  const shown = ranked(stats).length;
+  const gone = departedIds();
+  // Counted among players who would otherwise qualify, so the number matches
+  // what appears when you click it rather than counting departed one-timers.
+  const departed = Object.values(stats)
+    .filter(p => p.games >= minGames && gone.has(p.id)).length;
+  const occasional = Object.values(stats)
+    .filter(p => p.games < minGames && (showLeft || !gone.has(p.id))).length;
 
   slot('results-period').innerHTML = `
-    <div class="filter-bar" style="grid-template-columns: 1fr auto auto;">
+    <div class="filter-bar" style="grid-template-columns: 1fr auto auto auto;">
       <div class="hint">
-        Ranking <strong>${ranked}</strong> player(s) with ${minGames}+ appearance(s)${
-          hidden ? ` &middot; ${hidden} occasional hidden` : ''}
+        Ranking <strong>${shown}</strong> player(s) with ${minGames}+ appearance(s)${
+          occasional ? ` &middot; ${occasional} occasional hidden` : ''}
       </div>
+      ${departed || showLeft ? `<span class="seg" id="resLeft">
+        <button data-left="${showLeft ? '0' : '1'}" class="${showLeft ? 'active' : ''}"
+          title="Players marked on the Players screen as having left the club">
+          ${showLeft ? `Hide ${departed} who left` : `Show ${departed} who left`}
+        </button>
+      </span>` : ''}
       <span class="seg" id="resPeriod">
         ${btn('all', 'All time')}
         ${years.map(y => btn(y, y)).join('')}
@@ -354,12 +390,14 @@ function showPeriodBar(gws, stats) {
 
   slot('results-period').querySelectorAll('#resPeriod button').forEach(b =>
     b.addEventListener('click', () => { period = b.dataset.period; render(); }));
+  slot('results-period').querySelectorAll('#resLeft button').forEach(b =>
+    b.addEventListener('click', () => { showLeft = b.dataset.left === '1'; render(); }));
   slot('results-period').querySelectorAll('#resMinGames button').forEach(b =>
     b.addEventListener('click', () => { minGames = Number(b.dataset.min); render(); }));
 }
 
 function showLeaderboards(stats) {
-  const all = Object.values(stats).filter(p => p.games >= minGames);
+  const all = ranked(stats);
   const rated = all.filter(p => p.decided >= Math.max(3, Math.floor(minGames / 2)));
   // Goal difference needs games whose goals were actually recorded, which is a
   // smaller set than games with a result — "Reds win" decides a match without
@@ -433,7 +471,7 @@ let sortKey = 'games';
 let sortDir = -1;
 
 function showTable(stats) {
-  const rows = Object.values(stats).filter(p => p.games >= minGames);
+  const rows = ranked(stats);
   const cols = [
     ['name', 'Player', p => esc(p.name), 'left'],
     ['games', 'P', p => p.games],

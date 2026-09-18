@@ -12,6 +12,20 @@ let searchQuery = '';
 let sortBy = 'name';
 let filterStatus = 'all';
 let filterBalance = 'all';
+// Who is still turning up. Players drift away without announcing it, so the
+// only way to find them was to remember who you had not seen — with a third of
+// the roster dormant, that is not a thing anyone can do from a list of names.
+// "Quiet" is a prompt, not a verdict: the app cannot know somebody has left,
+// only that they have not played for a while. Marking them is still a person's
+// decision, which is what hide_from_sheet records.
+let filterActivity = 'all';   // all | quiet | left
+const QUIET_DAYS = 90;
+
+/** Whole days since an ISO date, or null when they have never played. */
+function daysSince(iso) {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+}
 // Guests are one-off outside players. They outnumber the regulars after a season
 // import and push the contracted squad off the screen, so the ledger shows only
 // contract players unless this is turned on. Guest debts are chased from the
@@ -66,6 +80,15 @@ async function render() {
     // Filter by balance
     if (filterBalance === 'positive' && l.present_balance <= 0) return false;
     if (filterBalance === 'negative' && l.present_balance >= 0) return false;
+    // Filter by activity. Players already marked as having left are not also
+    // offered as "quiet" — they have been dealt with, and leaving them in the
+    // list of people to consider means the list never empties.
+    if (filterActivity === 'left' && !l.hide_from_sheet) return false;
+    if (filterActivity === 'quiet') {
+      if (l.hide_from_sheet) return false;
+      const d = daysSince(l.last_game_date);
+      if (d !== null && d < QUIET_DAYS) return false;
+    }
     return true;
   });
 
@@ -77,6 +100,17 @@ async function render() {
     if (sortBy === 'games') return b.games - a.games;
     return 0;
   });
+
+  // Counted over everyone on the contract, not over what the other filters
+  // left behind — a count that shrinks as you narrow the list cannot tell you
+  // how many people there are to deal with.
+  const members = ledgers.filter(l => l.player_type !== 'outside');
+  const leftCount = members.filter(l => l.hide_from_sheet).length;
+  const quietCount = members.filter(l => {
+    if (l.hide_from_sheet) return false;
+    const d = daysSince(l.last_game_date);
+    return d === null || d >= QUIET_DAYS;
+  }).length;
 
   // Render controls
   const controlsPanel = document.querySelector('[data-player-controls]') || document.createElement('div');
@@ -103,6 +137,13 @@ async function render() {
       <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Any balance</option>
       <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>In credit</option>
       <option value="negative" ${filterBalance === 'negative' ? 'selected' : ''}>In the red</option>
+    </select>
+    <select id="pl_filter_activity" title="Find players who have stopped turning up">
+      <option value="all" ${filterActivity === 'all' ? 'selected' : ''}>Everyone</option>
+      <option value="quiet" ${filterActivity === 'quiet' ? 'selected' : ''}>Not played in ${QUIET_DAYS}+ days${
+  quietCount ? ` (${quietCount})` : ''}</option>
+      <option value="left" ${filterActivity === 'left' ? 'selected' : ''}>Marked as left${
+  leftCount ? ` (${leftCount})` : ''}</option>
     </select>
   `;
 
@@ -133,6 +174,7 @@ async function render() {
   $('pl_sort').addEventListener('change', (e) => { sortBy = e.target.value; updateRender(); });
   $('pl_filter_status').addEventListener('change', (e) => { filterStatus = e.target.value; updateRender(); });
   $('pl_filter_balance').addEventListener('change', (e) => { filterBalance = e.target.value; updateRender(); });
+  $('pl_filter_activity').addEventListener('change', (e) => { filterActivity = e.target.value; updateRender(); });
   $('pl_show_guests')?.addEventListener('change', (e) => { showGuests = e.target.checked; updateRender(); });
   const guestNote = $('pl_guest_count');
   if (guestNote) {
@@ -187,7 +229,20 @@ async function render() {
       <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}${
         l.player_type === 'outside' ? ' <span class="tag tag-due" title="Guest — not on a contract">Guest</span>' : ''}${
         owed > 0 ? ` <span class="tag tag-due" title="Cash still to collect">to collect ${money(owed)}</span>` : ''}${
-        l.balance_group_id ? ' <span class="tag tag-cashier" title="Shares a balance with another player">🔗 Shared</span>' : ''}</td>
+        l.balance_group_id ? ' <span class="tag tag-cashier" title="Shares a balance with another player">🔗 Shared</span>' : ''}${
+        // Both states are shown on the row itself. The toggle lives behind the
+        // ⋮ menu, so without this the only way to tell whether someone was
+        // hidden was to open the menu for each of them one at a time.
+        hiddenIds.has(l.player_id)
+    ? ' <span class="tag" title="Marked as having left — kept out of the Standing sheet and the rankings. Their history is untouched.">🚪 Left</span>'
+    : (() => {
+      const d = daysSince(l.last_game_date);
+      if (d === null) return ' <span class="tag" title="Has never played a game">never played</span>';
+      return d >= QUIET_DAYS
+        ? ` <span class="tag" title="Last played ${esc(fmtDate(l.last_game_date))}">quiet ${
+          Math.floor(d / 30)}m</span>`
+        : '';
+    })()}</td>
       <td><span class="tag ${status.cls}">${status.text}</span></td>
       <td class="num">${money(l.opening_balance)}</td>
       <td class="num">${money(l.contributed)}</td>
@@ -206,9 +261,9 @@ async function render() {
       </td>
       <td style="display: none;" data-actions="${l.player_id}">
         <button class="btn btn-sm" data-sheet="${l.player_id}" data-hidden="${hiddenIds.has(l.player_id) ? 1 : 0}"
-          title="Whether they appear on the Standing sheet. Affects nothing but the sheet — no balance, no charge, no total."
+          title="Marks someone as having left the club: they drop off the Standing sheet and out of the rankings, and stay on this screen so you can put them back. Moves no money — no balance, no charge, no total."
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
-  hiddenIds.has(l.player_id) ? '👁 Show on sheet' : '🚫 Hide from sheet'}</button>
+  hiddenIds.has(l.player_id) ? '👁 Mark as playing' : '🚪 Mark as left'}</button>
         <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
@@ -251,7 +306,9 @@ async function render() {
       try {
         await api.updatePlayer(btn.dataset.sheet, { hide_from_sheet: hide });
         store.players = await api.players();
-        toast(hide ? 'Hidden from the Standing sheet' : 'Back on the Standing sheet');
+        toast(hide
+          ? 'Marked as left — off the Standing sheet and the rankings'
+          : 'Back on the Standing sheet and the rankings');
         render();
       } catch (e) { toast(e.message, true); }
     }));

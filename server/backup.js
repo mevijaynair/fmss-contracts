@@ -17,16 +17,25 @@
 // a restore produces a working system, but `includeCredentials: false` redacts
 // them — use that for a copy you intend to share or store loosely.
 
-import { db, DB_FILE } from './db.js';
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { db, DB_FILE, initSchema } from './db.js';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export const BACKUP_FORMAT = 1;
 
 const CREDENTIAL_COLUMNS = new Set(['pin', 'pin_hash', 'password_hash', 'token', 'secret']);
 
-/** Tables that actually exist right now, with their real column names. */
+/**
+ * Tables that actually exist right now, with their real column names.
+ *
+ * The schema is created on demand first. Importing db.js only opens the file —
+ * it is `initSchema()` that builds the tables, and every other script in this
+ * repo calls it before touching anything. The backup code did not, which made
+ * the single most important case fail silently: restoring into a fresh install
+ * on a new machine found no tables, skipped all of them, and reported success.
+ */
 function liveSchema() {
+  initSchema();
   const tables = db.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all().map(r => r.name);
@@ -83,6 +92,17 @@ export function inspect(doc) {
   }
   if (!doc.tables || typeof doc.tables !== 'object') {
     return { ok: false, problems: [...problems, 'No "tables" section — this is not an FMSS backup.'] };
+  }
+
+  // A redacted export is a perfectly good copy of the club's accounts and a
+  // useless copy of its logins: every PIN and password hash in it is null. It
+  // restores without complaint and then nobody can sign in, which is a
+  // confusing way to discover the difference. Say so up front.
+  if (doc.includes_credentials === false) {
+    problems.push(
+      'This backup was exported without credentials — every PIN and password ' +
+      'hash in it is blank. Restoring it will leave nobody able to sign in ' +
+      'until logins are generated again.');
   }
 
   const schema = liveSchema();
@@ -142,13 +162,21 @@ export function restore(doc, { dbPath = DB_FILE } = {}) {
   const check = inspect(doc);
   if (!check.ok) throw new Error(`Refusing to restore: ${check.problems[0] || 'invalid backup'}`);
 
-  // Snapshot the current file first so this operation is itself reversible.
+  // Snapshot the current database first so this operation is itself reversible.
+  //
+  // This must be VACUUM INTO, not a file copy. The database runs in WAL mode,
+  // where the newest writes live in the -wal file — on production that file has
+  // been seen at 4MB against a 614KB main database. Copying the main file alone
+  // produced an "undo" snapshot that was missing everything recent, which is
+  // the one thing this copy exists to prevent. VACUUM INTO writes a single
+  // consistent file with the WAL folded in.
   let safety = null;
   if (dbPath && existsSync(dbPath)) {
     const dir = join(dirname(dbPath), 'backups');
     mkdirSync(dir, { recursive: true });
     safety = join(dir, `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
-    copyFileSync(dbPath, safety);
+    if (existsSync(safety)) unlinkSync(safety); // VACUUM INTO refuses an existing file
+    db.prepare('VACUUM INTO ?').run(safety);
   }
 
   const schema = liveSchema();
@@ -183,6 +211,42 @@ export function restore(doc, { dbPath = DB_FILE } = {}) {
       }
       restored[name] = rows.length;
     }
+
+    // Everything below is checked BEFORE the commit, so a restore that would
+    // leave the database wrong never becomes the database.
+
+    // A table in the file that this install does not have is not a detail to
+    // mention afterwards — it is data the operator believes they restored and
+    // did not. Refuse rather than report success over a partial load.
+    const lost = skipped.filter(n => (doc.tables[n] || []).length > 0);
+    if (lost.length) {
+      throw new Error(
+        `these tables could not be restored: ${lost.join(', ')}. ` +
+        `The backup is from a different version of the app.`);
+    }
+
+    // Count what actually landed, from the database rather than from the loop
+    // that claimed to write it.
+    const drift = [];
+    for (const [name, expected] of Object.entries(restored)) {
+      const actual = db.prepare(`SELECT COUNT(*) n FROM "${name}"`).get().n;
+      if (actual !== expected) drift.push(`${name}: expected ${expected}, found ${actual}`);
+    }
+    if (drift.length) throw new Error(`row counts do not match: ${drift.join('; ')}`);
+
+    // Foreign keys were off while loading, because the tables go in one at a
+    // time and any order breaks some reference on the way. Now that everything
+    // is present they must all resolve, or the file is internally inconsistent
+    // and restoring it would leave a corrupt ledger behind.
+    const broken = db.prepare('PRAGMA foreign_key_check').all();
+    if (broken.length) {
+      const shown = broken.slice(0, 5)
+        .map(b => `${b.table} → ${b.parent}`).join(', ');
+      throw new Error(
+        `${broken.length} broken foreign key reference(s) in the backup: ${shown}` +
+        (broken.length > 5 ? ', …' : ''));
+    }
+
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');

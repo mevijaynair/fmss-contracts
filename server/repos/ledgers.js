@@ -120,6 +120,13 @@ const SELECT = `
          -- Vijay among the debtors. Same argument as player_type above: it
          -- decides how a row should be treated, so it belongs on the row.
          p.special_role,
+         -- Whether someone has left the club is something only a person knows,
+         -- so it is a manual flag rather than a rule. It decides whether a row
+         -- should appear at all, which makes it the same kind of fact as the
+         -- two above: it belongs on the row, not looked up separately by each
+         -- screen that cares. The Standing sheet did its own lookup and was
+         -- therefore the only screen that honoured it.
+         COALESCE(p.hide_from_sheet, 0) AS hide_from_sheet,
          l.opening_balance, l.status,
          ${CONTRIB} AS contributed,
          ${CHARGED} AS charged,

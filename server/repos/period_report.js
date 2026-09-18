@@ -138,17 +138,34 @@ export const periodReportRepo = {
     // and guest_cash_owed below. Keeping it here put Raj, Kartik, Manish and
     // Rohit on the sheet at a 0 balance, which is the crowding this is meant to
     // remove and tells the reader nothing the sheet is for.
+    const members = rows.filter(r => r.player_type !== 'outside');
     const squad = (includeDormant
-      ? rows
-      : rows.filter(r => r.present_balance !== 0 || r.last_contribution_date))
-      .filter(r => r.player_type !== 'outside' && !r.hidden);
+      ? members
+      : members.filter(r => r.present_balance !== 0 || r.last_contribution_date))
+      .filter(r => !r.hidden);
     squad.sort((x, y) => x.name.localeCompare(y.name));
+
+    // Two different reasons to be off the sheet, counted apart because they
+    // mean opposite things. Dormant is a rule — no money, nothing this period —
+    // and safe to state as such. Hidden is a person's decision that someone has
+    // left, and they may well still be holding a balance. Reporting them as one
+    // number meant the sheet could say "holding no money" about someone with
+    // money, so the one case where the flag was used would be described wrongly.
+    const dormant = includeDormant ? 0
+      : members.filter(r => !r.hidden && r.present_balance === 0
+                            && !r.last_contribution_date).length;
+    const hiddenMembers = members.filter(r => r.hidden);
 
     return {
       contract_id: contractId,
       contract_name: c.name,
       period_start: from,
-      dormant_hidden: rows.length - guests.length - squad.length,
+      dormant_hidden: dormant,
+      flag_hidden: hiddenMembers.length,
+      // What those people are still holding, so hiding somebody can never make
+      // their balance disappear from the sheet without a word.
+      flag_hidden_balance: round2(
+        hiddenMembers.reduce((s, r) => s + r.present_balance, 0)),
       guests_hidden: guests.filter(r => r.played > 0 || r.cash_owed > 0).length,
       guest_cash_owed: round2(ledgersRepo.cashOutstanding(contractId)
         .reduce((s2, r) => s2 + r.owed, 0)),
