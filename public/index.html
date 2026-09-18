@@ -239,6 +239,11 @@
           <div class="filter-bar" id="plScreenControls">
             <span class="seg" id="plContractSeg"></span>
             <span class="seg" data-pl-modeseg></span>
+            <!-- Sits outside plLedgerActions so it stays available on the
+                 standing sheet, which is the shape you are most likely to be
+                 looking at when you decide to send it. -->
+            <button class="btn btn-secondary btn-sm" id="plShare"
+              title="One picture of both contracts, sized to send straight to WhatsApp">📤 Send standing</button>
             <span id="plLedgerActions" style="display:flex; gap:0.6rem;">
               <button class="btn btn-secondary btn-sm" id="plAdd">+ Player</button>
             </span>
@@ -272,7 +277,11 @@
           <div class="sams-card" id="playerDetailCard" hidden>
             <div class="card-header">
               <h3 class="card-title" id="playerDetailName"></h3>
-              <button class="btn btn-secondary btn-sm" id="playerDetailClose">Close</button>
+              <div style="display:flex; gap:0.6rem; align-items:center;">
+                <button class="btn btn-secondary btn-sm" id="plSharePlayer"
+                  title="One picture of this player across BOTH contracts, sized to send to them directly">📤 Send to player</button>
+                <button class="btn btn-secondary btn-sm" id="playerDetailClose">Close</button>
+              </div>
             </div>
             <div class="timeline-container" id="playerTimeline"></div>
             <div class="stats-grid" id="playerStatsGrid"></div>

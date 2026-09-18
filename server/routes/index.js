@@ -9,6 +9,7 @@ import { ledgersRepo } from '../repos/ledgers.js';
 import { gameweeksRepo } from '../repos/gameweeks.js';
 import { scheduleRepo } from '../repos/schedule.js';
 import { periodReportRepo } from '../repos/period_report.js';
+import { shareRepo } from '../repos/share.js';
 import { contributionsRepo } from '../repos/contributions.js';
 import { pendingContributionsRepo } from '../repos/contributions_pending.js';
 import { kittyRepo } from '../repos/kitty.js';
@@ -264,6 +265,25 @@ r.delete('/schedule/:contractId/no-game/:date', wrap((req) => {
 r.get('/report/:contractId', wrap((req) => {
   requireAdmin(req);
   return periodReportRepo.report(req.params.contractId, { since: req.query.since || null, includeDormant: req.query.all === '1' });
+}));
+
+// ---- shareable snapshots (the images that get sent to WhatsApp) ----
+// Read-only, and assembled from the repos that already own each figure — see
+// server/repos/share.js for why that matters.
+r.get('/share/club', wrap((req) => {
+  requireAdmin(req);
+  return shareRepo.club({ weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)) });
+}));
+
+// A player may fetch their own; an admin may fetch anyone's. Without the first
+// half of that, the one snapshot a player would actually want — where do I
+// stand across both contracts — would be admin-only.
+r.get('/share/player/:id', wrap((req) => {
+  if (req.user.role !== 'admin' && req.user.playerId !== req.params.id) {
+    throw Object.assign(new Error('Not your account'), { status: 403 });
+  }
+  return shareRepo.player(req.params.id,
+    { weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)) });
 }));
 
 // ---- gameweeks ----

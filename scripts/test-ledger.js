@@ -33,6 +33,7 @@ const { movementsRepo } = await import('../server/repos/movements.js');
 const { kittyRepo } = await import('../server/repos/kitty.js');
 const { statsRepo } = await import('../server/repos/stats.js');
 const { playersRepo } = await import('../server/repos/players.js');
+const { shareRepo } = await import('../server/repos/share.js');
 
 if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
   console.error(`Refusing to run: tests would write to ${DB_FILE}, not the scratch database.`);
@@ -1015,6 +1016,103 @@ test('a game with no sides on any charge is missing all three', () => {
   const row = listed(g);
   assert.deepEqual([row.has_teams, row.has_captains, row.has_result], [false, false, false],
     'without sides there is no captain to have and no winner to attribute');
+});
+
+// ---------------------------------------------------------------------------
+// The shared snapshots.
+//
+// These are the only figures in the system that leave it. Once a picture is in
+// forty people's chats it cannot be corrected, and nobody receiving it can
+// check it against the app. So what it says has to be what the app says.
+
+test('the club snapshot shows exactly the Standing sheet squad', () => {
+  const snap = shareRepo.club({ weeks: 3 });
+  const mine = snap.contracts.find(c => c.id === CONTRACT);
+  const sheet = periodReportRepo.report(CONTRACT, { since: null, includeDormant: false });
+  assert.deepEqual(mine.squad.map(r => r.name), sheet.rows.map(r => r.name),
+    'the picture and the sheet must list the same people, in the same order');
+  assert.deepEqual(mine.squad.map(r => r.balance), sheet.rows.map(r => r.present_balance));
+});
+
+test('a player marked as left is on no snapshot', () => {
+  const p = player('Departed', 400);
+  playersRepo.update(p, { hide_from_sheet: true });
+  const mine = shareRepo.club({ weeks: 3 }).contracts.find(c => c.id === CONTRACT);
+  assert.ok(!mine.squad.some(r => r.name === 'Departed'),
+    'retiring someone must take them off the picture too, not just the sheet');
+  assert.ok(!mine.in_the_red.some(r => r.name === 'Departed'));
+  playersRepo.update(p, { hide_from_sheet: false });
+});
+
+test('the cashier is never named as owing the club', () => {
+  const c = player('Club cashier', 0);
+  db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(c);
+  charge(game(), c, 500);                       // deep in the red, by design
+  const mine = shareRepo.club({ weeks: 3 }).contracts.find(x => x.id === CONTRACT);
+  assert.ok(balanceOf(c) < 0, 'the cashier really is negative — that is the float');
+  assert.ok(!mine.in_the_red.some(r => r.name === 'Club cashier'),
+    'their balance is money they fronted, and publishing it as a debt is wrong');
+  db.prepare('UPDATE players SET special_role = NULL WHERE id = ?').run(c);
+});
+
+test('"pending" never mixes cash owed with an empty balance', () => {
+  const guest = player('Cash guest', 0);
+  makeOutside(guest);
+  charge(game(), guest, 40, { paid: 0 });       // real cash, not yet handed over
+  const member = player('Spent up', 10);
+  charge(game(), member, 50);                   // balance gone, owes nothing in cash
+
+  const mine = shareRepo.club({ weeks: 3 }).contracts.find(c => c.id === CONTRACT);
+  assert.ok(mine.to_collect.some(r => r.name === 'Cash guest' && r.amount === 40),
+    'cash the club is waiting on belongs in to_collect');
+  assert.ok(!mine.to_collect.some(r => r.name === 'Spent up'),
+    'an empty balance is not cash owed — nobody is holding the club money');
+  assert.ok(mine.in_the_red.some(r => r.name === 'Spent up'),
+    'but they do need to top up before playing again');
+  assert.ok(!mine.in_the_red.some(r => r.name === 'Cash guest'),
+    'a guest keeps no balance, so they can never be in the red');
+});
+
+test('an ordinary charge is not reported as pending', () => {
+  // Charges settled off a prepaid balance are never marked paid. Reading
+  // `paid = 0` as "outstanding" would publish the whole season as a debt.
+  const p = player('Prepaid', 500);
+  charge(game(), p, 35, { paid: 0 });
+  const mine = shareRepo.club({ weeks: 3 }).contracts.find(c => c.id === CONTRACT);
+  assert.ok(!mine.to_collect.some(r => r.name === 'Prepaid'),
+    'they paid up front; there is nothing to collect');
+});
+
+test('a player snapshot agrees with every one of their ledgers', () => {
+  const p = player('Across the board', 300);
+  contribute(p, 120);
+  charge(game(), p, 45);
+  const snap = shareRepo.player(p, { weeks: 520 });   // wide enough to catch it all
+  for (const line of snap.contracts) {
+    assert.equal(line.balance, ledgersRepo.get(p, line.contract_id).present_balance,
+      'the picture must not disagree with the ledger it was drawn from');
+  }
+});
+
+test('a player snapshot never nets credit on one contract against debt on another', () => {
+  const p = player('Two sided', 200);
+  charge(game(), p, 260);                       // -60 here
+  const snap = shareRepo.player(p, { weeks: 520 });
+  assert.equal(snap.contracts.length, 1, 'only one contract exists in this harness');
+  assert.equal(snap.total_balance, snap.contracts.reduce((s, c) => s + c.balance, 0),
+    'the total is a sum of the lines, and every line is still shown separately');
+  assert.ok(snap.contracts.every(c => 'balance' in c && 'cash_owed' in c),
+    'credit and cash owed stay in their own fields — they are different money');
+});
+
+test('a charge settled by someone else says whose game it was', () => {
+  const host = player('The host', 500);
+  const brought = player('Their guest', 0);
+  charge(game(), brought, 35, { chargedTo: host });
+  const snap = shareRepo.player(host, { weeks: 520 });
+  const line = snap.recent.find(e => e.type === 'charge');
+  assert.match(line.label, /Their guest/,
+    'two identical lines on one date read as a double charge unless named');
 });
 
 process.on('exit', () => {

@@ -6,6 +6,7 @@ import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 import { splitNote, wireSplitNotes } from './contributions.js';
 import { renderStandingSheet } from './report.js';
+import { shareClubSnapshot, sharePlayerSnapshot } from './share.js';
 
 let contractId = null;   // resolved on first load — see defaultContract()
 
@@ -1001,6 +1002,13 @@ export function initPlayers() {
     $('plAdd').parentElement.appendChild(bulkImportBtn);
   }
   $('playerDetailClose').addEventListener('click', closePlayerDetail);
+
+  // Both snapshots cover every contract at once, so neither is tied to the
+  // contract currently on screen.
+  $('plShare').addEventListener('click', () => shareClubSnapshot());
+  $('plSharePlayer').addEventListener('click', () => {
+    if (currentDetailPlayerId) sharePlayerSnapshot(currentDetailPlayerId);
+  });
 }
 
 
