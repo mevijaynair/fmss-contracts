@@ -257,9 +257,15 @@ const kittyOf = (gwId) => db.prepare(
   `SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) AS n
    FROM kitty WHERE scope = ?`).get(gwId).n;
 
+// A fresh night for each game, because the club cannot be in two places at
+// once and the repo now enforces it. These all used one hard-coded date, which
+// was fine while nothing checked and is exactly the state the check exists to
+// prevent.
+let playDay = 0;
 function playGame({ pitch = 100, water = 0, players = [], ...rest }) {
+  const date = new Date(Date.UTC(2026, 1, 1 + playDay++)).toISOString().slice(0, 10);
   return gameweeksRepo.create(
-    { contract_id: CONTRACT, date: '2026-02-01', cost_per_gw: pitch, game_cost: water, ...rest },
+    { contract_id: CONTRACT, date, cost_per_gw: pitch, game_cost: water, ...rest },
     players);
 }
 
@@ -1327,6 +1333,64 @@ test('a charge settled by someone else says whose game it was', () => {
   const line = snap.recent.find(e => e.type === 'charge');
   assert.match(line.label, /Their guest/,
     'two identical lines on one date read as a double charge unless named');
+});
+
+// ---------------------------------------------------------------------------
+// One night, one game — and moving one that was filed wrongly.
+
+test('the club cannot be in two places on one night', () => {
+  const other = 'testc2';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Other','{}',100,2)`).run(other);
+  const p = player('Double booked', 500);
+  gameweeksRepo.create({ contract_id: CONTRACT, date: '2026-10-01', cost_per_gw: 100 },
+    [{ player_id: p, amount: 10 }]);
+  // Same contract, same night.
+  assert.throws(() => gameweeksRepo.create({ contract_id: CONTRACT, date: '2026-10-01' }, []),
+    /already a .* game on 2026-10-01/);
+  // And the other contract, which is the case that actually happened: a
+  // Saturday game filed under Mon/Thu, with a Saturday game entered beside it.
+  assert.throws(() => gameweeksRepo.create({ contract_id: other, date: '2026-10-01' }, []),
+    /cannot be in two places/);
+  // A different night is fine.
+  gameweeksRepo.create({ contract_id: other, date: '2026-10-02', cost_per_gw: 100 }, []);
+});
+
+test('moving a game to another contract moves the ledger it settles against', () => {
+  const other = 'testc3';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Elsewhere','{}',200,3)`).run(other);
+  const p = player('Moved about', 400);
+  const gw = gameweeksRepo.create(
+    { contract_id: CONTRACT, date: '2026-10-05', cost_per_gw: 100 },
+    [{ player_id: p, amount: 40 }]);
+
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 360, 'charged on the old contract');
+  const totalBefore = round2(ledgersRepo.forPlayer(p)
+    .reduce((s, l) => s + l.present_balance, 0));
+
+  gameweeksRepo.moveToContract(gw.id, other);
+
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 400, 'the charge left the old one');
+  assert.equal(ledgersRepo.get(p, other).present_balance, -40, 'and landed on the new one');
+  assert.equal(round2(ledgersRepo.forPlayer(p).reduce((s, l) => s + l.present_balance, 0)),
+    totalBefore, 'moving between their pockets must not change what is in them');
+  assert.equal(gameweeksRepo.get(gw.id).cost_per_gw, 200,
+    'and the pitch is what the new contract costs');
+
+  // The amounts are untouched: a night already played and partly settled is
+  // not repriced by being refiled.
+  assert.equal(gameweeksRepo.get(gw.id).charges[0].amount, 40);
+
+  // Refusals.
+  assert.throws(() => gameweeksRepo.moveToContract(gw.id, 'nope'), /No such contract/);
+  assert.throws(() => gameweeksRepo.moveToContract('nope', other), /No such game/);
+  // Onto a night the club is already playing.
+  const clash = gameweeksRepo.create(
+    { contract_id: CONTRACT, date: '2026-10-06', cost_per_gw: 100 }, []);
+  db.prepare("UPDATE gameweeks SET date = '2026-10-05' WHERE id = ?").run(clash.id);
+  assert.throws(() => gameweeksRepo.moveToContract(clash.id, other), /already a .* game/);
+  db.prepare("UPDATE gameweeks SET date = '2026-10-06' WHERE id = ?").run(clash.id);
 });
 
 test('paying for somebody does not put their game on your list', () => {

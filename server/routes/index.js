@@ -322,6 +322,19 @@ r.post('/gameweeks', wrap((req) => {
 }));
 r.delete('/gameweeks/:id', wrap((req) => { requireAdmin(req); gameweeksRepo.remove(req.params.id); return { ok: true }; }));
 
+// A game filed under the wrong contract. Moves the ledger it settles against,
+// the pitch cost and the venue booking it is priced from, together — see
+// moveToContract, which refuses unless nobody's total moves.
+r.post('/gameweeks/:id/move', wrap((req) => {
+  requireAdmin(req);
+  const { contract_id, cost_per_gw } = req.body || {};
+  if (!contract_id) throw new Error('Which contract?');
+  return gameweeksRepo.moveToContract(req.params.id, contract_id, {
+    costPerGw: cost_per_gw === undefined || cost_per_gw === null || cost_per_gw === ''
+      ? null : Number(cost_per_gw),
+  });
+}));
+
 // ---- per-player edits on an existing game ----
 // After an import, names the sheet used may not have matched anyone. The raw
 // team text is kept on the gameweek so the gaps can be filled in here.

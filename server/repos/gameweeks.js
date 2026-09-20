@@ -214,7 +214,109 @@ function applyScore(gameweekId, rawScore) {
   return { a, b, aName, bName };
 }
 
+/**
+ * One night, one game — across every contract, not just within one.
+ *
+ * The club plays Mon/Thu at O365 and Saturdays at Koora, and it cannot be in
+ * two places at once. Before this, nothing stopped the same date carrying a
+ * live game on both: the 19th of September was a Saturday filed under Mon/Thu,
+ * and had a Saturday game been entered for it too, the club would have had two
+ * games, two pitch costs and two sets of charges for one evening, with nothing
+ * anywhere saying so.
+ *
+ * Historical games are exempt. They come from imported sheets that predate the
+ * baseline, and refusing one now would block a correction to the past rather
+ * than prevent a mistake in the present.
+ */
+function assertDateFree(date, exceptId = null) {
+  if (!date) return;
+  const clash = db.prepare(
+    `SELECT g.id, g.contract_id, c.name FROM gameweeks g
+     LEFT JOIN contracts c ON c.id = g.contract_id
+     WHERE g.date = ? AND g.historical = 0 AND g.id <> COALESCE(?, '')`)
+    .get(date, exceptId);
+  if (clash) {
+    throw new Error(
+      `There is already a ${clash.name || clash.contract_id} game on ${date}. `
+      + 'The club cannot be in two places on one night — move or delete that one first.');
+  }
+}
+
 export const gameweeksRepo = {
+  assertDateFree,
+
+  /**
+   * A game was filed under the wrong contract. Move it.
+   *
+   * Which contract a game belongs to decides three separate things, and all
+   * three have to move together or the game ends up half in each: which
+   * ledger its charges come off, what the pitch cost, and which venue booking
+   * the night is priced against. Moving the row alone would leave thirteen
+   * charges drawing on a balance the game no longer belongs to.
+   *
+   * What it deliberately does NOT do is reprice the players. The rate card is
+   * a price list for a night, and that night has been played and partly
+   * settled in cash — two of these charges were collected at the door. Raising
+   * a charge somebody has already handed money over for is not a correction,
+   * it is a new bill, and it is not this operation's to send.
+   *
+   * Reconciled before the commit, as everything that moves money is: each
+   * player's total across BOTH contracts must be exactly what it was, because
+   * a charge changing which balance it comes off moves it between two of their
+   * pockets and must not alter what is in them altogether.
+   */
+  moveToContract(gameweekId, contractId, { costPerGw = null } = {}) {
+    const gw = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(gameweekId);
+    if (!gw) throw new Error('No such game');
+    const target = db.prepare('SELECT id, name, cost_per_gw FROM contracts WHERE id = ?')
+      .get(contractId);
+    if (!target) throw new Error(`No such contract: ${contractId}`);
+    if (gw.contract_id === contractId) return this.get(gameweekId);
+    if (gw.historical) throw new Error('A historical game is inside the opening baseline — moving it would move money the baseline already accounts for');
+    assertDateFree(gw.date, gameweekId);
+
+    const settlers = db.prepare(
+      `SELECT DISTINCT COALESCE(charged_to, player_id) AS pid FROM charges WHERE gameweek_id = ?`)
+      .all(gameweekId).map(r => r.pid);
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const totalFor = (pid) => r2(ledgersRepo.forPlayer(pid)
+      .reduce((s, l) => s + l.present_balance, 0));
+    const before = Object.fromEntries(settlers.map(p => [p, totalFor(p)]));
+    const pitch = costPerGw === null ? Number(target.cost_per_gw) || 0 : r2(costPerGw);
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      // A ledger row on the new contract for everyone whose balance now carries
+      // this game, or their charge lands on an account that does not exist.
+      for (const pid of settlers) ledgersRepo.ensure(pid, contractId);
+      db.prepare('UPDATE gameweeks SET contract_id = ?, cost_per_gw = ?, gw_number = ? WHERE id = ?')
+        .run(contractId, pitch, this.nextGwNumber(contractId), gameweekId);
+      // A charge naming the contract it came from would keep settling against
+      // it, which is the half-moved state this exists to prevent. Only ones
+      // pointing at the OLD contract are cleared: a genuine cross-contract dip
+      // — somebody paying for this night out of their other pot — is a
+      // decision that survives the move.
+      db.prepare(`UPDATE charges SET settle_contract_id = NULL
+                  WHERE gameweek_id = ? AND settle_contract_id = ?`)
+        .run(gameweekId, gw.contract_id);
+      recomputeGameKitty(gameweekId);
+
+      const drift = settlers
+        .map(p => [p, before[p], totalFor(p)])
+        .filter(([, was, now]) => was !== now)
+        .map(([p, was, now]) => `${p}: ${was} -> ${now}`);
+      if (drift.length) {
+        throw new Error('Moving the game would have changed what people hold, '
+          + `so nothing was done: ${drift.join('; ')}`);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return this.get(gameweekId);
+  },
+
   // Exposed for the one-off reconcile script, which rebuilds the pot from games
   // that predate the derived entries.
   recomputeGameKitty,
@@ -610,6 +712,7 @@ export const gameweeksRepo = {
   },
   // Create a live gameweek and its charges; ensures every charged player has a ledger.
   create(gw, charges) {
+    assertDateFree(gw.date, null);
     // Validate everything BEFORE the first INSERT. There is no transaction here,
     // so throwing partway through the charge loop would leave a gameweek row with
     // only some of its charges written — worse than rejecting outright.

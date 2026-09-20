@@ -254,11 +254,16 @@ const refusals = new Map();
 const liveGames = [];
 const liveEvents = [];
 
-function makeGame() {
+function makeGame(onDate = null) {
   const contract = pick(CONTRACTS);
   const who = [...everyone].sort(() => rnd() - 0.5).slice(0, 4 + Math.floor(rnd() * 6));
   const gw = gameweeksRepo.create(
-    { contract_id: contract, date: `2026-0${1 + Math.floor(rnd() * 8)}-1${Math.floor(rnd() * 9)}`,
+    { contract_id: contract,
+      // Random, so the "one night, one game" guard gets exercised by
+      // collisions — a refusal in the loop is the app working, and the loop
+      // below counts it as such. The setup games below pass a date instead,
+      // because those four have to succeed for there to be anything to fuzz.
+      date: onDate || `2026-0${1 + Math.floor(rnd() * 8)}-1${Math.floor(rnd() * 9)}`,
       cost_per_gw: pick([0, 100, 275, 346]), game_cost: pick([0, 15]),
       game_cost_paid_by: pick(['self', squad[0]]), score: pick(['', 'Blue win 7-5', 'Draw 4-4', 'Reds win']) },
     who.map(p => ({ player_id: p, team: pick(['Blue', 'Red', 'White', '']),
@@ -450,7 +455,7 @@ for (const m of MOVES) {
   for (let i = 0; i < times; i++) WEIGHTED.push(m);
 }
 
-makeGame(); makeGame(); makeGame(); makeGame();
+for (const d of ['2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24']) makeGame(d);
 if (!invariants('setup')) broke = true;
 
 const RUNS = Number(process.argv[3] || 400);
