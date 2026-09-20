@@ -10,7 +10,7 @@
 // standing figures follow underneath.
 import { api } from '../api.js';
 import { $, esc, money, balCell, fmtDate } from '../util.js';
-import { reportIssue, setClubContact, renderMyIssues } from './issues.js';
+import { reportIssue, renderMyIssues } from './issues.js';
 
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -177,7 +177,6 @@ export async function loadDashboard() {
  */
 function renderPlayerDashboard(d) {
   renderHero(d);
-  setClubContact(d.club_whatsapp);
   const totalBalance = d.contracts.reduce((s, c) => s + (c.present_balance || 0), 0);
   const shortest = d.contracts
     .filter(c => c.games_left !== null && c.games_left !== undefined)
@@ -352,4 +351,3 @@ async function renderMyGames() {
     b.addEventListener('click', () => reportIssue(games[Number(b.dataset.report)])));
 }
 
-export { setClubContact };

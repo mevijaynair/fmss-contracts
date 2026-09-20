@@ -16,7 +16,22 @@ import { api } from '../api.js';
 import { toast } from '../store.js';
 import { $, esc, fmtDate, openModal, closeModal } from '../util.js';
 
-let contact = null;          // the club's WhatsApp number, if one is set
+/**
+ * The club's WhatsApp number, fetched only when somebody is about to use it.
+ *
+ * It is a real person's phone number. It used to arrive with every dashboard
+ * load; now it is asked for at the one moment it is needed, from an endpoint
+ * that answers `no-store`. Held in a module variable for the life of the
+ * page and never written to storage, so closing the tab takes it with it.
+ */
+let contact;                 // undefined = not asked yet, '' = none set
+
+async function clubContact() {
+  if (contact !== undefined) return contact;
+  try { contact = (await api.get('/club-contact'))?.whatsapp || ''; }
+  catch { contact = ''; }
+  return contact;
+}
 
 /** The message a person would send, built so they do not have to write it. */
 function whatsappText(game, fieldLabel, shouldBe) {
@@ -66,8 +81,9 @@ export async function reportIssue(game) {
     // never done for them: sending a message on somebody's behalf is theirs.
     const label = fields[field];
     const text = whatsappText(game, label, shouldBe);
-    const link = contact
-      ? `https://wa.me/${encodeURIComponent(String(contact).replace(/\D/g, ''))}`
+    const number = await clubContact();
+    const link = number
+      ? `https://wa.me/${encodeURIComponent(String(number).replace(/\D/g, ''))}`
         + `?text=${encodeURIComponent(text)}`
       : null;
     $('ri_send').hidden = true;
@@ -93,9 +109,6 @@ export async function reportIssue(game) {
     toast('Reported ✓');
   });
 }
-
-/** Remember the club's WhatsApp number so the link can be built. */
-export function setClubContact(number) { contact = number || null; }
 
 /** A player's own open reports, so they can see it was received. */
 export function renderMyIssues(reports) {

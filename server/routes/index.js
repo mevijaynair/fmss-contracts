@@ -645,9 +645,34 @@ r.post('/my/issues', wrap((req) => {
   return issuesRepo.create({ player_id: req.user.playerId, gameweek_id, field, should_be });
 }));
 
-// The number a player is offered when a result is wrong. Stored because the
-// app must not invent one, and read back so the Settings field shows what is
-// actually published.
+/**
+ * The club's WhatsApp number, for a signed-in member about to send a message.
+ *
+ * A real person's phone number, so it is handled like one:
+ *
+ *   - behind the token like everything else under /api, and never in any
+ *     unauthenticated response. The login page and its roster do not carry it.
+ *   - on its own endpoint, asked for at the moment somebody is actually
+ *     sending a message. It used to ride along in /dashboard, which every
+ *     player fetches on every page load — that put it in far more responses,
+ *     caches and logs than the one link it exists for.
+ *   - `no-store`, so no browser, proxy or back button keeps a copy.
+ *   - never logged, and never placed in a URL this server sees. The wa.me
+ *     link is built in the browser and goes straight to WhatsApp.
+ *
+ * Empty until an admin sets one. The app does not invent somebody's number,
+ * and a blank answer is a perfectly good answer — the report screen falls
+ * back to offering the message to copy.
+ */
+r.get('/club-contact', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  return { whatsapp: db.prepare("SELECT value FROM meta WHERE key = 'club_whatsapp'")
+    .get()?.value || '' };
+}));
+
+// The same value for the admin who maintains it. Kept separate from the read
+// above so the write stays admin-only.
 r.get('/admin/club-contact', wrap((req) => {
   requireAdmin(req);
   return { whatsapp: db.prepare("SELECT value FROM meta WHERE key = 'club_whatsapp'")
@@ -943,11 +968,12 @@ r.get('/dashboard', wrap((req) => {
       cash_owed: Math.round(myLedgers.reduce((s, l) => s + (l.cash_owed || 0), 0) * 100) / 100,
       pending_contributions: pendingContributionsRepo.forPlayer(req.user.playerId)
         .filter(p => p.status === 'pending').length,
-      // Where to send a message when a result is wrong. Only whatever the club
-      // has chosen to publish to its own members, and absent entirely until an
-      // admin sets it — the app does not invent somebody's phone number.
-      club_whatsapp: db.prepare("SELECT value FROM meta WHERE key = 'club_whatsapp'")
-        .get()?.value || null,
+      // The club's WhatsApp number used to be returned here. It is not any
+      // more: the dashboard is fetched on every page load, by everybody, all
+      // day, which put a real person's phone number into every one of those
+      // responses and into whatever caches and logs they passed through — for
+      // the sake of a link almost nobody clicks. It has its own endpoint now,
+      // asked for only at the moment somebody is actually sending a message.
       contracts: myLedgers.map((l) => {
         const rate = rateOf(l.contract_id);
         return {

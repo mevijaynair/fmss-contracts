@@ -91,6 +91,10 @@ const PLAYER_MAY = [
   // id off the token and never off the request, which is what makes them safe
   // to open — there is a test below that proves it.
   'GET /my/games', 'GET /my/issues', 'POST /my/issues',
+  // The club's WhatsApp number. Members are meant to have it — it is how a
+  // wrong result gets fixed — but it is a real person's phone number, so it
+  // is behind the token and nowhere else. Two tests below hold that line.
+  'GET /club-contact',
 ];
 
 const fill = (p) => p.replace(/:contractId/g, 'mon_thu').replace(/:playerId/g, 'tp')
@@ -166,6 +170,37 @@ test('a report is filed under whoever is signed in, never whoever is named', asy
   const mine = await (await fetch(`${BASE}/api/my/issues`,
     { headers: { Authorization: `Bearer ${playerToken}` } })).json();
   assert.ok(mine.reports.every(r => r.player_id === 'tp'));
+});
+
+test('the club phone number never leaves the building unauthenticated', async () => {
+  const NUMBER = '+971 509575101';
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('club_whatsapp', ?)").run(NUMBER);
+  const digits = NUMBER.replace(/\D/g, '');
+  const looksLikeIt = (s) => s.includes(NUMBER) || s.replace(/\D/g, '').includes(digits);
+
+  // Everything anybody can reach without signing in.
+  for (const path of ['/api/health', '/api/login/players', '/api/club-contact', '/api/dashboard']) {
+    const res = await fetch(`${BASE}${path}`);
+    const body = await res.text();
+    assert.ok(!looksLikeIt(body), `${path} handed out the number without a token`);
+  }
+  // And the page a stranger actually lands on.
+  const page = await (await fetch(`${BASE}/`)).text();
+  assert.ok(!looksLikeIt(page), 'the login page carries it');
+
+  // A signed-in member does get it — that is the point — but only from the
+  // endpoint that exists for it, not riding along in the dashboard they load
+  // on every visit.
+  const auth = { headers: { Authorization: `Bearer ${playerToken}` } };
+  const dash = await (await fetch(`${BASE}/api/dashboard`, auth)).text();
+  assert.ok(!looksLikeIt(dash), 'the dashboard should not carry a phone number');
+
+  const res = await fetch(`${BASE}/api/club-contact`, auth);
+  assert.equal((await res.json()).whatsapp, NUMBER, 'a member can reach it');
+  assert.equal(res.headers.get('cache-control'), 'no-store',
+    'nothing downstream should keep a copy');
+
+  db.prepare("DELETE FROM meta WHERE key = 'club_whatsapp'").run();
 });
 
 test('a player cannot read another player by asking for them', async () => {
