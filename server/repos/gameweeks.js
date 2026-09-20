@@ -449,12 +449,23 @@ export const gameweeksRepo = {
    * gameweek so the missing people can be filled in by hand afterwards.
    * `amount` defaults to 0, which records the appearance without touching money.
    */
-  addCharge(gameweekId, { player_id, team = '', is_captain = false, rate_type = 'manual', amount = 0 }) {
+  addCharge(gameweekId, { player_id, team = '', is_captain = false,
+    rate_type = null, amount = null }) {
     const gw = this.get(gameweekId);
     if (!gw) throw new Error('Gameweek not found');
     if (!player_id) throw new Error('player_id required');
 
-    const amt = Number(amount);
+    // Price it from who they are when no amount is given, rather than
+    // defaulting to 0 and "manual". A guest added to an already-recorded game
+    // was charged nothing at all — every other route derives the rate from
+    // the player, and this one relied on the caller remembering. An explicit
+    // 0 still means "record the appearance without charging", which is a real
+    // thing somebody asks for.
+    const priced = (amount === null || amount === undefined)
+      ? this.priceFor(gameweekId, player_id, { isCaptain: !!is_captain })
+      : null;
+    const amt = priced ? priced.amount : Number(amount);
+    const label = rate_type || priced?.rate_type || 'manual';
     if (!Number.isFinite(amt) || amt < 0) throw new Error(`Invalid amount: ${amount}`);
     // Same rule as create(): one charge per player per game, or they are billed
     // twice and counted twice in the results.
@@ -472,7 +483,7 @@ export const gameweeksRepo = {
       // fault audit.js, movements.js and contributions.js each carried. Adding
       // two players to a game back to back is well inside one.
       .run(`c_add_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
-        gameweekId, player_id, team, is_captain ? 1 : 0, rate_type, amt);
+        gameweekId, player_id, team, is_captain ? 1 : 0, label, amt);
     db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
       .run(this.chargeCount(gameweekId), gameweekId);
     recomputeGameKitty(gameweekId);
@@ -600,11 +611,42 @@ export const gameweeksRepo = {
    * else the contract rate. Kept here so a correction lands on the same
    * figure the night would have produced, rather than a second opinion.
    */
-  cardRateFor(gameweekId, { isCaptain, settles, settlerType, fromOtherContract }) {
+  cardRateFor(gameweekId, { isCaptain, settles, settlerType, fromOtherContract,
+    outsideCost = null }) {
     if (settles === 'cash' || settlerType === 'outside' || fromOtherContract) {
+      // A guest can have a rate agreed with them, which beats the card. Only
+      // a real guest: outside_cost is a fact about a walk-up, not something
+      // to apply to a member whose night happens to be priced as non-contract.
+      if (settlerType === 'outside' && Number(outsideCost) > 0) {
+        return { rate_type: 'noncontract', amount: Number(outsideCost) };
+      }
       return this.rateForCharge({ gameweekId, isCaptain, fromOtherContract: true });
     }
     return this.rateForCharge({ gameweekId, isCaptain, fromOtherContract: false });
+  },
+
+  /**
+   * What this person costs in this game, worked out from who they are.
+   *
+   * Every other path derives the rate from the player — Game Day does it when
+   * the sheet is pasted, the parser does it server-side — but anything that
+   * takes an amount from a caller relies on that caller remembering. Adding
+   * somebody to a game already recorded did not remember: it defaulted to 0
+   * and "manual", so a guest added that way was charged nothing at all.
+   *
+   * One function both sides can ask, so the answer cannot differ by route.
+   */
+  priceFor(gameweekId, playerId, { isCaptain = false, chargedTo = null } = {}) {
+    const settler = db.prepare(
+      "SELECT COALESCE(player_type,'regular') t, outside_cost FROM players WHERE id = ?")
+      .get(chargedTo || playerId);
+    return this.cardRateFor(gameweekId, {
+      isCaptain,
+      settles: 'balance',
+      settlerType: settler?.t || 'regular',
+      fromOtherContract: false,
+      outsideCost: settler?.outside_cost ?? null,
+    });
   },
 
   setChargeSettlement(gameweekId, chargeId,

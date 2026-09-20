@@ -1524,6 +1524,47 @@ test('splitting one record into two moves games without moving money', () => {
     'the two are now distinguishable in a team sheet');
 });
 
+test('a guest added to a recorded game is priced as a guest, not at nothing', () => {
+  // Every other route works the rate out from the player — Game Day on the
+  // night, the parser server-side. Adding somebody to a game already
+  // recorded relied on the caller sending an amount, and defaulted to 0 and
+  // "manual", so a walk-up added that way was charged nothing at all.
+  db.prepare(`UPDATE contracts SET rates = '{"contracted_10":30,"contracted_12":27,
+    "captain_10":25,"captain_12":20,"noncontract":35}' WHERE id = ?`).run(CONTRACT);
+  const g = game();
+  const walkup = player('Added walk-up');
+  makeOutside(walkup);
+  const member = player('Added member', 500);
+
+  gameweeksRepo.addCharge(g, { player_id: walkup, team: 'Red' });
+  gameweeksRepo.addCharge(g, { player_id: member, team: 'Blue' });
+  const charges = gameweeksRepo.get(g).charges;
+  const of = (pid) => charges.find(c => c.player_id === pid);
+  assert.equal(of(walkup).amount, 35, 'the guest rate');
+  assert.equal(of(walkup).rate_type, 'noncontract');
+  assert.equal(of(member).amount, 30, 'and the contract rate for a member');
+  assert.equal(of(member).rate_type, 'contracted_10');
+
+  // A captain gets the captain rate.
+  const capt = player('Added captain', 500);
+  gameweeksRepo.addCharge(g, { player_id: capt, team: 'Blue', is_captain: true });
+  assert.equal(gameweeksRepo.get(g).charges.find(c => c.player_id === capt).amount, 25);
+
+  // An explicit 0 still records the appearance without charging — a real
+  // thing somebody asks for, and it must survive the defaulting.
+  const free = player('Played for nothing', 500);
+  gameweeksRepo.addCharge(g, { player_id: free, team: 'Red', amount: 0 });
+  assert.equal(gameweeksRepo.get(g).charges.find(c => c.player_id === free).amount, 0);
+  assert.equal(balanceOf(free), 500);
+
+  // A guest with a rate agreed with them beats the card.
+  const agreed = player('Agreed 50');
+  makeOutside(agreed);
+  db.prepare('UPDATE players SET outside_cost = 50 WHERE id = ?').run(agreed);
+  gameweeksRepo.addCharge(g, { player_id: agreed, team: 'Red' });
+  assert.equal(gameweeksRepo.get(g).charges.find(c => c.player_id === agreed).amount, 50);
+});
+
 test('two players can be added to a game back to back', () => {
   // Same millisecond-as-a-key fault the audit rows had. Adding two people to
   // a game is well inside one millisecond, and the second insert would die on

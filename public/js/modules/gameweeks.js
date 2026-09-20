@@ -123,6 +123,15 @@ const GAPS = [
 ];
 const gapsFor = (g) => GAPS.filter(f => f.missing(g));
 
+/** A contract's rate card, whatever shape the store holds it in. */
+function rateCardOf(id) {
+  const c = (store.contracts || []).find(x => x.id === id);
+  if (!c) return {};
+  return typeof c.rates === 'string'
+    ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
+    : (c.rates || {});
+}
+
 let gapFilter = 'all';            // 'all' | 'incomplete' | one of GAPS[].key
 
 // Which night. Mon/Thu is two different games in one contract — six Mondays and
@@ -616,10 +625,13 @@ async function detail(id) {
       </select>
       <select id="gwAddTeam" style="flex:0 1 110px">${teamOptions(teams[0] || '')}</select>
       <label class="hint" style="display:flex;align-items:center;gap:.3rem"><input type="checkbox" id="gwAddCapt"> Captain</label>
-      <input type="number" id="gwAddAmount" class="qw-amount" value="0" min="0" step="0.5" title="0 records the appearance without charging">
+      <input type="number" id="gwAddAmount" class="qw-amount" min="0" step="0.5"
+        placeholder="rate" title="Filled in from the rate card once you pick somebody. 0 records the appearance without charging.">
       <button class="btn btn-sm" id="gwAddBtn">Add</button>
     </div>
-    <p class="hint">Amount 0 records the appearance without moving any balance.</p>
+    <p class="hint" id="gwAddNote">Pick somebody and the rate fills itself in — a guest gets the
+      guest rate, a captain gets the captain rate. Type over it to charge something else, or 0
+      to record the appearance without moving any balance.</p>
 
     <div class="quick-row mt">
       <button class="btn btn-secondary" onclick="window.editGameweekClick('${g.id}')">Edit charge amounts</button>
@@ -655,15 +667,55 @@ async function detail(id) {
     scoreBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') scoreBox.blur(); });
   }
 
+  /**
+   * Fill the amount in from who was picked, so the rate is seen before it is
+   * committed rather than discovered in somebody's balance.
+   *
+   * The box used to default to 0, so a guest added to an already-recorded
+   * game was charged nothing. The server prices it now when no amount is
+   * sent, but the person doing it should still be able to see what that is
+   * and change it — hence prefilled, not hidden.
+   */
+  const priceAdd = () => {
+    const pid = $('gwAddPlayer')?.value;
+    const box = $('gwAddAmount');
+    const note = $('gwAddNote');
+    if (!box) return;
+    if (!pid) { box.value = ''; delete box.dataset.touched; return; }
+    if (box.dataset.touched === '1') return;    // a typed figure is a decision
+    const p = (store.players || []).find(x => x.id === pid);
+    const rates = rateCardOf(g.contract_id);
+    const bucket = (g.charges?.length ?? 0) + 1 >= 11 ? '12' : '10';
+    const guest = (p?.player_type || 'regular') === 'outside';
+    const capt = $('gwAddCapt')?.checked;
+    const amount = guest
+      ? (Number(p?.outside_cost) > 0 ? Number(p.outside_cost) : Number(rates.noncontract ?? 0))
+      : capt
+        ? Number(rates[`captain_${bucket}`] ?? rates[`contracted_${bucket}`] ?? 0)
+        : Number(rates[`contracted_${bucket}`] ?? rates.noncontract ?? 0);
+    box.value = amount;
+    if (note) {
+      note.textContent = `${esc(p?.name || 'They')} is on the ${guest ? 'guest'
+        : capt ? 'captain' : 'contract'} rate for this game: ${money(amount)}. `
+        + 'Type over it to charge something else, or 0 to record the appearance only.';
+    }
+  };
+  $('gwAddPlayer')?.addEventListener('change', priceAdd);
+  $('gwAddCapt')?.addEventListener('change', priceAdd);
+  $('gwAddAmount')?.addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
+
   $('gwAddBtn')?.addEventListener('click', async () => {
     const pid = $('gwAddPlayer').value;
     if (!pid) { toast('Pick a player', true); return; }
+    const typed = $('gwAddAmount').value;
     try {
       await api.addCharge(id, {
         player_id: pid,
         team: $('gwAddTeam').value,
         is_captain: $('gwAddCapt').checked,
-        amount: Number($('gwAddAmount').value) || 0,
+        // Blank means "you work it out" — the server prices it from who they
+        // are. Anything typed, including 0, is a decision and is sent as one.
+        amount: typed === '' ? null : Number(typed),
       });
       toast('Player added ✓'); reopen(); render();
     } catch (e) { toast(e.message, true); }
