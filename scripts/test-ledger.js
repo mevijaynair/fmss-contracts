@@ -1311,7 +1311,8 @@ test('a player marked as left is on no snapshot', () => {
   const mine = shareRepo.club({ weeks: 3 }).contracts.find(c => c.id === CONTRACT);
   assert.ok(!mine.squad.some(r => r.name === 'Departed'),
     'retiring someone must take them off the picture too, not just the sheet');
-  assert.ok(!mine.in_the_red.some(r => r.name === 'Departed'));
+  assert.ok(!shareRepo.club({ weeks: 3 }).still_to_pay.top_up.some(r => r.name === 'Departed'),
+    'nor on the list of people asked to pay');
   playersRepo.update(p, { hide_from_sheet: false });
 });
 
@@ -1319,10 +1320,12 @@ test('the cashier is never named as owing the club', () => {
   const c = player('Club cashier', 0);
   db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(c);
   charge(game(), c, 500);                       // deep in the red, by design
-  const mine = shareRepo.club({ weeks: 3 }).contracts.find(x => x.id === CONTRACT);
+  const snap = shareRepo.club({ weeks: 3 });
   assert.ok(balanceOf(c) < 0, 'the cashier really is negative — that is the float');
-  assert.ok(!mine.in_the_red.some(r => r.name === 'Club cashier'),
+  assert.ok(!snap.still_to_pay.top_up.some(r => r.name === 'Club cashier'),
     'their balance is money they fronted, and publishing it as a debt is wrong');
+  assert.ok(!snap.contracts.find(x => x.id === CONTRACT).to_collect
+    .some(r => r.name === 'Club cashier'));
   db.prepare('UPDATE players SET special_role = NULL WHERE id = ?').run(c);
 });
 
@@ -1333,15 +1336,50 @@ test('"pending" never mixes cash owed with an empty balance', () => {
   const member = player('Spent up', 10);
   charge(game(), member, 50);                   // balance gone, owes nothing in cash
 
-  const mine = shareRepo.club({ weeks: 3 }).contracts.find(c => c.id === CONTRACT);
+  const snap = shareRepo.club({ weeks: 3 });
+  const mine = snap.contracts.find(c => c.id === CONTRACT);
   assert.ok(mine.to_collect.some(r => r.name === 'Cash guest' && r.amount === 40),
     'cash the club is waiting on belongs in to_collect');
   assert.ok(!mine.to_collect.some(r => r.name === 'Spent up'),
     'an empty balance is not cash owed — nobody is holding the club money');
-  assert.ok(mine.in_the_red.some(r => r.name === 'Spent up'),
+  assert.ok(snap.still_to_pay.top_up.some(r => r.name === 'Spent up'),
     'but they do need to top up before playing again');
-  assert.ok(!mine.in_the_red.some(r => r.name === 'Cash guest'),
+  assert.ok(!snap.still_to_pay.top_up.some(r => r.name === 'Cash guest'),
     'a guest keeps no balance, so they can never be in the red');
+  assert.ok(snap.still_to_pay.cash.some(r => r.name === 'Cash guest' && r.amount === 40),
+    'the guest is on the cash list instead');
+});
+
+test('the picture asks each person for money once, across everything', () => {
+  // It used to list debtors per contract. So Jeetu was shown as -159 on one
+  // line and -441 on another and never as the -600 he owes, and somebody in
+  // credit on one night was named as a debtor for a shortfall their own
+  // money already covers.
+  const other = 'testc6';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Other night','{}',0,6)`).run(other);
+
+  // Short on both: one line, the total.
+  const deep = player('Short twice', 0);
+  ledgersRepo.ensure(deep, other);
+  db.prepare('UPDATE ledgers SET opening_balance = -100 WHERE player_id = ? AND contract_id = ?')
+    .run(deep, other);
+  db.prepare('UPDATE ledgers SET opening_balance = -60 WHERE player_id = ? AND contract_id = ?')
+    .run(deep, CONTRACT);
+
+  // Short on one, in credit on the other, and better off overall: not asked.
+  const evens = player('Evens out', 300);
+  ledgersRepo.ensure(evens, other);
+  db.prepare('UPDATE ledgers SET opening_balance = -50 WHERE player_id = ? AND contract_id = ?')
+    .run(evens, other);
+
+  const pay = shareRepo.club({ weeks: 3 }).still_to_pay;
+  const asked = pay.top_up.filter(r => r.name === 'Short twice');
+  assert.equal(asked.length, 1, 'one line, not one per contract');
+  assert.equal(asked[0].total, -160, 'and the figure is what they actually owe');
+  assert.equal(asked[0].parts.length, 2, 'with the split, so they know which night');
+  assert.ok(!pay.top_up.some(r => r.name === 'Evens out'),
+    'their own money covers it — asking them to pay is asking twice');
 });
 
 test('an ordinary charge is not reported as pending', () => {

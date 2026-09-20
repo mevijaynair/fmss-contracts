@@ -203,54 +203,70 @@ function paintClub(pen, d, ctx) {
     pen.gap(16);
 
     // ---- what happened lately
+    //
+    // Dates and turnout only. What each night collected used to be here: a
+    // true figure nobody reading this can act on, which invites a
+    // conversation about the club's takings instead of about the one thing
+    // this picture is for.
     const games = c.recent_games;
     if (games.length) {
       pen.text(`Last ${d.weeks} weeks`, x, { size: 22, weight: 600, color: C.muted, lead: 32 });
-      for (const g of games.slice(0, 6)) {
-        pen.row([
-          { str: shortDate(g.date), x: x + 8, size: 22, color: C.text },
-          { str: `${g.players} played`, x: x + 150, size: 22, color: C.faint },
-          { str: `${money(g.charged)} charged`, x: x + w - 8, size: 22, color: C.muted, align: 'right' },
-        ], 32);
-      }
-      pen.gap(10);
-    }
-
-    const paid = c.recent_contributions;
-    if (paid.length) {
-      const total = paid.reduce((s, p) => s + p.amount, 0);
-      pen.text(`Money in — ${money(total)}`, x, { size: 22, weight: 600, color: C.good, lead: 30 });
-      for (const l of wrapList(ctx, paid.map(p => `${p.name} ${money(p.amount)}`), w - 16, 22)) {
-        pen.text(l, x + 8, { size: 22, color: C.muted, lead: 30 });
-      }
-      pen.gap(10);
-    }
-
-    // ---- the two kinds of pending, never added together
-    if (c.to_collect.length) {
-      const total = c.to_collect.reduce((s, r) => s + r.amount, 0);
-      pen.text(`Cash still to collect — ${money(total)}`, x,
-        { size: 22, weight: 600, color: C.warn, lead: 30 });
       for (const l of wrapList(ctx,
-        c.to_collect.map(r => `${r.name} ${money(r.amount)}`), w - 16, 22)) {
-        pen.text(l, x + 8, { size: 22, color: C.muted, lead: 30 });
+        games.slice(0, 8).map(g => `${shortDate(g.date)} · ${g.players}`), w - 16, 22)) {
+        pen.text(l, x + 8, { size: 22, color: C.faint, lead: 30 });
       }
-      pen.gap(10);
+      pen.gap(12);
     }
 
-    if (c.in_the_red.length) {
-      pen.text(`Please top up before the next game (${c.in_the_red.length})`, x,
-        { size: 22, weight: 600, color: C.bad, lead: 30 });
-      for (const l of wrapList(ctx,
-        c.in_the_red.map(r => `${r.name} ${money(r.balance)}`), w - 16, 22)) {
-        pen.text(l, x + 8, { size: 22, color: C.muted, lead: 30 });
-      }
-      pen.gap(10);
-    }
-
-    pen.gap(18);
+    pen.gap(14);
   }
 
+  // ---- who still has to pay, ONCE, across everything
+  //
+  // This was two lists, one per contract, so Jeetu was shown as -159 and
+  // -441 and never as the -600 he owes — and Toby, 487 in hand across the
+  // two, was named as a debtor for a shortfall his own money already covers.
+  const pay = d.still_to_pay || { top_up: [], cash: [] };
+  pen.rect(x, w, 4, C.gold, 2);
+  pen.gap(20);
+  pen.text('Still to pay', x, { size: 32, weight: 700, lead: 40 });
+  pen.text('Both contracts together — one line each, so this is what you owe in all.', x,
+    { size: 21, color: C.faint, lead: 36 });
+
+  if (pay.top_up.length) {
+    pen.text(`Top up before your next game — ${money(-pay.top_up_total)} from `
+      + `${pay.top_up.length}`, x, { size: 23, weight: 600, color: C.bad, lead: 34 });
+    for (const r of pay.top_up) {
+      // The split beside the total, because somebody 600 down wants to know
+      // which night it is on before they decide what to send.
+      // The contract's own name, not a first word: splitting "Mon/Thu" on the
+      // slash leaves "Mon", which is a different night.
+      const split = r.parts.length > 1
+        ? r.parts.map(p => `${p.contract} ${money(p.balance)}`).join(' · ')
+        : '';
+      pen.row([
+        { str: r.name, x: x + 8, size: 23, color: C.text },
+        { str: split, x: x + 250, size: 20, color: C.faint },
+        { str: money(r.total), x: x + w - 8, size: 23, weight: 700, color: C.bad, align: 'right' },
+      ], 33);
+    }
+    pen.gap(14);
+  } else {
+    pen.text('Nobody is short — every balance covers the next game.', x,
+      { size: 22, color: C.good, lead: 32 });
+  }
+
+  if (pay.cash.length) {
+    pen.text(`Cash to hand over — ${money(pay.cash_total)}`, x,
+      { size: 23, weight: 600, color: C.warn, lead: 34 });
+    for (const l of wrapList(ctx,
+      pay.cash.map(r => `${r.name} ${money(r.amount)}`), w - 16, 22)) {
+      pen.text(l, x + 8, { size: 22, color: C.muted, lead: 30 });
+    }
+    pen.gap(10);
+  }
+
+  pen.gap(14);
   pen.hr(x, w);
   pen.gap(16);
   pen.text('A balance is money you have already put in. "Empty" means the next game '

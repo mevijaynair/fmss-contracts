@@ -63,12 +63,19 @@ function rateOf(contract) {
   return Number(rates.contracted_10) || Number(rates.noncontract) || 0;
 }
 
-/** Games played on a contract since a date, with what they cost and who turned out. */
+/**
+ * Games played on a contract since a date, and who turned out.
+ *
+ * What each night COLLECTED used to be here and is not any more. It is a true
+ * figure that nobody reading the picture can act on — the club's takings are
+ * the cashier's business, and publishing them to forty people invites a
+ * conversation about the pot rather than about the one thing this picture is
+ * for, which is who still needs to pay.
+ */
 function recentGames(contractId, from) {
   return db.prepare(`
     SELECT g.id, g.date,
-           COUNT(DISTINCT ch.player_id)            AS players,
-           ROUND(COALESCE(SUM(ch.amount), 0), 2)   AS charged
+           COUNT(DISTINCT ch.player_id) AS players
     FROM gameweeks g
     LEFT JOIN charges ch ON ch.gameweek_id = g.id
     WHERE g.contract_id = ? AND g.historical = 0 AND g.date >= ?
@@ -76,13 +83,68 @@ function recentGames(contractId, from) {
     ORDER BY g.date DESC`).all(contractId, from);
 }
 
-/** Money in since a date. Historical rows are the imported past, not news. */
-function recentContributions(contractId, from) {
-  return db.prepare(`
-    SELECT c.date, p.name, ROUND(c.amount, 2) AS amount
-    FROM contributions c JOIN players p ON p.id = c.player_id
-    WHERE c.contract_id = ? AND c.historical = 0 AND c.amount > 0 AND c.date >= ?
-    ORDER BY c.date DESC, c.amount DESC`).all(contractId, from);
+/**
+ * Who still has to pay, ONCE, across both contracts.
+ *
+ * The picture listed each contract's debtors separately, so Jeetu appeared as
+ * -159 on one line and -441 on another and was never shown the -600 he
+ * actually owes. Worse, somebody in credit on one night and short on the
+ * other was named as a debtor for a shortfall their own money already
+ * covers — Toby was on the Mon/Thu list at 487 in hand.
+ *
+ * Two kinds, kept apart because they are settled differently and adding them
+ * would produce a figure nobody can act on:
+ *
+ *   top_up   a member whose prepaid balance, across everything they hold, has
+ *            run out. They pay it in.
+ *   cash     a guest who played and has not handed the money over. Real notes.
+ *
+ * The cashier never appears: they fund the pitch up front, so their balance
+ * is the club's float and naming them in a picture sent to forty people would
+ * be both wrong and unpleasant.
+ */
+function stillToPay() {
+  const cashiers = cashierIds();
+  const names = Object.fromEntries(contractsRepo.all().map(c => [c.id, c.name]));
+
+  const byPlayer = new Map();
+  for (const l of ledgersRepo.all()) {
+    if (cashiers.has(l.player_id) || (l.player_type || 'regular') === 'outside') continue;
+    if (!byPlayer.has(l.player_id)) {
+      byPlayer.set(l.player_id, { name: l.player_name, total: 0, parts: [] });
+    }
+    const row = byPlayer.get(l.player_id);
+    row.total += l.present_balance;
+    if (l.present_balance !== 0) {
+      row.parts.push({ contract: names[l.contract_id] || l.contract_id,
+        balance: round2(l.present_balance) });
+    }
+  }
+
+  const topUp = [...byPlayer.values()]
+    .map(r => ({ ...r, total: round2(r.total) }))
+    .filter(r => r.total < 0)
+    .sort((a, b) => a.total - b.total);
+
+  // Guest cash, also once per person however many contracts it spans.
+  const cashBy = new Map();
+  for (const r of ledgersRepo.cashOutstanding()) {
+    const key = r.player_id || r.player_name;
+    if (!cashBy.has(key)) cashBy.set(key, { name: r.player_name || 'Guest', amount: 0, games: 0 });
+    const c = cashBy.get(key);
+    c.amount += r.owed;
+    c.games += r.games;
+  }
+  const cash = [...cashBy.values()]
+    .map(c => ({ ...c, amount: round2(c.amount) }))
+    .sort((a, b) => b.amount - a.amount);
+
+  return {
+    top_up: topUp,
+    top_up_total: round2(topUp.reduce((s, r) => s + r.total, 0)),
+    cash,
+    cash_total: round2(cash.reduce((s, r) => s + r.amount, 0)),
+  };
 }
 
 export const shareRepo = {
@@ -119,16 +181,13 @@ export const shareRepo = {
           retired_balance: sheet.flag_hidden_balance,
         },
         recent_games: recentGames(c.id, from),
-        recent_contributions: recentContributions(c.id, from),
-        // The two kinds of pending, kept apart on purpose — see the header.
+        // Who owes what is no longer per contract — see stillToPay. Listing
+        // it twice is how somebody in credit on one night ended up named as a
+        // debtor for a shortfall their own money already covers.
         to_collect: collect.map(r => ({
           name: r.player_name, amount: round2(r.owed),
           games: r.games, last_game: r.last_game_date,
         })),
-        in_the_red: sheet.rows
-          .filter(r => r.present_balance < 0 && !cashiers.has(r.player_id))
-          .map(r => ({ name: r.name, balance: r.present_balance }))
-          .sort((a, b) => a.balance - b.balance),
       };
     });
 
@@ -138,6 +197,9 @@ export const shareRepo = {
       weeks,
       kitty_total: round2(db.prepare('SELECT SUM(amount) t FROM kitty').get()?.t || 0),
       contracts,
+      // One list, across everything, because that is the question the picture
+      // is sent to answer.
+      still_to_pay: stillToPay(),
     };
   },
 
