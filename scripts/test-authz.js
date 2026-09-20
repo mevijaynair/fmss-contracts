@@ -209,20 +209,41 @@ test('a bulk action is per person, so one refusal does not lose the rest', async
   db.prepare("INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status) VALUES ('bulk_b','bc',100,'')").run();
   db.prepare("INSERT OR IGNORE INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid) VALUES ('bch','bg','bulk_b','',0,'',30,'bulk_b',0)").run();
 
-  const res = await fetch(`${BASE}/api/admin/players/bulk`, {
+  const bulk = async (body) => (await fetch(`${BASE}/api/admin/players/bulk`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-    body: JSON.stringify({ ids: ['bulk_a', 'bulk_b'], action: 'kind', kind: 'outside' }),
-  });
-  assert.equal(res.status, 200);
-  const out = await res.json();
-  assert.deepEqual(out.done, ['bulk_a'], 'the clean one went through');
+    body: JSON.stringify({ ids: ['bulk_a', 'bulk_b'], action: 'kind', kind: 'outside', ...body }),
+  })).json();
+
+  // A dry run says what would happen and writes nothing. It matters that it
+  // is the same code path: a preview computed a second way is one that
+  // eventually lies.
+  const preview = await bulk({ dry_run: true });
+  assert.equal(preview.dry_run, true);
+  assert.deepEqual(preview.done.map(d => d.id), ['bulk_a']);
+  assert.deepEqual(preview.refused.map(r => r.id), ['bulk_b']);
+  assert.match(preview.refused[0].why, /settled off a balance/);
+  assert.equal(db.prepare("SELECT player_type FROM players WHERE id = 'bulk_a'").get().player_type,
+    'regular', 'a preview writes nothing');
+  // It also says which contracts each person has something on, because being
+  // a guest reaches both while the Working sheet shows one.
+  assert.ok(preview.refused[0].touches.some(t => t.contract_id === 'bc'),
+    JSON.stringify(preview.refused[0].touches));
+
+  const out = await bulk({});
+  assert.deepEqual(out.done.map(d => d.id), ['bulk_a'], 'the clean one went through');
   assert.equal(out.refused.length, 1, 'and the other came back by name');
   assert.equal(out.refused[0].name, 'bulk_b');
   assert.match(out.refused[0].why, /settled off a balance/);
   assert.equal(
     db.prepare("SELECT player_type FROM players WHERE id = 'bulk_b'").get().player_type,
     'regular', 'the refused one is unchanged');
+  assert.equal(
+    db.prepare("SELECT player_type FROM players WHERE id = 'bulk_a'").get().player_type,
+    'outside', 'and the clean one actually moved');
+  // The preview said exactly what the real run did.
+  assert.deepEqual(preview.done.map(d => d.id), out.done.map(d => d.id));
+  assert.deepEqual(preview.refused.map(r => r.id), out.refused.map(r => r.id));
 });
 
 test('a report is filed under whoever is signed in, never whoever is named', async () => {

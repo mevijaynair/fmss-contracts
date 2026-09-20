@@ -631,24 +631,39 @@ r.put('/admin/players/:playerId/kind', wrap((req) => {
  */
 r.post('/admin/players/bulk', wrap((req) => {
   requireAdmin(req);
-  const { ids, action, kind, hidden } = req.body || {};
+  const { ids, action, kind, hidden, dry_run: dryRun } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) throw new Error('Nobody selected');
   if (ids.length > 200) throw new Error('Too many at once');
   if (!['kind', 'sheet'].includes(action)) throw new Error('Unknown action');
 
+  // A dry run answers "what would this do" by doing it and rolling back, so
+  // the preview cannot disagree with the action. Being a guest is a fact
+  // about the PERSON while the Working sheet shows one contract at a time,
+  // so somebody tidying the Mon/Thu list can move a Saturday regular off the
+  // Saturday sheet without ever seeing it — the preview is what stops that
+  // being a surprise.
   const done = [];
   const refused = [];
   for (const id of ids) {
+    const name = playersRepo.get(id)?.name || id;
     try {
-      const name = playersRepo.get(id)?.name || id;
-      if (action === 'kind') playersRepo.setKind(id, kind);
-      else playersRepo.update(id, { hide_from_sheet: !!hidden });
-      done.push(name);
+      if (action === 'kind') {
+        const out = playersRepo.setKind(id, kind, { dryRun: !!dryRun });
+        const touches = (dryRun ? out.would?.touches : out.touches) || [];
+        if (dryRun && out.would && !out.would.ok) {
+          refused.push({ id, name, why: out.would.why, touches });
+        } else {
+          done.push({ id, name, touches, already: !!out.would?.already });
+        }
+      } else {
+        if (!dryRun) playersRepo.update(id, { hide_from_sheet: !!hidden });
+        done.push({ id, name, touches: [] });
+      }
     } catch (e) {
-      refused.push({ id, name: playersRepo.get(id)?.name || id, why: e.message });
+      refused.push({ id, name, why: e.message, touches: [] });
     }
   }
-  return { done, refused };
+  return { dry_run: !!dryRun, done, refused };
 }));
 
 // Everything one person is charged for, so their settlement can be corrected

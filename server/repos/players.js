@@ -200,11 +200,13 @@ export const playersRepo = {
    * this changes WHAT SOMEBODY IS, never how a game was settled, and the
    * second is a decision to make on the game.
    */
-  setKind(playerId, kind, { outsideCost = null } = {}) {
+  setKind(playerId, kind, { outsideCost = null, dryRun = false } = {}) {
     if (!['regular', 'outside'].includes(kind)) throw new Error('Unknown kind');
     const p = this.get(playerId);
     if (!p) throw new Error('No such player');
-    if ((p.player_type || 'regular') === kind) return p;
+    if ((p.player_type || 'regular') === kind) {
+      return dryRun ? { ...p, would: { ok: true, already: true, touches: [] } } : p;
+    }
     if (p.special_role === 'cashier' && kind === 'outside') {
       throw new Error('The cashier funds the contracts; they cannot be a guest');
     }
@@ -222,6 +224,20 @@ export const playersRepo = {
     const games = db.prepare(
       `SELECT DISTINCT gameweek_id FROM charges
        WHERE COALESCE(charged_to, player_id) = ?`).all(playerId).map(r => r.gameweek_id);
+
+    // Which contracts this person actually has something on. The Working
+    // sheet shows one contract at a time, but being a guest is a fact about
+    // the PERSON — so somebody tidying the Mon/Thu list can move a Saturday
+    // regular off the Saturday sheet without ever seeing it. Reported so the
+    // caller can say so before it happens.
+    const touches = ledgersRepo.forPlayer(playerId)
+      .filter(l => l.present_balance !== 0 || l.games > 0 || (l.cash_owed || 0) > 0)
+      .map(l => ({
+        contract_id: l.contract_id,
+        balance: r2(l.present_balance),
+        games: l.games,
+        cash_owed: r2(l.cash_owed || 0),
+      }));
 
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -241,12 +257,17 @@ export const playersRepo = {
           + 'hold, so nothing was done. Switch those games on the game itself first, in Game '
           + 'history, if that is really what happened.');
       }
+      // A dry run does the whole thing and then takes it back, so the answer
+      // it gives cannot differ from what the real one would do — a preview
+      // computed a second way is a preview that eventually lies.
+      if (dryRun) { db.exec('ROLLBACK'); return { ...p, would: { ok: true, touches } }; }
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');
+      if (dryRun) return { ...p, would: { ok: false, why: e.message, touches } };
       throw e;
     }
-    return this.get(playerId);
+    return { ...this.get(playerId), touches };
   },
 
   /**

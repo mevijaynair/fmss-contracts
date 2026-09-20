@@ -176,6 +176,52 @@ async function splitPlayerModal(playerId) {
  * way to move the same money.
  */
 /**
+ * Ask before moving people to the guest list, showing what it reaches.
+ *
+ * Being a guest is a fact about the PERSON, but the Working sheet shows one
+ * contract at a time. So somebody tidying the Mon/Thu list can take a
+ * Saturday regular off the Saturday sheet without ever seeing the Saturday
+ * sheet. That is the surprise this exists to prevent.
+ *
+ * The preview comes from the server doing the whole thing and rolling it
+ * back, so it cannot disagree with what pressing yes will do — a preview
+ * computed a second way is a preview that eventually lies.
+ */
+async function confirmToGuests(ids) {
+  let prev;
+  try {
+    prev = await api.post('/admin/players/bulk',
+      { ids, action: 'kind', kind: 'outside', dry_run: true });
+  } catch (e) { toast(e.message, true); return false; }
+
+  const name = (c) => nameOfContract(c);
+  const both = prev.done.filter(d => (d.touches || []).length > 1);
+  const lines = prev.done.map((d) => {
+    const t = (d.touches || []).map(x =>
+      `${name(x.contract_id)} ${money(x.balance)}${x.games ? `, ${x.games} games` : ''}`);
+    return `  ${d.name}${t.length ? ` — ${t.join(' · ')}` : ' — nothing on either contract'}`;
+  });
+
+  const msg = [
+    `Move ${prev.done.length} player(s) to the guest list?`,
+    '',
+    'Guests pay cash on the day and keep no balance, so they leave the ledger',
+    'and the standing sheet on BOTH contracts, not just this one.',
+    '',
+    ...lines,
+    ...(both.length ? ['',
+      `${both.length} of them play on both nights: ${both.map(b => b.name).join(', ')}.`,
+      'Moving them here takes them off the other sheet too.'] : []),
+    ...(prev.refused.length ? ['',
+      `${prev.refused.length} cannot be moved and will be left alone:`,
+      ...prev.refused.map(r => `  ${r.name} — ${r.why}`)] : []),
+  ].join('\n');
+
+  if (!prev.done.length) { toast(msg, true); return false; }
+  return confirm(msg);
+}
+
+/**
  * Doing the same thing to a dozen people at once.
  *
  * A third of the roster is walk-ups sitting in the ledger who ought to be on
@@ -211,7 +257,12 @@ function wireBulk() {
   const run = async (label, body, confirmText) => {
     const ids = picked();
     if (!ids.length) return;
-    if (!confirm(`${confirmText}\n\n${ids.length} player(s) selected.`)) return;
+    // Moving people to the guest list reaches BOTH contracts, so it gets a
+    // preview naming who and what rather than a count.
+    const ok = body.action === 'kind' && body.kind === 'outside'
+      ? await confirmToGuests(ids)
+      : confirm(`${confirmText}\n\n${ids.length} player(s) selected.`);
+    if (!ok) return;
     try {
       const out = await api.post('/admin/players/bulk', { ids, ...body });
       store.players = await api.players();
@@ -891,15 +942,18 @@ async function render() {
     btn.addEventListener('click', () => fixMoneyModal(btn.dataset.fixmoney)));
   $('playersTable').querySelectorAll('[data-kind]').forEach(btn =>
     btn.addEventListener('click', async () => {
-      const name = store.players.find(p => p.id === btn.dataset.kind)?.name || 'them';
-      if (!confirm(`Move ${name} to the guest list?\n\n`
-        + 'Guests pay cash on the day and keep no balance, so they leave the ledger and the '
-        + 'standing sheet and appear under Guests instead.\n\n'
-        + 'Nothing is written if it would change what they hold.')) return;
+      const id = btn.dataset.kind;
+      const name = store.players.find(p => p.id === id)?.name || 'them';
+      // One player and twelve go through the same preview, so the warning
+      // about the other contract cannot depend on how many you picked.
+      if (btn.dataset.to === 'outside') {
+        if (!await confirmToGuests([id])) return;
+      } else if (!confirm(`Move ${name} to the squad?\n\n`
+        + 'They keep a balance and appear on the ledger and the standing sheet.')) return;
       try {
-        await api.put(`/admin/players/${btn.dataset.kind}/kind`, { kind: btn.dataset.to });
+        await api.put(`/admin/players/${id}/kind`, { kind: btn.dataset.to });
         store.players = await api.players();
-        toast(`${name} is on the guest list now`);
+        toast(`${name} is on the ${btn.dataset.to === 'outside' ? 'guest list' : 'squad'} now`);
         render();
       } catch (e) { toast(e.message, true); }
     }));
