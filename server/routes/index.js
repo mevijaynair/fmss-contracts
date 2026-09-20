@@ -293,6 +293,49 @@ r.get('/cash-outstanding', wrap((req) => {
   requireAdmin(req);
   return ledgersRepo.cashOutstanding(req.query.contract || null);
 }));
+// The individual nights behind the cash owed, so a collect list can be
+// checked against somebody's memory rather than only read.
+r.get('/cash-outstanding/games', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.cashOutstandingGames(req.query.contract || null);
+}));
+
+/**
+ * Cover shortfalls out of the same person's credit on the other contract.
+ *
+ * Per person, not all or nothing: one of them having moved since the screen
+ * was drawn must not lose the other five. Each is reconciled on its own — the
+ * player's total across both contracts has to be unchanged, because this
+ * moves money between two of their own pockets.
+ */
+r.post('/admin/ledgers/cover', wrap((req) => {
+  requireAdmin(req);
+  const moves = Array.isArray(req.body?.moves) ? req.body.moves : [];
+  if (!moves.length) throw new Error('Nothing to cover');
+  if (moves.length > 100) throw new Error('Too many at once');
+  const done = [];
+  const refused = [];
+  for (const m of moves) {
+    try {
+      done.push(ledgersRepo.coverFromOtherContract(m.player_id, {
+        from: m.from, to: m.to, amount: m.amount, by: req.user.id || 'admin',
+      }));
+    } catch (e) {
+      refused.push({
+        player_id: m.player_id,
+        name: playersRepo.get(m.player_id)?.name || m.player_id,
+        why: e.message,
+      });
+    }
+  }
+  return { done, refused };
+}));
+
+r.post('/admin/ledgers/cover/:id/undo', wrap((req) => {
+  requireAdmin(req);
+  return ledgersRepo.undoCover(req.params.id);
+}));
+
 r.put('/ledgers/:playerId/:contractId/status', wrap((req) => {
   requireAdmin(req);
   ledgersRepo.setStatus(req.params.playerId, req.params.contractId, req.body.status || '');

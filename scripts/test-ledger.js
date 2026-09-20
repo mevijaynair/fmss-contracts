@@ -1493,6 +1493,70 @@ test('two players can be added to a game back to back', () => {
   assert.equal(balanceOf(b), 70);
 });
 
+test('a shortfall can be covered out of the same person\'s other balance', () => {
+  // Six people are in the red on one night while holding more than that on
+  // the other. Chasing them is chasing money the club already has.
+  const other = 'testc4';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Other night','{}',0,4)`).run(other);
+  const p = player('Rich here, short there', 400);
+  ledgersRepo.ensure(p, other);
+  const g = game();
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'',64,?,0)`).run(`ch${++seq}`, g, p, p);
+  db.prepare('UPDATE charges SET settle_contract_id = ? WHERE gameweek_id = ?').run(other, g);
+  assert.equal(ledgersRepo.get(p, other).present_balance, -64);
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 400);
+  const total = round2(ledgersRepo.forPlayer(p).reduce((s, l) => s + l.present_balance, 0));
+
+  const out = ledgersRepo.coverFromOtherContract(p,
+    { from: CONTRACT, to: other, amount: 64 });
+
+  assert.equal(ledgersRepo.get(p, other).present_balance, 0, 'square on the night they owed');
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 336, 'taken from where it was');
+  assert.equal(round2(ledgersRepo.forPlayer(p).reduce((s, l) => s + l.present_balance, 0)),
+    total, 'the same money, in the other pocket — the total cannot move');
+
+  // Undoing puts both legs back.
+  ledgersRepo.undoCover(out.id);
+  assert.equal(ledgersRepo.get(p, other).present_balance, -64);
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 400);
+});
+
+test('covering refuses what the other balance cannot pay for', () => {
+  const other = 'testc5';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Nowhere','{}',0,5)`).run(other);
+  const p = player('Short everywhere', 10);
+  ledgersRepo.ensure(p, other);
+  assert.throws(() => ledgersRepo.coverFromOtherContract(p,
+    { from: CONTRACT, to: other, amount: 64 }), /only has 10/);
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 10, 'and nothing moved');
+  assert.throws(() => ledgersRepo.coverFromOtherContract(p,
+    { from: CONTRACT, to: CONTRACT, amount: 5 }), /the other contract/);
+  assert.throws(() => ledgersRepo.coverFromOtherContract(p,
+    { from: CONTRACT, to: other, amount: 0 }), /Nothing to cover/);
+  assert.throws(() => ledgersRepo.coverFromOtherContract(p,
+    { from: CONTRACT, to: 'nope', amount: 5 }), /No such contract/);
+});
+
+test('the unpaid nights behind a cash debt are listed, not just counted', () => {
+  const g1 = game(); const g2 = game();
+  const walkup = player('Owes for two');
+  makeOutside(walkup);
+  charge(g1, walkup, 35);
+  charge(g2, walkup, 40);
+  const nights = ledgersRepo.cashOutstandingGames(CONTRACT)
+    .filter(r => r.player_id === walkup);
+  assert.equal(nights.length, 2, 'both nights, not a count of two');
+  assert.deepEqual(nights.map(n => n.amount).sort((a, b) => a - b), [35, 40]);
+  // Settling one takes it off the list.
+  db.prepare('UPDATE charges SET paid = 1 WHERE gameweek_id = ? AND player_id = ?')
+    .run(g1, walkup);
+  assert.equal(ledgersRepo.cashOutstandingGames(CONTRACT)
+    .filter(r => r.player_id === walkup).length, 1);
+});
+
 test('moving somebody to the guest list is free when it moves nothing', () => {
   // The ordinary case, and the one this exists for: a walk-up sitting in the
   // ledger at zero who was never a member.

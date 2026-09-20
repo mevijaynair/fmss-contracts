@@ -272,6 +272,30 @@ function wireBulk() {
  * buys fewer Saturdays than Mondays, and one averaged number would be true of
  * neither night.
  */
+/** A contract's name, for a sentence rather than an id. */
+const nameOfContract = (id) =>
+  (store.contracts || []).find(c => c.id === id)?.name || id;
+
+/**
+ * What it would take to square somebody up out of their own other balance.
+ *
+ * Only where they are short on one contract and holding enough on another —
+ * which is six people today. Returns null when there is nothing to do or
+ * nothing to do it with, so the caller can filter on it and the button never
+ * offers a move that would be refused.
+ */
+function coverPlan(l) {
+  const entries = Object.entries(l.contracts || {});
+  const short = entries.find(([, c]) => c.present_balance < 0);
+  if (!short) return null;
+  const need = Math.round(-short[1].present_balance * 100) / 100;
+  const source = entries
+    .filter(([id, c]) => id !== short[0] && c.present_balance >= need)
+    .sort((a, b) => b[1].present_balance - a[1].present_balance)[0];
+  if (!source) return null;
+  return { player_id: l.player_id, name: l.player_name, from: source[0], to: short[0], amount: need };
+}
+
 async function renderCombined(host) {
   host.innerHTML = '<p class="hint">Loading…</p>';
   let rows = [];
@@ -301,9 +325,17 @@ async function renderCombined(host) {
         <div class="rep-collect-head">${evensOut.length} ${evensOut.length === 1
     ? 'player is' : 'players are'} in the red on one night but square across both</div>
         <div class="rep-collect-row"><span class="rep-collect-k">No need to chase</span>
-          <span class="rep-collect-v">${evensOut.map(l =>
-    `<span class="rep-owe"><strong>${esc(l.player_name)}</strong> ${money(l.present_balance)}</span>`)
-    .join('')}</span></div>
+          <span class="rep-collect-v">${evensOut.map(l => `<span class="rep-owe">
+            <strong>${esc(l.player_name)}</strong> ${coverPlan(l)
+    ? `${money(coverPlan(l).amount)} short on ${esc(nameOfContract(coverPlan(l).to))}`
+    : money(l.present_balance)}</span>`).join('')}</span></div>
+        <div class="quick-row">
+          <button class="btn btn-sm" data-cover="all">Cover all ${
+  evensOut.filter(coverPlan).length} from their other balance</button>
+          <span class="hint">Moves each shortfall out of the credit they already hold on the
+            other contract. Their total does not change — it is the same money in the other
+            pocket — and the kitty is untouched.</span>
+        </div>
       </div>` : ''}
       ${reallyOwes.length ? `<p class="hint">
         <strong>${reallyOwes.length}</strong> genuinely short, ${money(Math.abs(owedTotal))} in all.</p>` : ''}
@@ -346,13 +378,57 @@ async function renderCombined(host) {
         dearer night, so it is given per contract rather than averaged into a figure that is
         true of neither.</p>
     </div>`;
+
+  // Covering a shortfall out of the same person's other balance. Per person
+  // on the server, so one of them having moved since this was drawn does not
+  // lose the rest — and the refusals come back by name.
+  host.querySelectorAll('[data-cover]').forEach(btn => btn.addEventListener('click', async () => {
+    const plans = (btn.dataset.cover === 'all'
+      ? evensOut.map(coverPlan)
+      : [coverPlan(members.find(m => m.player_id === btn.dataset.cover))]).filter(Boolean);
+    if (!plans.length) { toast('Nothing to cover', true); return; }
+    if (!confirm(`Cover ${plans.length} shortfall(s) from the credit they already hold?\n\n`
+      + plans.map(p => `${p.name}: ${money(p.amount)} from ${nameOfContract(p.from)}`).join('\n')
+      + '\n\nNobody\'s total changes — it is the same money in their other pocket. '
+      + 'The kitty is not touched.')) return;
+    try {
+      const out = await api.post('/admin/ledgers/cover', { moves: plans });
+      toast(out.refused.length
+        ? `${out.done.length} covered, ${out.refused.length} refused`
+        : `${out.done.length} covered`);
+      if (out.refused.length) {
+        openModal('Some were not covered', `
+          <div class="split-list">${out.refused.map(r => `<div class="split-row"><span></span>
+            <span><strong>${esc(r.name)}</strong><br><span class="hint">${esc(r.why)}</span></span>
+            <span></span></div>`).join('')}</div>`, { wide: true });
+      }
+      render();
+    } catch (e) { toast(e.message, true); }
+  }));
 }
 
 async function renderGuests(host) {
   host.innerHTML = '<p class="hint">Loading…</p>';
   let owed = [];
-  try { owed = await api.cashOutstanding(contractId) || []; }
-  catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+  let games = [];
+  try {
+    [owed, games] = await Promise.all([
+      api.cashOutstanding(contractId),
+      api.get(`/cash-outstanding/games${contractId ? `?contract=${contractId}` : ''}`),
+    ]);
+    owed = owed || []; games = games || [];
+  } catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+
+  // The nights behind each person's total. "John owes 105 over 3 games" can be
+  // read but not checked — which three, and was one of them the night he says
+  // he did not play? Collecting cash is a conversation, and this is the half
+  // of it the app was not holding up.
+  const nights = new Map();
+  for (const g of games) {
+    const key = `${g.player_id}|${g.contract_id}`;
+    if (!nights.has(key)) nights.set(key, []);
+    nights.get(key).push(g);
+  }
 
   const guests = (store.players || []).filter(p => p.player_type === 'outside');
   const total = owed.reduce((s, r) => s + r.owed, 0);
@@ -373,7 +449,7 @@ async function renderGuests(host) {
       <div class="table-scroll">
         <table class="sams-table">
           <thead><tr><th>Who</th><th>Contract</th><th class="num">Games</th>
-            <th class="num">Owes</th><th>Last played</th><th></th></tr></thead>
+            <th class="num">Owes</th><th>Which nights</th><th></th></tr></thead>
           <tbody>${owed.map(r => `
             <tr>
               <td><strong>${esc(r.player_name || 'Guest')}</strong>${
@@ -382,7 +458,11 @@ async function renderGuests(host) {
               <td>${esc(store.contracts.find(c => c.id === r.contract_id)?.name || r.contract_id)}</td>
               <td class="num">${r.games}</td>
               <td class="num"><span class="bal neg">${money(r.owed)}</span></td>
-              <td>${esc(fmtDate(r.last_game_date))}</td>
+              <td>${(nights.get(`${r.player_id}|${r.contract_id}`) || [])
+    .map(g => `<span class="owe-night" title="${esc(g.score || 'no result recorded')}${
+  g.played_by_id !== g.player_id ? ` · played by ${esc(g.played_by)}` : ''}">${
+  esc(fmtDate(g.date))} <strong>${money(g.amount)}</strong></span>`).join('')
+    || `<span class="hint">${esc(fmtDate(r.last_game_date))}</span>`}</td>
               <td class="row-actions">
                 <button class="btn btn-secondary btn-sm" data-goto="gameweeks"
                   title="Marking it collected on the game is what puts the cash in the pot">Collect</button>

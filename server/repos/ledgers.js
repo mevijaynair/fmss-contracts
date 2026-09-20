@@ -308,6 +308,112 @@ export const ledgersRepo = {
       ORDER BY owed DESC`).all(...args);
   },
 
+  /**
+   * The individual nights behind the cash that is owed.
+   *
+   * cashOutstanding above answers "how much, from whom", which is the right
+   * summary and the wrong thing to collect from. Somebody handing over notes
+   * asks which games, and "John owes 105 over 3 games" does not say whether
+   * that is three nights at 35 or a night he disputes — so the collect list
+   * could be read but not checked against anybody's memory.
+   */
+  cashOutstandingGames(contractId = null) {
+    const where = contractId
+      ? 'AND COALESCE(ch.settle_contract_id, g.contract_id) = ?' : '';
+    const args = contractId ? [contractId] : [];
+    return db.prepare(`
+      SELECT ch.id AS charge_id, ch.gameweek_id, ch.amount, ch.team, ch.rate_type,
+             g.date, g.score,
+             COALESCE(ch.settle_contract_id, g.contract_id) AS contract_id,
+             c.name AS contract_name,
+             COALESCE(ch.charged_to, ch.player_id) AS player_id,
+             sp.name AS player_name,
+             COALESCE(sp.player_type, 'regular') AS player_type,
+             ch.player_id AS played_by_id,
+             pl.name AS played_by
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      LEFT JOIN contracts c ON c.id = COALESCE(ch.settle_contract_id, g.contract_id)
+      LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+      LEFT JOIN players pl ON pl.id = ch.player_id
+      WHERE g.historical = 0 AND ch.paid = 0 AND ch.settled_from_kitty = 0
+        AND (ch.settles_cash = 1 OR COALESCE(sp.player_type,'regular') = 'outside')
+        AND ch.amount > 0 ${where}
+      ORDER BY sp.name, g.date DESC`).all(...args);
+  },
+
+  /**
+   * Cover a shortfall on one contract out of the same person's credit on the
+   * other.
+   *
+   * Six people are in the red on one night while holding more than that on
+   * the other — Hari is 64 short on Saturdays and holding 437 on Mon/Thu.
+   * Chasing them is chasing money the club already has, and the only way to
+   * fix it was to invent a contribution on one side and an adjustment on the
+   * other, by hand, with nothing tying the two together.
+   *
+   * Two legs written as one, same as a movement: the money leaves one of
+   * their balances and lands on the other, so their total is unchanged and
+   * the kitty never enters into it. Refused otherwise — this moves money
+   * between two of somebody's own pockets and must not alter what is in them
+   * altogether.
+   */
+  coverFromOtherContract(playerId, { from, to, amount, by = 'admin' } = {}) {
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const amt = r2(amount);
+    if (!(amt > 0)) throw new Error('Nothing to cover');
+    if (!from || !to || from === to) throw new Error('It has to come from the other contract');
+    for (const c of [from, to]) {
+      if (!db.prepare('SELECT id FROM contracts WHERE id = ?').get(c)) {
+        throw new Error(`No such contract: ${c}`);
+      }
+    }
+    const p = db.prepare('SELECT name FROM players WHERE id = ?').get(playerId);
+    if (!p) throw new Error('No such player');
+
+    const source = this.get(playerId, from);
+    if (!source || source.present_balance < amt) {
+      throw new Error(`${p.name} only has ${r2(source?.present_balance ?? 0)} on that contract`);
+    }
+    const before = r2(this.forPlayer(playerId).reduce((s, l) => s + l.present_balance, 0));
+
+    const id = `cov_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const now = new Date().toISOString();
+    const fromName = db.prepare('SELECT name FROM contracts WHERE id = ?').get(from).name;
+    const toName = db.prepare('SELECT name FROM contracts WHERE id = ?').get(to).name;
+    const label = `Covered from ${fromName} credit`;
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      this.ensure(playerId, from);
+      this.ensure(playerId, to);
+      const ins = db.prepare(`INSERT INTO transactions
+        (id, player_id, contract_id, type, amount, description, status, created_by,
+         created_at, updated_at)
+        VALUES (?,?,?,'adjustment',?,?,'approved',?,?,?)`);
+      ins.run(`t_${id}_out`, playerId, from, -amt, `${label} → ${toName}`, by, now, now);
+      ins.run(`t_${id}_in`, playerId, to, amt, label, by, now, now);
+
+      const after = r2(this.forPlayer(playerId).reduce((s, l) => s + l.present_balance, 0));
+      if (after !== before) {
+        throw new Error(`Refusing: ${p.name}'s total would move from ${before} to ${after}`);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return { id, player_id: playerId, name: p.name, from, to, amount: amt };
+  },
+
+  /** Undo one, both legs together. */
+  undoCover(id) {
+    const n = db.prepare('DELETE FROM transactions WHERE id IN (?,?)')
+      .run(`t_${id}_out`, `t_${id}_in`).changes;
+    if (!n) throw new Error('No such cover');
+    return { ok: true, removed: n };
+  },
+
   ensure(playerId, contractId) {
     db.prepare(`INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status)
                 VALUES (?,?,0,'')`).run(playerId, contractId);

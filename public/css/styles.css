@@ -1541,3 +1541,10 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
    up; one at a time through a ⋮ menu is forty clicks and a job nobody does,
    which is why the list stays wrong. */
 .pl-pick { cursor: pointer; }
+
+/* The individual nights behind a cash debt. "105 over 3 games" can be read
+   but not checked against anybody's memory; the dates can. */
+.owe-night { display: inline-block; margin: 0.1rem 0.3rem 0.1rem 0; padding: 0.08rem 0.4rem;
+  border-radius: 6px; background: var(--bg-subtle); font-size: 0.78rem;
+  color: var(--text-muted); white-space: nowrap; }
+.owe-night strong { color: var(--text-main); }
