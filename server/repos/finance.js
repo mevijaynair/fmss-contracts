@@ -81,7 +81,9 @@ function cashier() {
  */
 function sessionsIn(contractId, from, to) {
   return db.prepare(
-    `SELECT COUNT(*) n, COALESCE(SUM(cost_per_gw), 0) booked
+    `SELECT COUNT(*) n,
+            COALESCE(SUM(COALESCE(hours, 1)), 0) hours,
+            COALESCE(SUM(cost_per_gw), 0) booked
      FROM gameweeks
      WHERE contract_id = ? AND historical = 0 AND date >= ? AND date <= ?`
   ).get(contractId, from, to || '9999-12-31');
@@ -97,20 +99,20 @@ function decorate(vc) {
   const upto = vc.end_date && vc.end_date < today() ? vc.end_date : today();
   const played = sessionsIn(vc.contract_id, vc.start_date, upto);
 
-  // Nights bought, including the ones thrown in. O365 sells "20 + 3hrs free",
-  // so the bundle buys twenty-three nights; Koora sells twenty with nothing
+  // HOURS bought, including the ones thrown in. O365 sells "20 + 3hrs free",
+  // so the bundle buys twenty-three hours; Koora sells twenty with nothing
   // free. Both are priced by the same rule.
   const free = Number(vc.free_sessions) || 0;
   const covered = vc.sessions_total > 0 ? vc.sessions_total + free : null;
 
-  // What one session costs under this contract, which is the whole reason for
-  // entering it. Divided by every night the bundle covers, not by the ones that
-  // were paid for: a free night still gets played, and pricing against twenty
+  // What one hour costs under this contract, which is the whole reason for
+  // entering it. Divided by every hour the bundle covers, not by the ones that
+  // were paid for: a free hour still gets played, and pricing against twenty
   // when twenty-three are played overstates the pitch by 15% — enough to turn a
   // contract that is making money into one that reads as losing it.
   //
   // Null when the deal is open-ended — a rate cannot be derived from a total
-  // with no session count, and guessing one would quietly put a made-up number
+  // with no hour count, and guessing one would quietly put a made-up number
   // into the P&L.
   const perSession = covered ? round2(Number(vc.amount_total) / covered) : null;
   const perPaidSession = vc.sessions_total > 0
@@ -122,7 +124,10 @@ function decorate(vc) {
   // have already been played and shared with the club.
   const bookedPerSession = played.n ? round2(played.booked / played.n) : null;
 
-  const consumed = perSession === null ? null : round2(perSession * played.n);
+  // Priced on hours, not on games. Thirteen ordinary nights and one two-hour
+  // tournament is fifteen hours off the bundle, not fourteen.
+  const hours = round2(played.hours);
+  const consumed = perSession === null ? null : round2(perSession * hours);
 
   return {
     ...vc,
@@ -130,10 +135,14 @@ function decorate(vc) {
     payments,
     paid,
     outstanding: round2(Number(vc.amount_total) - paid),
-    sessions_played: played.n,
+    games_played: played.n,
+    hours_played: hours,
+    // Games and hours differ only when a night ran long. Saying so lets the
+    // screen keep quiet about hours until there is something to say.
+    has_long_games: round2(hours) !== played.n,
     free_sessions: free,
     sessions_covered: covered,
-    sessions_left: covered === null ? null : covered - played.n,
+    sessions_left: covered === null ? null : round2(covered - hours),
     cost_per_session: perSession,
     // What a night would cost if the free ones were not counted. Shown beside
     // the real rate so the saving the bundle actually buys is visible, never
@@ -143,10 +152,15 @@ function decorate(vc) {
     // Positive: the games were booked at more than the contract charges, so the
     // pot is quietly making more than the P&L claims. Negative: the other way,
     // and the club is losing money it has not noticed.
+    //
+    // The total is the difference of the two TOTALS, not the per-game gap times
+    // the number of games. Those agree only while every night is one hour; a
+    // two-hour tournament eats two hours of the bundle while the game is still
+    // booked once, and multiplying would quietly drop the extra hour.
     variance_per_session: perSession !== null && bookedPerSession !== null
       ? round2(bookedPerSession - perSession) : null,
-    variance_total: perSession !== null && bookedPerSession !== null
-      ? round2((bookedPerSession - perSession) * played.n) : null,
+    variance_total: consumed === null ? null : round2(played.booked - consumed),
+    booked_total: round2(played.booked),
     consumed,
     // Money handed over that has not been played off yet. Negative means the
     // opposite and is the ordinary state early on: games played on a booking
@@ -295,7 +309,8 @@ export const financeRepo = {
     const end = to || '9999-12-31';
 
     const games = db.prepare(
-      `SELECT id, date, cost_per_gw, game_cost, game_cost_paid_by
+      `SELECT id, date, cost_per_gw, game_cost, game_cost_paid_by,
+              COALESCE(hours, 1) AS hours
        FROM gameweeks WHERE contract_id = ? AND historical = 0
          AND date >= ? AND date <= ? ORDER BY date`
     ).all(contractId, start, end);
@@ -335,12 +350,19 @@ export const financeRepo = {
     };
     let pitchContracted = 0;
     let covered = 0;
+    let hours = 0;
     for (const g of games) {
+      const h = Number(g.hours) || 1;
+      hours += h;
       const r = rateOn(g.date);
+      // Priced by the hour. A tournament night holds the court for two, so it
+      // costs two — while cost_per_gw still records it as one booking, which is
+      // exactly the gap this pricing exists to close.
       if (r === null) pitchContracted += Number(g.cost_per_gw) || 0;
-      else { pitchContracted += r; covered += 1; }
+      else { pitchContracted += r * h; covered += 1; }
     }
     pitchContracted = round2(pitchContracted);
+    hours = round2(hours);
 
     // Club income and spend that is not a game: a BBQ, shirts, a referee. Scoped
     // to this contract, which is why kitty rows carry one.
@@ -368,6 +390,9 @@ export const financeRepo = {
       from: start,
       to: to || today(),
       games: games.length,
+      hours,
+      long_games: games.filter(g => (Number(g.hours) || 1) !== 1)
+        .map(g => ({ date: g.date, hours: Number(g.hours) || 1 })),
       players_billed: ids.length ? db.prepare(
         `SELECT COUNT(*) n FROM charges WHERE gameweek_id IN (${ids.map(() => '?').join(',')})`)
         .get(...ids).n : 0,
@@ -398,6 +423,19 @@ export const financeRepo = {
         guest_cash_still_owed: round2(rev.cash_owed),
         places_carried_by_the_kitty: round2(rev.carried),
       },
+      // Nights that look like they ran long but are recorded as one hour.
+      //
+      // Twelve players is two teams and an hour. More than that is three teams
+      // at 5- or 6-a-side, which holds the court for an hour and a half or two
+      // — and that night eats two hours of the bundle while looking on every
+      // screen exactly like the one before it. Reported, never applied: the
+      // duration decides the cost, and a guessed duration is a guessed cost.
+      hours_to_check: ids.length ? db.prepare(`
+        SELECT g.date, COUNT(ch.id) AS players
+        FROM gameweeks g JOIN charges ch ON ch.gameweek_id = g.id
+        WHERE g.id IN (${ids.map(() => '?').join(',')}) AND COALESCE(g.hours, 1) = 1
+        GROUP BY g.id HAVING players > 12 ORDER BY g.date`)
+        .all(...ids).map(r => ({ date: r.date, players: r.players })) : [],
       // Two routes to the same figure. Anything other than zero is a bug in one
       // of them, not a rounding curiosity.
       kitty_says: kittyFromGames,

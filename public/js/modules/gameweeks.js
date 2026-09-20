@@ -774,6 +774,9 @@ function editGameweekModal(g) {
   $('egTitle').textContent = `Edit ${fmtDate(g.date)}`;
   $('egGameType').value = g.game_type || 'regular';
   $('egTournamentName').value = g.tournament_name || '';
+  // A duration the list has never carried reads as 1, which is what every game
+  // recorded before this existed actually was.
+  if ($('egHours')) $('egHours').value = String(Number(g.hours) || 1);
   $('egScore').value = g.score || '';
   $('egComments').value = g.comments || '';
 
@@ -836,6 +839,7 @@ async function saveGameweekEdits(gameweekId) {
         tournament_name: $('egTournamentName').value,
         score: $('egScore').value,
         comments: $('egComments').value,
+        hours: Number($('egHours')?.value) || 1,
       },
       chargeEdits: edits,
       reason: 'Web UI edit',

@@ -50,6 +50,7 @@ db.prepare(`INSERT INTO contracts (id,name,venue,rates,cost_per_gw,sort,season_s
 
 let seq = 0;
 const now = () => new Date().toISOString();
+const round2 = (n) => Math.round(n * 100) / 100;
 
 function player(name, { opening = 0, type = 'regular', role = null } = {}) {
   const id = `p${++seq}`;
@@ -64,12 +65,13 @@ const contribute = (pid, amount, date = '2026-08-05') =>
               VALUES (?,?,?,?,?,0,?)`).run(`c${++seq}`, pid, C, amount, date, now());
 
 /** A played game, priced at the contract's pitch cost with the pot buying water. */
-function game(date, { pitch = 300, water = 15, waterPaidBy = 'self' } = {}) {
+function game(date, { pitch = 300, water = 15, waterPaidBy = 'self', hours = 1 } = {}) {
   const id = `g${++seq}`;
   db.prepare(`INSERT INTO gameweeks (id,contract_id,gw_number,contract_number,date,cost_per_gw,
-    num_players,teams_raw,captains_raw,score,comments,historical,game_cost,game_cost_paid_by,created_at)
-    VALUES (?,?,?,0,?,?,0,'','','','',0,?,?,?)`)
-    .run(id, C, ++seq, date, pitch, water, waterPaidBy, now());
+    num_players,teams_raw,captains_raw,score,comments,historical,game_cost,game_cost_paid_by,
+    hours,created_at)
+    VALUES (?,?,?,0,?,?,0,'','','','',0,?,?,?,?)`)
+    .run(id, C, ++seq, date, pitch, water, waterPaidBy, hours, now());
   return id;
 }
 const charge = (gid, pid, amount, { cash = 0, paid = 0, fromKitty = 0 } = {}) => {
@@ -115,14 +117,15 @@ test('a booking spreads its cost over the sessions it buys', () => {
     sessions_total: 8, amount_total: 2200,
   });
   assert.equal(vc.cost_per_session, 275, '2200 over 8 sessions');
-  assert.equal(vc.sessions_played, 2, 'only the two August games fall inside it');
-  assert.equal(vc.sessions_left, 6);
+  assert.equal(vc.games_played, 2, 'only the two August games fall inside it');
+  assert.equal(vc.hours_played, 2, 'both were ordinary one-hour nights');
+  assert.equal(vc.sessions_left, 6, 'eight hours bought, two used');
   assert.equal(vc.paid, 0);
   assert.equal(vc.outstanding, 2200);
   assert.equal(vc.prepaid, -550, 'two sessions used and nothing paid');
   assert.equal(vc.booked_per_session, 300, 'the games were booked at the contract rate');
   assert.equal(vc.variance_per_session, 25, 'booked 25 a night above what the venue charges');
-  assert.equal(vc.variance_total, 50);
+  assert.equal(vc.variance_total, 50, '600 booked against 550 of contract hours');
   financeRepo.removeVenueContract(vc.id);
 });
 
@@ -137,7 +140,7 @@ test('free nights are priced in, not priced out', () => {
   assert.equal(vc.sessions_covered, 23);
   assert.equal(vc.cost_per_session, 217.39, '5000 over 23 nights');
   assert.equal(vc.cost_per_paid_session, 250, 'what it would be without the free ones');
-  assert.equal(vc.sessions_left, 23 - vc.sessions_played, 'the free nights count as nights left');
+  assert.equal(vc.sessions_left, 23 - vc.hours_played, 'the free hours count as hours left');
 
   // And the P&L uses the real rate, not the paid-only one.
   const p = financeRepo.pnl(C);
@@ -161,6 +164,67 @@ test('no free nights is the same rule, not a different one', () => {
   /Free sessions must be a whole number/);
 });
 
+/** Remove a game and everything hanging off it, so the next test starts clean. */
+function dropGame(id) {
+  db.prepare('DELETE FROM charges WHERE gameweek_id = ?').run(id);
+  db.prepare('DELETE FROM kitty WHERE scope = ?').run(id);
+  db.prepare('DELETE FROM gameweeks WHERE id = ?').run(id);
+}
+
+test('a tournament night eats the hours it actually used', () => {
+  // Three teams, court held for two hours. It is one game and one row, but it
+  // takes two hours out of the bundle and costs two hours' worth.
+  const long = game('2026-09-14', { hours: 2 });
+  charge(long, ajay, 35);
+  gameweeksRepo.recomputeGameKitty(long);
+  const vc = financeRepo.createVenueContract({
+    contract_id: C, vendor: 'O365', start_date: '2026-08-01', end_date: '2026-12-31',
+    sessions_total: 20, free_sessions: 3, amount_total: 5000,
+  });
+  try {
+    assert.equal(vc.games_played, 4, 'four nights');
+    assert.equal(vc.hours_played, 5, 'but five hours — three ordinary and one double');
+    assert.equal(vc.has_long_games, true);
+    assert.equal(vc.sessions_left, 18, '23 bought less 5 used');
+    assert.equal(vc.consumed, round2(217.39 * 5));
+
+    const p = financeRepo.pnl(C);
+    assert.equal(p.games, 4);
+    assert.equal(p.hours, 5);
+    assert.deepEqual(p.long_games, [{ date: '2026-09-14', hours: 2 }]);
+    assert.equal(p.cost.pitch_contracted, round2(217.39 * 5),
+      'the long night is charged twice over, not once');
+    assert.equal(p.cost.pitch_booked, 1200, 'while the books still say four bookings at 300');
+    assert.equal(p.drift, 0, 'and the kitty, which follows the booked cost, is unmoved');
+  } finally {
+    financeRepo.removeVenueContract(vc.id);
+    dropGame(long);
+  }
+});
+
+test('a game with more than two teams out is flagged, never assumed', () => {
+  const big = game('2026-09-15');                 // recorded as one hour
+  for (let i = 0; i < 15; i++) charge(big, ajay, 35);
+  gameweeksRepo.recomputeGameKitty(big);
+  try {
+    const p = financeRepo.pnl(C);
+    assert.deepEqual(p.hours_to_check, [{ date: '2026-09-15', players: 15 }],
+      'fifteen out on a one-hour booking is worth asking about');
+    assert.equal(p.hours, 4, 'but nothing was changed — it still counts as one hour');
+
+    // Setting the duration is what makes it count, and it clears the flag.
+    gameweeksRepo.updateMetadata(big, { hours: 2 });
+    const after = financeRepo.pnl(C);
+    assert.deepEqual(after.hours_to_check, []);
+    assert.equal(after.hours, 5);
+    assert.throws(() => gameweeksRepo.updateMetadata(big, { hours: 0 }), /more than zero/);
+    assert.throws(() => gameweeksRepo.updateMetadata(big, { hours: -1 }), /more than zero/);
+    assert.equal(financeRepo.pnl(C).hours, 5, 'and a refused edit left it alone');
+  } finally {
+    dropGame(big);
+  }
+});
+
 test('an open-ended booking refuses to invent a per-session rate', () => {
   const vc = financeRepo.createVenueContract({
     contract_id: C, vendor: 'Koora', start_date: '2026-08-01',
@@ -170,7 +234,7 @@ test('an open-ended booking refuses to invent a per-session rate', () => {
   assert.equal(vc.prepaid, null, 'and there is nothing to compare payments against');
   assert.equal(vc.variance_total, null);
   assert.equal(vc.is_open_ended, true);
-  assert.equal(vc.sessions_played, 3, 'it still covers every game from its start');
+  assert.equal(vc.games_played, 3, 'it still covers every game from its start');
   financeRepo.removeVenueContract(vc.id);
 });
 
@@ -183,8 +247,8 @@ test('payments accumulate, and removing the booking takes them with it', () => {
   vc = financeRepo.addPayment(vc.id, { amount: 750, date: '2026-09-01', method: 'bank' });
   assert.equal(vc.paid, 1750);
   assert.equal(vc.outstanding, 1000);
-  assert.equal(vc.sessions_played, 3);
-  assert.equal(vc.prepaid, 1750 - 825, 'three sessions at 275 played against 1750 paid');
+  assert.equal(vc.games_played, 3);
+  assert.equal(vc.prepaid, 1750 - 825, 'three hours at 275 played against 1750 paid');
 
   const payments = db.prepare('SELECT COUNT(*) n FROM venue_payments').get().n;
   assert.equal(payments, 2);

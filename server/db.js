@@ -902,6 +902,27 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_vc_contract ON venue_contracts(contract_id, start_date)');
       }
     },
+    // gameweeks: how long the pitch was booked for.
+    //
+    // A venue bundle is sold in HOURS — O365's is "20 + 3hrs free" — and an
+    // ordinary night is one of them. A tournament night is not: more than
+    // twelve turn up, they play three teams at 5- or 6-a-side, and the court is
+    // held for an hour and a half or two. That night eats two hours of the
+    // bundle while looking exactly like every other row, so counting games
+    // instead of hours would say twenty-three nights were bought when the pack
+    // is actually spent after twenty.
+    //
+    // Defaults to 1, which is what every game recorded so far was, so nothing
+    // that exists changes. Deliberately NOT derived from the headcount: a
+    // guessed duration is a guessed cost, and the club would find out about it
+    // in the P&L rather than being asked.
+    () => {
+      const cols = db.prepare('PRAGMA table_info(gameweeks)').all().map(c => c.name);
+      if (!cols.includes('hours')) {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN hours REAL NOT NULL DEFAULT 1');
+      }
+    },
+
     // venue_contracts: sessions thrown in free.
     //
     // O365 sells a bundle of "20 + 3hrs free": twenty-three nights for the price

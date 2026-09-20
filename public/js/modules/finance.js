@@ -102,6 +102,13 @@ function pnlCard(p) {
       (${signed(p.profit_per_game_contracted)} a game). The games have not been
       repriced; that would move money on nights already shared with the club.</p>` : ''}
 
+    ${p.hours_to_check.length ? `<p class="hint fin-drift">
+      ${p.hours_to_check.length} night${p.hours_to_check.length === 1 ? '' : 's'} had more than
+      two teams out but ${p.hours_to_check.length === 1 ? 'is' : 'are'} recorded as one hour
+      — ${p.hours_to_check.map(h => `${fmtDate(h.date)} (${h.players})`).join(', ')}.
+      If the court was held longer, set it on the game and this cost follows. Nothing has
+      been assumed.</p>` : ''}
+
     ${p.cost.sessions_priced_from_a_contract === 0 ? `<p class="hint fin-note">
       No venue booking is wired to this contract yet, so the pitch above is the
       ${money(p.games ? p.cost.pitch_booked / p.games : 0)} a night set on Settings rather
@@ -142,29 +149,32 @@ function venueRow(v) {
     </div>
     <div class="fin-venue-grid">
       <div><span class="k">Signed for</span><span class="v">${money(v.amount_total)}</span></div>
-      <div><span class="k">Nights bought</span><span class="v">${
+      <div><span class="k">Hours bought</span><span class="v">${
   v.sessions_covered === null ? '<span class="hint">open</span>'
     : v.free_sessions
       ? `${v.sessions_covered} <span class="hint">(${v.sessions_total} + ${v.free_sessions} free)</span>`
       : v.sessions_covered}</span></div>
-      <div><span class="k">A night costs</span><span class="v">${
+      <div><span class="k">An hour costs</span><span class="v">${
   per === null ? '<span class="hint">not fixed</span>'
     : v.free_sessions
       ? `${money(per)} <span class="hint">(${money(v.cost_per_paid_session)} without the free ones)</span>`
       : money(per)}</span></div>
-      <div><span class="k">Played so far</span><span class="v">${v.sessions_played}${
-  v.sessions_covered === null ? '' : ` of ${v.sessions_covered}`}</span></div>
+      <div><span class="k">Used so far</span><span class="v">${v.hours_played}${
+  v.sessions_covered === null ? '' : ` of ${v.sessions_covered}`}${
+  v.has_long_games
+    ? ` <span class="hint">(${v.games_played} games, some over an hour)</span>`
+    : ` <span class="hint">hrs · ${v.games_played} games</span>`}</span></div>
       <div><span class="k">Paid</span><span class="v">${money(v.paid)}${
   v.outstanding > 0.01 ? ` <span class="hint">(${money(v.outstanding)} still to pay)</span>` : ''}</span></div>
       <div><span class="k">${prepaid === null ? 'Paid vs played' : prepaid >= 0
     ? 'Paid ahead' : 'Behind'}</span><span class="v ${cls(prepaid)}">${
   prepaid === null ? '<span class="hint">—</span>' : money(Math.abs(prepaid))}</span></div>
     </div>
-    ${v.variance_per_session !== null && Math.abs(v.variance_per_session) >= 0.01
+    ${v.variance_total !== null && Math.abs(v.variance_total) >= 0.01
     ? `<p class="hint fin-note">The games are booked at ${money(v.booked_per_session)} each and
-        this contract charges ${money(per)} — ${v.variance_per_session > 0 ? 'the pot is keeping'
+        this contract charges ${money(per)} an hour — ${v.variance_total > 0 ? 'the pot is keeping'
     : 'the club is short by'} ${money(Math.abs(v.variance_total))} over the
-        ${v.sessions_played} game${v.sessions_played === 1 ? '' : 's'} played so far.
+        ${v.games_played} game${v.games_played === 1 ? '' : 's'} played so far.
         Change the cost per game on Settings if you want the books to follow the contract.</p>`
     : ''}
     ${v.notes ? `<p class="hint fin-note">${esc(v.notes)}</p>` : ''}

@@ -629,7 +629,30 @@ function showRateWarning(meta, total) {
 const payerName = (id) =>
   store.players?.find(p => p.id === id)?.name || 'whoever bought it';
 
+/**
+ * Nudge when the squad looks bigger than an hour's worth of football.
+ *
+ * Twelve is two teams and an hour. Fifteen or eighteen is three teams, which
+ * holds the court for an hour and a half or two — and that night eats two hours
+ * of the venue bundle while looking on every screen exactly like the one
+ * before. Nothing is changed automatically: the duration decides the cost, and
+ * a guessed duration is a guessed cost. It just asks.
+ */
+function showHoursNote() {
+  const note = document.querySelector('[data-gd-hoursnote]');
+  if (!note) return;
+  const hours = Number($('gdHours')?.value) || 1;
+  const n = rows.length;
+  note.innerHTML = n > 12 && hours === 1
+    ? `<strong>${n} players</strong> is more than two teams — was the court held
+       longer than an hour? The venue bundle is bought by the hour.`
+    : hours > 1
+      ? `This night uses ${hours} hours of the venue bundle, not one.`
+      : '';
+}
+
 function recomputeKitty() {
+  showHoursNote();
   const el = $('gdKittyEarned');
   if (!el) return;
   if (el.dataset.override === '1') return;      // user typed their own figure
@@ -793,6 +816,8 @@ async function doConfirm() {
     whatsapp_message: $('gdGameMessage').value.trim(),
     game_cost: Number($('gdGameCost').value) || 0,
     game_cost_paid_by: $('gdCostPaidBy').value || 'self',
+    // How long the court was held, which is what the venue bundle is sold in.
+    hours: Number($('gdHours')?.value) || 1,
     kitty_earned: Number($('gdKittyEarned').value) || 0,
     // Only a figure typed over the calculated one travels as an override. Left
     // alone, the server derives the kitty from the charges itself, so there is
@@ -871,6 +896,8 @@ function clearForm() {
   $('gdKittyEarned').value = '';
   $('gdCostPaidBy').value = 'self';
   $('gdGameCost').value = '15'; // Reset to default water cost
+  if ($('gdHours')) $('gdHours').value = '1';
+  showHoursNote();
   $('gdPreviewCard').hidden = true;
   // Release the date so the next fixture can prefill it again, and re-read the
   // schedule — the game just entered is no longer outstanding.
@@ -907,6 +934,7 @@ export function initGameday() {
   // Who bought the water decides whether its cost comes off the pot or is owed
   // back to a player, so the figure has to move when the payer does.
   $('gdCostPaidBy')?.addEventListener('change', () => recomputeKitty());
+  $('gdHours')?.addEventListener('change', showHoursNote);
 
   $('gdScore').addEventListener('input', showScoreNote);
   // A date the user set themselves must not be overwritten by the next fixture.

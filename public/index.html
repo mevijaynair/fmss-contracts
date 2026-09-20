@@ -173,6 +173,18 @@
                 <div class="form-group"><label>Paid by</label>
                   <select id="gdCostPaidBy"><option value="self">Me (Vijay)</option></select></div>
               </div>
+              <!-- How long the court was held. An ordinary two-team night is an
+                   hour; three teams is an hour and a half or two, and that night
+                   eats two hours of the venue bundle while looking like every
+                   other row. Nothing guesses it from the headcount, because a
+                   guessed duration is a guessed cost. -->
+              <div class="form-group mt"><label for="gdHours">Court booked for</label>
+                <select id="gdHours">
+                  <option value="1">1 hour — the usual, two teams</option>
+                  <option value="1.5">1½ hours — three teams</option>
+                  <option value="2">2 hours — three teams / tournament</option>
+                </select>
+                <p class="hint" data-gd-hoursnote style="margin:0.3rem 0 0"></p></div>
               <p class="hint" data-gd-kittynote style="margin:0.8rem 0 0"></p>
 
             <details class="gd-more">
@@ -590,6 +602,16 @@
           </div>
           <div class="form-group"><label>Tournament Name (if applicable)</label>
             <input type="text" id="egTournamentName" placeholder="e.g. Ramadan Cup">
+          </div>
+          <!-- How long the court was held. The venue bundle is bought by the
+               hour, so a three-team night at 1½ or 2 hours costs that much
+               more against it even though it is one row here. -->
+          <div class="form-group"><label>Court booked for</label>
+            <select id="egHours">
+              <option value="1">1 hour</option>
+              <option value="1.5">1½ hours</option>
+              <option value="2">2 hours</option>
+            </select>
           </div>
         </div>
         <div class="form-row mt">
