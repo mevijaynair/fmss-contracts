@@ -1,7 +1,7 @@
 {
   "name": "fmss",
   "version": "1.0.0",
-  "description": "FMSS Football Club — contract fee management (WhatsApp-driven cost tracking).",
+  "description": "FMSS Football Club \u2014 contract fee management (WhatsApp-driven cost tracking).",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
@@ -15,10 +15,11 @@
     "test:scores": "node scripts/test-scores.js",
     "test:backup": "node scripts/test-backup.js",
     "fuzz": "node scripts/fuzz-ledger.js",
-    "test": "npm run check:ui && npm run test:deps && npm run test:scores && npm run test:ledger && npm run test:backup && npm run fuzz",
+    "test": "npm run check:ui && npm run test:deps && npm run test:scores && npm run test:auth && npm run test:ledger && npm run test:backup && npm run fuzz",
     "audit": "node scripts/audit.js",
     "verify": "node scripts/verify-balances.js",
-    "verify:lock": "node scripts/verify-balances.js --lock"
+    "verify:lock": "node scripts/verify-balances.js --lock",
+    "test:auth": "node scripts/test-auth.js"
   },
   "engines": {
     "node": ">=22.5.0"

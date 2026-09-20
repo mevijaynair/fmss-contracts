@@ -114,9 +114,11 @@ export const authUsersRepo = {
   createPlayerLogin(db, playersRepo, playerId) {
     const player = playersRepo.get(playerId);
     if (!player) throw new Error(`Player ${playerId} not found`);
-    if (player.special_role === 'cashier') {
-      throw new Error('Cashier logs in as admin — no player login needed');
-    }
+    // The cashier used to be refused a login here on the grounds that they log
+    // in as admin instead. They are a player too — they turn out, they hold a
+    // balance, and they vote — so the one was made by hand anyway. Now that
+    // signing in under their own name grants the admin side (see loginPlayer),
+    // refusing to create that login is refusing them the app.
     if (this.getPlayerLogin(db, playerId)) {
       throw new Error(`${player.name} already has a login`);
     }
@@ -134,12 +136,12 @@ export const authUsersRepo = {
     return { player_id: playerId, name: player.name, pin };
   },
 
-  // One-click: generate logins for every non-cashier player without one.
+  // One-click: generate logins for every player without one, the cashier
+  // included — see createPlayerLogin for why they are no longer skipped.
   generateAllPlayerLogins(db, playersRepo) {
     const players = playersRepo.all();
     const created = [];
     for (const p of players) {
-      if (p.special_role === 'cashier') continue;
       if (this.getPlayerLogin(db, p.id)) continue;
 
       const pin = generatePin();

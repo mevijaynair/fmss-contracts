@@ -43,14 +43,35 @@ export const auth = {
     // reached the browser — which is why nothing was built to act on it and why
     // all 54 production logins still sit at requires_pin_change = 1, on the PIN
     // they were handed.
+    // The cashier runs the club's money. Signing in under their own name used
+    // to drop them into the read-only player view — one ledger and nothing
+    // else — which looks exactly like an app with no data in it, and is the
+    // reason this was reported as the site being empty.
+    //
+    // Gated on having replaced the issued PIN. Club PINs are handed out over
+    // WhatsApp and are known to whoever passed them on, so one must never be
+    // enough to unlock the admin side; resetting the cashier's PIN closes this
+    // again until they choose a new one. It stays a weaker key than the admin
+    // password either way, which is why it is granted to this one role and not
+    // to a general "is this person staff" flag.
+    const person = db.prepare('SELECT special_role FROM players WHERE id = ?').get(user.player_id);
+    const elevated = person?.special_role === 'cashier' && requires_change !== true;
+
     const payload = {
       userId: user.id,
-      role: 'player',
+      // Their own player id travels either way, so "my ledger", "my
+      // contributions" and their own snapshot keep working when elevated.
+      role: elevated ? 'admin' : 'player',
+      ...(elevated ? { adminMode: true } : {}),
       playerId: user.player_id,
       requiresPinChange: requires_change === true,
     };
     const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
-    return { token, expiresIn: TOKEN_EXPIRY, requiresPinChange: requires_change === true };
+    return {
+      token, expiresIn: TOKEN_EXPIRY,
+      requiresPinChange: requires_change === true,
+      role: payload.role,
+    };
   },
 
   // Admin login: password-only
