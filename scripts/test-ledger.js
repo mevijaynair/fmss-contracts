@@ -1473,6 +1473,26 @@ test('splitting one record into two moves games without moving money', () => {
     'the two are now distinguishable in a team sheet');
 });
 
+test('two players can be added to a game back to back', () => {
+  // Same millisecond-as-a-key fault the audit rows had. Adding two people to
+  // a game is well inside one millisecond, and the second insert would die on
+  // a UNIQUE violation. Clock frozen so the collision is certain rather than
+  // a race the test might win.
+  const g = game();
+  const a = player('Added one', 100);
+  const b = player('Added two', 100);
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_001;
+  try {
+    gameweeksRepo.addCharge(g, { player_id: a, amount: 30 });
+    gameweeksRepo.addCharge(g, { player_id: b, amount: 30 });
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(balanceOf(a), 70);
+  assert.equal(balanceOf(b), 70);
+});
+
 test('the second person can be a guest, which is the usual reason there are two', () => {
   // The club's second Rohit is a walk-up who pays cash and happens to share a
   // name with a member. Without saying so in the split, it produced another

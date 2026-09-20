@@ -468,8 +468,11 @@ export const gameweeksRepo = {
     if (settlerType !== 'outside') ledgersRepo.ensure(player_id, gw.contract_id);
     db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount)
                 VALUES (?,?,?,?,?,?,?)`)
-      .run(`c_add_${Date.now()}`, gameweekId, player_id, team,
-        is_captain ? 1 : 0, rate_type, amt);
+      // A millisecond is not unique enough to be a primary key — the same
+      // fault audit.js, movements.js and contributions.js each carried. Adding
+      // two players to a game back to back is well inside one.
+      .run(`c_add_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+        gameweekId, player_id, team, is_captain ? 1 : 0, rate_type, amt);
     db.prepare('UPDATE gameweeks SET num_players = ? WHERE id = ?')
       .run(this.chargeCount(gameweekId), gameweekId);
     recomputeGameKitty(gameweekId);
