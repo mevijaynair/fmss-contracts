@@ -1104,6 +1104,15 @@ test('funding from another contract is not turned into a cash debt', () => {
 test('paying from another pot is priced at the out-of-contract rate', () => {
   // The contract rates are what prepaying into THIS contract buys. Somebody
   // dipping in from elsewhere has not, so they pay what a guest pays.
+  //
+  // Reviewed and kept on 2026-09-20, against two alternatives: the contract
+  // rate for any member, and the contract rate when the game takes them less
+  // than 25 below zero. The club chose to keep the premium. It is 8 a game —
+  // five cross-dips have ever happened, so 40 across the season — and the
+  // reasoning that won is that the Saturday regulars should not subsidise
+  // somebody who has never paid into Saturdays. Recorded because this is now
+  // a decision rather than an inherited default, and the next person to think
+  // it looks harsh should know it was already argued.
   db.prepare(`UPDATE contracts SET rates = '{"contracted_10":30,"contracted_12":27,
     "captain_10":25,"captain_12":20,"noncontract":35}' WHERE id = ?`).run(CONTRACT);
   const g = game();
