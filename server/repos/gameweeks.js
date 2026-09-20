@@ -833,15 +833,32 @@ export const gameweeksRepo = {
     // How long the court was held. Its own branch because it is a number with a
     // floor, not a string: a night cannot last no time at all, and a 0 would
     // silently make a game free against the venue bundle.
+    //
+    // The pitch cost follows it, in PROPORTION rather than recomputed from the
+    // contract's rate card. A game whose cost was corrected by hand — a night
+    // the venue charged differently — must keep that correction; rebuilding
+    // from the card would silently throw it away. Deciding a night ran to two
+    // hours therefore doubles what it cost, which is the truth and which does
+    // move the kitty for that game.
     if (fields.hours !== undefined) {
       const h = Number(fields.hours);
       if (!Number.isFinite(h) || h <= 0) throw new Error('Hours must be more than zero');
+      const before = db.prepare('SELECT COALESCE(hours,1) h, cost_per_gw c FROM gameweeks WHERE id = ?')
+        .get(id);
       sets.push('hours=?');
       values.push(Math.round(h * 100) / 100);
+      if (before && before.h > 0 && h !== before.h) {
+        sets.push('cost_per_gw=?');
+        values.push(Math.round((before.c / before.h) * h * 100) / 100);
+      }
     }
     if (sets.length) {
       db.prepare(`UPDATE gameweeks SET ${sets.join(', ')} WHERE id=?`).run(...values, id);
     }
+    // The pitch just moved, so the pot has to move with it. Leaving this out is
+    // how a figure written once drifts away from the charges it came from —
+    // the exact failure recomputeGameKitty exists to prevent.
+    if (fields.hours !== undefined) recomputeGameKitty(id);
     if (fields.score !== undefined) applyScore(id, fields.score);
     return this.get(id);
   },

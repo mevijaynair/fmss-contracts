@@ -117,6 +117,62 @@ test('an admin token and an elevated cashier token both verify as admin', () => 
   }
 });
 
+test('a failed admin login leaves a trace, a successful one does not cry wolf', () => {
+  const before = db.prepare(
+    "SELECT COUNT(*) n FROM audit_log WHERE action = 'admin_login_failed'").get().n;
+  assert.throws(() => auth.loginAdmin(db, 'wrong'), /Invalid password/);
+  const after = db.prepare(
+    "SELECT COUNT(*) n FROM audit_log WHERE action = 'admin_login_failed'").get().n;
+  assert.equal(after, before + 1, 'guessing at the master key must be recorded');
+  // And never the guess itself.
+  const row = db.prepare(
+    "SELECT details FROM audit_log WHERE action = 'admin_login_failed' ORDER BY created_at DESC LIMIT 1").get();
+  assert.equal(row.details, null, 'what was typed is never written down');
+
+  auth.loginAdmin(db, 'test-admin-password');
+  assert.equal(db.prepare(
+    "SELECT COUNT(*) n FROM audit_log WHERE action = 'admin_login_failed'").get().n, after,
+  'a correct password writes no failure');
+});
+
+test('the signing key and the admin password are separate things', async () => {
+  // Setting one must not be the same act as setting the other: rotating a
+  // password that is also the signing key signs every player out at once,
+  // which is a reason not to rotate it.
+  const { token } = auth.loginAdmin(db, 'test-admin-password');
+  assert.equal(auth.verify(`Bearer ${token}`).role, 'admin');
+
+  process.env.FMSS_JWT_SECRET = 'a-different-signing-key';
+  assert.throws(() => auth.verify(`Bearer ${token}`), /Invalid or expired/,
+    'a token signed with the old key no longer verifies under a new one');
+  // The password is unchanged, so signing in still works and issues a token
+  // under the new key.
+  const fresh = auth.loginAdmin(db, 'test-admin-password');
+  assert.equal(auth.verify(`Bearer ${fresh.token}`).role, 'admin');
+  delete process.env.FMSS_JWT_SECRET;
+});
+
+test('a new address is noticed, but only after the first one', async () => {
+  const { noteLogin } = await import('../server/devices.js');
+  const uid = db.prepare('SELECT id FROM auth_users WHERE player_id = ?')
+    .get(member('Travels a lot')).id;
+
+  assert.equal(noteLogin(db, uid, '10.0.0.1').isNew, false, 'nothing to compare it to yet');
+  assert.equal(noteLogin(db, uid, '10.0.0.1').isNew, false, 'the same place again is not news');
+  assert.equal(noteLogin(db, uid, '10.0.0.2').isNew, true, 'somewhere else is');
+  assert.equal(noteLogin(db, uid, '10.0.0.2').isNew, false, 'and then it is known too');
+
+  // The address itself is never stored.
+  const rows = db.prepare('SELECT ip_hash FROM login_devices WHERE user_id = ?').all(uid);
+  assert.equal(rows.length, 2);
+  for (const r of rows) {
+    assert.ok(!/10\.0\.0\./.test(r.ip_hash), 'an address in the clear is a thing that can leak');
+    assert.match(r.ip_hash, /^[0-9a-f]{32}$/);
+  }
+  // And it never takes a sign-in down with it.
+  assert.deepEqual(noteLogin(db, null, '10.0.0.3'), { isNew: false, seen: 0 });
+});
+
 process.on('exit', () => {
   try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ }
 });

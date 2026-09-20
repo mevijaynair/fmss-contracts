@@ -217,6 +217,12 @@ test('a game with more than two teams out is flagged, never assumed', () => {
     const after = financeRepo.pnl(C);
     assert.deepEqual(after.hours_to_check, []);
     assert.equal(after.hours, 5);
+    // And the books follow: two hours of court is two hours of pitch, and the
+    // pot for that night moves with it rather than being left behind.
+    assert.equal(db.prepare('SELECT cost_per_gw c FROM gameweeks WHERE id = ?').get(big).c, 600,
+      'the pitch doubled with the duration');
+    assert.equal(after.cost.pitch_booked, 1500, 'three at 300 plus one at 600');
+    assert.equal(after.drift, 0, 'and the kitty was recomputed, not left stale');
     assert.throws(() => gameweeksRepo.updateMetadata(big, { hours: 0 }), /more than zero/);
     assert.throws(() => gameweeksRepo.updateMetadata(big, { hours: -1 }), /more than zero/);
     assert.equal(financeRepo.pnl(C).hours, 5, 'and a refused edit left it alone');

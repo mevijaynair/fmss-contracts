@@ -675,7 +675,9 @@ function recomputeKitty() {
   const pending = sum(fates.filter(f => f.s.cash && !f.s.collected));
 
   const c = store.contracts.find(x => x.id === contractId);
-  const pitch = Number(c?.cost_per_gw) || 0;
+  // Same scaling the save uses, so the profit shown on screen is the profit
+  // that gets committed.
+  const pitch = (Number(c?.cost_per_gw) || 0) * (Number($('gdHours')?.value) || 1);
   // Only water the club itself bought comes off the pot. When a player buys it
   // they are credited for it instead, so the cash never left the kitty — this
   // subtracted it either way, which charged the club twice and made the figure
@@ -801,7 +803,12 @@ async function doConfirm() {
     contract_id: contractId,
     date: $('gdDate').value || today(),
     contract_number: Number($('gdContractNo').value) || 0,
-    cost_per_gw: store.contracts.find(c => c.id === contractId)?.cost_per_gw || 0,
+    // The pitch scales with how long it was held. A two-hour night genuinely
+    // costs the club two hours of court; booking it at the flat per-game figure
+    // understated the cost by about 160 and made the pot look that much richer
+    // on exactly the nights it was not.
+    cost_per_gw: (store.contracts.find(c => c.id === contractId)?.cost_per_gw || 0)
+      * (Number($('gdHours')?.value) || 1),
     teams_raw: $('gdText').value.trim(),
     // A readable result built from the one score box, rather than asking for the
     // same thing again in words.
@@ -934,7 +941,8 @@ export function initGameday() {
   // Who bought the water decides whether its cost comes off the pot or is owed
   // back to a player, so the figure has to move when the payer does.
   $('gdCostPaidBy')?.addEventListener('change', () => recomputeKitty());
-  $('gdHours')?.addEventListener('change', showHoursNote);
+  // The duration drives the pitch cost now, so it drives the profit too.
+  $('gdHours')?.addEventListener('change', () => recomputeKitty());
 
   $('gdScore').addEventListener('input', showScoreNote);
   // A date the user set themselves must not be overwritten by the next fixture.

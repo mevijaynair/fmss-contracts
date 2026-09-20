@@ -1414,3 +1414,89 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .rep-owe strong { color: var(--text-main); }
 .rep-clear { margin: 0 0 1rem; }
 @media (max-width: 620px) { .rep-collect-k { flex-basis: 100%; } }
+
+/* --- Identity strip: who you are, and the way out ------------------------
+   In the topbar because it is on every screen. There was no sign-out control
+   anywhere in the app, and a token lasts a week — so anyone who signed in on a
+   borrowed phone stayed signed in on it. */
+.whoami { font-size: 0.82rem; color: var(--text-muted); font-weight: 600;
+  max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.is-view-as .topbar { box-shadow: inset 0 -2px 0 var(--warning); }
+body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--text-main)); }
+@media (max-width: 640px) { .whoami { display: none; } }
+
+/* The one security question worth asking at sign-in. Unticked by default:
+   nearly everyone is on their own phone, and making the common case tick a box
+   to stay signed in is friction that buys nothing. */
+.login-shared { display: flex; gap: 0.55rem; align-items: flex-start;
+  margin: 0 0 1rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.45;
+  cursor: pointer; }
+.login-shared input { margin-top: 0.15rem; flex: 0 0 auto; }
+.login-notice { margin-top: 0.8rem; padding: 0.6rem 0.75rem; border-radius: 10px;
+  font-size: 0.78rem; line-height: 1.45;
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-card));
+  color: color-mix(in srgb, var(--warning) 72%, var(--text-main));
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border-color)); }
+
+/* --- The player's own header --------------------------------------------
+   Their page used to open with four grey tiles and nothing saying whose page
+   it was. A name and a badge cost one strip of screen and are the difference
+   between a report and somewhere you belong. */
+.dash-hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem;
+  padding: 1.1rem 1.25rem; border-radius: var(--radius); background: var(--bg-card);
+  border: 1px solid var(--border-color); border-left: 3px solid var(--sport);
+  box-shadow: var(--shadow-sm); }
+.hero-badge { flex: 0 0 auto; width: 3.1rem; height: 3.1rem; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 800; font-size: 1.1rem;
+  letter-spacing: 0.02em; background: var(--sport-grad);
+  color: #fff; /* ui-tokens-allow — on the sport gradient, as every other badge in here */ }
+.hero-text { min-width: 0; }
+.hero-hi { font-size: 0.78rem; color: var(--text-faint); }
+.hero-name { margin: 0.1rem 0 0.25rem; font-size: 1.45rem; font-weight: 800;
+  color: var(--text-main); line-height: 1.1; }
+.hero-sub { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: 0.8rem;
+  color: var(--text-muted); }
+@media (max-width: 480px) {
+  .hero-badge { width: 2.6rem; height: 2.6rem; font-size: 0.95rem; }
+  .hero-name { font-size: 1.2rem; }
+}
+
+/* --- "Needs you": what to do, before what the numbers are --------------- */
+.dash-actions { margin-bottom: 1.2rem; }
+.dash-actions .panel-row { align-items: center; }
+.dash-clear { margin: 0 0 1.2rem; }
+
+/* --- A player's recent matches ------------------------------------------ */
+.game-row { display: grid; gap: 0.2rem 0.9rem; padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border-color); align-items: center;
+  grid-template-columns: 1fr auto; }
+.game-row:last-child { border-bottom: none; }
+.game-when { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap;
+  font-size: 0.85rem; }
+.game-what { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap;
+  font-size: 0.82rem; grid-column: 1 / -1; }
+.game-score { font-weight: 600; color: var(--text-main); }
+.game-cost { font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text-muted); font-size: 0.85rem; }
+.game-report { grid-column: 2; justify-self: end; font-size: 0.78rem; }
+.game-badge { font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.04em; padding: 0.12rem 0.45rem; border-radius: 6px;
+  background: var(--bg-subtle); color: var(--text-faint); }
+.game-badge.is-won { background: color-mix(in srgb, var(--success) 18%, var(--bg-card));
+  color: color-mix(in srgb, var(--success) 78%, var(--text-main)); }
+.game-badge.is-lost { background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); }
+.game-badge.is-drawn { background: color-mix(in srgb, var(--warning) 16%, var(--bg-card));
+  color: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
+@media (min-width: 720px) {
+  .game-row { grid-template-columns: 11rem minmax(0, 1fr) 5rem auto; }
+  .game-what { grid-column: auto; }
+  .game-report { grid-column: auto; }
+}
+
+/* --- A player's record, as a strip rather than a table ------------------ */
+.rec-strip { display: flex; flex-wrap: wrap; gap: 0.6rem 1.6rem; }
+.rec-item { display: flex; flex-direction: column; font-size: 0.75rem;
+  color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
+.rec-item strong { font-size: 1.35rem; font-weight: 800; color: var(--text-main);
+  text-transform: none; letter-spacing: 0; }

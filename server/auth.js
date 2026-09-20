@@ -7,8 +7,24 @@ import jwt from 'jsonwebtoken';
 
 const TOKEN_EXPIRY = '7d';
 
-// Get SECRET dynamically so it reads the current env (loaded by index.js)
+// Two different secrets that used to be one.
+//
+// FMSS_AUTH_PASSWORD is a password a person types. FMSS_JWT_SECRET is the key
+// every token is signed with. Using the password for both means changing the
+// password — the ordinary, healthy thing to do with a password, and the first
+// thing anybody would do if they thought it had leaked — silently invalidates
+// every token in existence and signs all sixty players out at once. That is a
+// good reason not to change it, which is the opposite of what a password
+// wants.
+//
+// Falls back to the password when no separate secret is set, so nothing
+// breaks on an install that has not been given one; setting FMSS_JWT_SECRET
+// signs everybody out once and then the two are independent for good.
 function getSecret() {
+  return process.env.FMSS_JWT_SECRET || process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
+}
+
+function getAdminPassword() {
   return process.env.FMSS_AUTH_PASSWORD || 'change-me-in-env';
 }
 
@@ -87,12 +103,25 @@ export const auth = {
       token, expiresIn: TOKEN_EXPIRY,
       requiresPinChange: requires_change === true,
       role: payload.role,
+      userId: user.id,
     };
   },
 
   // Admin login: password-only
   loginAdmin(db, password) {
-    if (password !== getSecret()) {
+    if (password !== getAdminPassword()) {
+      // Recorded, because until now a failed admin login left no trace
+      // anywhere: a player's failures are counted on their row, and the
+      // master key's were not counted at all. Somebody working through
+      // guesses at the one password that opens everything is precisely what
+      // there should be a record of. The attempt is logged; what was typed
+      // never is.
+      try {
+        db.prepare(`INSERT INTO audit_log (id, user_id, action, details, created_at)
+                    VALUES (?, 'admin', 'admin_login_failed', NULL, ?)`)
+          .run(`al_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+            new Date().toISOString());
+      } catch { /* a login must not fail because its audit row did */ }
       throw new Error('Invalid password');
     }
     // Carry the shared admin's id so req.user.id is a real auth_users row.
@@ -107,7 +136,7 @@ export const auth = {
       adminMode: true,
     };
     const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
-    return { token, expiresIn: TOKEN_EXPIRY };
+    return { token, expiresIn: TOKEN_EXPIRY, userId: admin?.id ?? null };
   },
 
   // Verify a token from the Authorization header and return the decoded payload.

@@ -41,6 +41,7 @@ export async function loadSettings() {
   if (isPlayer()) return loadAccount();
 
   renderBackupPanel();
+  wireClubContact();
   store.contracts = await api.contracts();
   $('settingsCards').innerHTML = store.contracts.map(card).join('');
   $('settingsCards').querySelectorAll('[data-save]').forEach(btn =>
@@ -57,6 +58,27 @@ export async function loadSettings() {
         toast('Contract saved ✓');
       } catch (e) { toast(e.message, true); }
     }));
+}
+
+/**
+ * The number a player is pointed at when a result is wrong.
+ *
+ * Optional and blank by default: the app must not publish somebody's phone
+ * number because it guessed one. Without it, the report screen offers to copy
+ * the message instead, which works everywhere.
+ */
+async function wireClubContact() {
+  const input = $('s_whatsapp');
+  const save = $('s_whatsapp_save');
+  if (!input || !save) return;
+  try { input.value = (await api.get('/admin/club-contact')).whatsapp || ''; }
+  catch { /* leave it blank rather than block the rest of the screen */ }
+  save.onclick = async () => {
+    try {
+      await api.put('/admin/club-contact', { whatsapp: input.value });
+      toast(input.value.trim() ? 'Saved ✓' : 'Cleared');
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 // Player "Account" view: read-only profile (rate cards are not theirs to edit).

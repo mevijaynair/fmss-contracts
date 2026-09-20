@@ -25,6 +25,7 @@ import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { movementsRepo } from '../repos/movements.js';
 import { financeRepo } from '../repos/finance.js';
+import { issuesRepo } from '../repos/issues.js';
 import { parseTeams } from '../parser.js';
 import { parseResultsSheet, normaliseScore, winningTeam, isTournament } from '../results_import.js';
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
@@ -615,6 +616,71 @@ r.get('/my/stats', wrap((req) => {
   return { timeline, ...stats };
 }));
 
+/**
+ * A player's own recent games, with what actually happened in them.
+ *
+ * The player side could show a balance and a list of deductions and nothing
+ * about the football. "35 on 12 September" is a line on a bank statement; "12
+ * September, Red 8 Blue 6, you were on Red, you captained" is the thing they
+ * were actually there for — and it is also the only way anybody but the person
+ * entering the results is ever going to notice one is wrong.
+ *
+ * Their own games only: the id comes from the token, never from the query.
+ */
+r.get('/my/games', wrap((req) => {
+  if (!req.user.playerId) throw new Error('This is for a player account');
+  return statsRepo.playerGames(req.user.playerId, Number(req.query.limit) || 10);
+}));
+
+// ---- results: a player saying "that is not what happened" ----
+r.get('/my/issues', wrap((req) => {
+  if (!req.user.playerId) throw new Error('This is for a player account');
+  return { fields: issuesRepo.fields, reports: issuesRepo.list({ playerId: req.user.playerId }) };
+}));
+r.post('/my/issues', wrap((req) => {
+  if (!req.user.playerId) throw new Error('This is for a player account');
+  const { gameweek_id, field, should_be } = req.body || {};
+  // player_id comes from the token. Taking it from the body would let anybody
+  // file a complaint in somebody else's name.
+  return issuesRepo.create({ player_id: req.user.playerId, gameweek_id, field, should_be });
+}));
+
+// The number a player is offered when a result is wrong. Stored because the
+// app must not invent one, and read back so the Settings field shows what is
+// actually published.
+r.get('/admin/club-contact', wrap((req) => {
+  requireAdmin(req);
+  return { whatsapp: db.prepare("SELECT value FROM meta WHERE key = 'club_whatsapp'")
+    .get()?.value || '' };
+}));
+r.put('/admin/club-contact', wrap((req) => {
+  requireAdmin(req);
+  // Digits and a leading +, nothing else. It is put into a wa.me link, and a
+  // field that accepts anything is a field somebody eventually puts a URL in.
+  const raw = String(req.body?.whatsapp ?? '').trim();
+  if (raw && !/^\+?[0-9][0-9 ()-]{6,19}$/.test(raw)) {
+    throw new Error('That does not look like a phone number');
+  }
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('club_whatsapp', ?)").run(raw);
+  return { whatsapp: raw };
+}));
+
+r.get('/admin/issues', wrap((req) => {
+  requireAdmin(req);
+  return issuesRepo.list({ status: req.query.status || null });
+}));
+r.post('/admin/issues/:issueId/resolve', wrap((req) => {
+  requireAdmin(req);
+  const { status, resolution } = req.body || {};
+  return issuesRepo.resolve(req.params.issueId, {
+    status: status || 'resolved', resolution, by: req.user.id || 'admin',
+  });
+}));
+r.post('/admin/issues/:issueId/reopen', wrap((req) => {
+  requireAdmin(req);
+  return issuesRepo.reopen(req.params.issueId);
+}));
+
 // ---- admin: contribution approval queue ----
 r.get('/admin/contributions/pending', wrap((req) => {
   requireAdmin(req);
@@ -849,22 +915,57 @@ r.get('/audit/charges', wrap((req) => {
 
 // ---- dashboard summary ----
 r.get('/dashboard', wrap((req) => {
-  // Player dashboard: only their own balances across contracts.
+  // Player dashboard: only their own balances across contracts — plus enough
+  // about the football to make it a home page rather than a bank statement.
+  // Their name, how they have been playing, and whether they are covered for
+  // the next game, all of which the screen had to do without.
   if (req.user.role === 'player') {
     const myLedgers = ledgersRepo.forPlayer(req.user.playerId);
+    const me = playersRepo.get(req.user.playerId);
+    const rateOf = (id) => {
+      const c = contractsRepo.get(id);
+      const rates = c?.rates || {};
+      return Number(rates.contracted_10) || Number(rates.noncontract) || 0;
+    };
+    const rec = statsRepo.matchRecord(req.user.playerId);
+    const lastGame = statsRepo.playerGames(req.user.playerId, 1)[0] || null;
     return {
       role: 'player',
       player_id: req.user.playerId,
-      contracts: myLedgers.map(l => ({
-        id: l.contract_id,
-        name: store_contractName(l.contract_id),
-        opening_balance: l.opening_balance,
-        contributed: l.contributed,
-        charged: l.charged,
-        present_balance: l.present_balance,
-        games: l.games,
-        status: l.status,
-      })),
+      name: me?.name || req.user.playerId,
+      // Games with a result, so "3-1-2" is never quietly built out of games
+      // nobody scored.
+      record: { ...rec, decided: rec.wins + rec.draws + rec.losses },
+      last_game: lastGame ? { date: lastGame.date, contract_name: lastGame.contract_name,
+        score: lastGame.score, outcome: lastGame.outcome } : null,
+      // Cash they owe for games settled on the day, which is not a balance and
+      // must never be netted into one.
+      cash_owed: Math.round(myLedgers.reduce((s, l) => s + (l.cash_owed || 0), 0) * 100) / 100,
+      pending_contributions: pendingContributionsRepo.forPlayer(req.user.playerId)
+        .filter(p => p.status === 'pending').length,
+      // Where to send a message when a result is wrong. Only whatever the club
+      // has chosen to publish to its own members, and absent entirely until an
+      // admin sets it — the app does not invent somebody's phone number.
+      club_whatsapp: db.prepare("SELECT value FROM meta WHERE key = 'club_whatsapp'")
+        .get()?.value || null,
+      contracts: myLedgers.map((l) => {
+        const rate = rateOf(l.contract_id);
+        return {
+          id: l.contract_id,
+          name: store_contractName(l.contract_id),
+          opening_balance: l.opening_balance,
+          contributed: l.contributed,
+          charged: l.charged,
+          present_balance: l.present_balance,
+          games: l.games,
+          status: l.status,
+          rate,
+          // How many more games the balance covers — the question a player
+          // actually asks, which a figure in dirhams does not answer unless
+          // you happen to know the rate.
+          games_left: rate > 0 ? Math.floor(l.present_balance / rate) : null,
+        };
+      }),
     };
   }
 
@@ -949,6 +1050,10 @@ r.get('/dashboard', wrap((req) => {
       games: games.length,
       last_game: lastGame,
       games_30d: games.filter(g => String(g.date) >= cutoff).length,
+      // Games played but never scored. A gap the admin can close in a minute
+      // and which every statistic on the Results screen is quietly missing
+      // until they do.
+      missing_results: games.filter(g => !g.historical && !g.score && !g.scoreline).length,
       // Split so the UI can distinguish "already owes" from "about to run out".
       in_debt_count: inDebt.length,
       low_runway_count: lowRunway.length,
@@ -968,6 +1073,10 @@ r.get('/dashboard', wrap((req) => {
     players: playersRepo.all().length,
     kitty,
     pending_contributions: pendingContributionsRepo.pendingCount(),
+    // Players saying a stat is wrong. On the dashboard because it is a queue
+    // with people waiting at the end of it, and a queue nobody is shown is a
+    // queue nobody works.
+    open_issues: issuesRepo.openCount(),
     contracts: perContract,
     // Can the club honour what players have already paid in? Positive means the
     // pot covers the prepayments; negative means some of that money is spent.

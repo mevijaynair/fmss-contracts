@@ -1,9 +1,42 @@
-// dashboard.js — KPI strip, per-contract cards, refill watchlist.
-// Role-aware: admin sees club-wide aggregates; player sees only their balances.
+// dashboard.js — the first screen, for whoever is looking at it.
+//
+// A dashboard earns its place by answering "what do I need to do?" before it
+// answers "what are the numbers?". Both sides of this one used to open with
+// figures: the admin got four totals and a watchlist, the player got their
+// balance and nothing about the football they had actually turned up for.
+//
+// So each now leads with a short list of things that need doing — and only
+// things that do; an empty list says so and takes up one line — and the
+// standing figures follow underneath.
 import { api } from '../api.js';
 import { $, esc, money, balCell, fmtDate } from '../util.js';
+import { reportIssue, setClubContact, renderMyIssues } from './issues.js';
 
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+/**
+ * The "do something" block. Each item is a sentence naming the thing and, where
+ * there is one, a button that goes straight to it.
+ *
+ * Deliberately capped and ordered by urgency: a list of fifteen things is a
+ * list nobody reads, and the point is that what is on it is worth looking at.
+ */
+function actionBlock(items) {
+  const host = $('dashAction');
+  if (!host) return;
+  const live = items.filter(Boolean);
+  if (!live.length) {
+    host.innerHTML = '<p class="hint dash-clear">Nothing needs doing. ⚽</p>';
+    return;
+  }
+  host.innerHTML = `<div class="panel panel-warn dash-actions">
+    <div class="panel-title">Needs you</div>
+    ${live.slice(0, 6).map(i => `<div class="panel-row">
+      <span>${i.text}</span>
+      ${i.goto ? `<button class="btn btn-sm" data-goto="${esc(i.goto)}">${esc(i.label)}</button>` : ''}
+    </div>`).join('')}
+  </div>`;
+}
 
 export async function loadDashboard() {
   const d = await api.dashboard();
@@ -29,6 +62,42 @@ export async function loadDashboard() {
   ];
   $('kpiStrip').innerHTML = kpis.map(k =>
     `<div class="kpi ${k.cls || ''}"><div class="v">${k.v}</div><div class="l">${esc(k.l)}</div></div>`).join('');
+
+  // What the admin actually has to act on today, in front of the totals.
+  const gaps = d.contracts.filter(c => c.missing_results > 0);
+  const stalest = d.contracts
+    .map(c => ({ c, days: c.last_game ? Math.floor((Date.now() - new Date(c.last_game)) / 864e5) : null }))
+    .filter(x => x.days !== null && x.days > 21);
+  actionBlock([
+    d.pending_contributions > 0 && {
+      text: `<strong>${plural(d.pending_contributions, 'contribution')}</strong> waiting to be approved`,
+      goto: 'contributions', label: 'Review',
+    },
+    d.open_issues > 0 && {
+      text: `<strong>${plural(d.open_issues, 'player report')}</strong> about a result — somebody
+             says a stat is wrong`,
+      goto: 'gameweeks', label: 'See them',
+    },
+    gaps.length && {
+      text: `<strong>${gaps.reduce((s, c) => s + c.missing_results, 0)} games</strong> with no
+             result recorded (${gaps.map(c => esc(c.name)).join(', ')})`,
+      goto: 'gameweeks', label: 'Fill them in',
+    },
+    refills > 0 && {
+      text: `<strong>${plural(refills, 'player')}</strong> out of credit or nearly — the list is below`,
+      goto: 'players', label: 'Standing sheet',
+    },
+    (cash.cover ?? 0) < 0 && {
+      text: `The kitty is <strong>${money(-(cash.cover ?? 0))}</strong> short of what players
+             have prepaid`,
+      goto: 'finance', label: 'Cashier',
+    },
+    stalest.length && {
+      text: `No game recorded on <strong>${stalest.map(x => esc(x.c.name)).join(', ')}</strong>
+             for ${stalest[0].days} days`,
+      goto: 'gameday', label: 'Enter one',
+    },
+  ]);
 
   // Say plainly what the cash position means, rather than leaving a bare number.
   const shortfall = -(cash.cover ?? 0);
@@ -97,33 +166,190 @@ export async function loadDashboard() {
     : `<p class="hint">Everyone has credit for at least two more games. 🎉</p>${coverNote}`;
 }
 
-// Player dashboard: a personal balance snapshot per contract, no club aggregates.
+/**
+ * The player's dashboard.
+ *
+ * It used to be a balance and a list of deductions — a bank statement for
+ * something nobody joins a football club to do. What a player wants to know is
+ * whether they are covered for Thursday, how they have been playing, and what
+ * happened last time out. The money is still all there; it is just no longer
+ * the only thing there.
+ */
 function renderPlayerDashboard(d) {
+  renderHero(d);
+  setClubContact(d.club_whatsapp);
   const totalBalance = d.contracts.reduce((s, c) => s + (c.present_balance || 0), 0);
-  const inRed = d.contracts.filter(c => c.present_balance < 0).length;
+  const shortest = d.contracts
+    .filter(c => c.games_left !== null && c.games_left !== undefined)
+    .sort((a, b) => a.games_left - b.games_left)[0];
+  const rec = d.record || null;
 
   const kpis = [
-    { v: money(totalBalance), l: 'My balance (AED)', cls: totalBalance >= 0 ? 'good' : 'bad' },
-    { v: d.contracts.length, l: 'My contracts' },
-    { v: inRed, l: 'Need refill', cls: inRed ? 'warn' : 'good' },
-  ];
+    { v: money(totalBalance), l: 'Your balance (AED)', cls: totalBalance >= 0 ? 'good' : 'bad' },
+    shortest
+      ? {
+        v: Math.max(0, shortest.games_left),
+        l: `Games covered${d.contracts.length > 1 ? ` on ${shortest.name}` : ''}`,
+        cls: shortest.games_left < 1 ? 'bad' : shortest.games_left < 3 ? 'warn' : 'good',
+      }
+      : { v: d.contracts.length, l: 'Your contracts' },
+    { v: d.contracts.reduce((s, c) => s + (c.games || 0), 0), l: 'Games played' },
+    rec && rec.decided
+      ? { v: `${rec.wins}-${rec.draws}-${rec.losses}`, l: 'Won · drawn · lost' }
+      : null,
+  ].filter(Boolean);
   $('kpiStrip').innerHTML = kpis.map(k =>
     `<div class="kpi ${k.cls || ''}"><div class="v">${k.v}</div><div class="l">${esc(k.l)}</div></div>`).join('');
+
+  // What THEY have to do. Almost always nothing, and saying so is the point.
+  actionBlock([
+    ...d.contracts.filter(c => c.present_balance < 0).map(c => ({
+      text: `You are <strong>${money(-c.present_balance)}</strong> short on
+             ${esc(c.name)} — top up before the next game`,
+      goto: 'contributions', label: 'Pay in',
+    })),
+    ...d.contracts.filter(c => c.present_balance >= 0
+      && c.games_left !== null && c.games_left < 2).map(c => ({
+      text: `${esc(c.name)}: your balance covers
+             ${c.games_left === 0 ? 'no more games' : 'one more game'}`,
+      goto: 'contributions', label: 'Top up',
+    })),
+    d.cash_owed > 0 && {
+      text: `<strong>${money(d.cash_owed)}</strong> of cash to hand over for games you played`,
+    },
+    d.pending_contributions > 0 && {
+      text: `${plural(d.pending_contributions, 'payment')} you submitted is waiting for the
+             admin to confirm`,
+      goto: 'contributions', label: 'See it',
+    },
+  ]);
 
   $('contractCards').innerHTML = d.contracts.map(c => `
     <div class="sams-card">
       <div class="card-header"><h3 class="card-title">${esc(c.name)}</h3>
-        <span class="card-sub">${c.present_balance >= 0 ? 'In credit' : 'Refill needed'}</span></div>
+        <span class="card-sub">${c.present_balance < 0 ? 'Needs a top-up'
+    : c.games_left !== null ? `Covers ${plural(Math.max(0, c.games_left), 'more game')}`
+      : 'In credit'}</span></div>
       <div>
-        <div class="kv"><span class="k">Opening balance</span><span class="v">${money(c.opening_balance)}</span></div>
-        <div class="kv"><span class="k">Contributed</span><span class="v">${money(c.contributed)}</span></div>
-        <div class="kv"><span class="k">Charged (games)</span><span class="v">${money(c.charged)}</span></div>
+        <div class="kv"><span class="k">Balance now</span><span class="v">${balCell(c.present_balance)}</span></div>
+        <div class="kv"><span class="k">Paid in</span><span class="v">${money(c.contributed)}</span></div>
+        <div class="kv"><span class="k">Spent on games</span><span class="v">${money(c.charged)}</span></div>
         <div class="kv"><span class="k">Games played</span><span class="v">${c.games}</span></div>
-        <div class="kv"><span class="k">Present balance</span><span class="v">${balCell(c.present_balance)}</span></div>
+        ${c.rate ? `<div class="kv"><span class="k">A game costs</span><span class="v">${money(c.rate)}</span></div>` : ''}
+        <div class="kv"><span class="k">Started the season with</span><span class="v">${money(c.opening_balance)}</span></div>
       </div>
     </div>`).join('') || '<p class="hint">No contracts yet.</p>';
 
-  $('watchlist').innerHTML = totalBalance >= 0
-    ? '<p class="hint">You\'re in credit. ⚽</p>'
-    : '<p class="hint">Your balance is in the red — please top up via the Contributions tab.</p>';
+  renderMyGames();
+
+  const title = $('watchTitle');
+  const sub = $('watchSub');
+  if (title) title.textContent = 'How you are playing';
+  if (sub) sub.textContent = 'Your record since the club started tracking';
+  $('watchlist').innerHTML = rec && rec.games
+    ? `<div class="rec-strip">
+        ${[['Played', rec.games], ['Won', rec.wins], ['Drawn', rec.draws], ['Lost', rec.losses],
+    ['Captained', rec.captainGames]]
+    .map(([k, v]) => `<span class="rec-item"><strong>${v}</strong>${esc(k)}</span>`).join('')}
+      </div>
+      ${rec.unknown ? `<p class="hint">${plural(rec.unknown, 'game')} has no result recorded,
+        so it counts as neither.</p>` : ''}`
+    : '<p class="hint">No games recorded for you yet.</p>';
 }
+
+/** Initials, for the badge. Two at most — "AK", not "AKMN". */
+const initials = (name) => String(name || '?').trim().split(/\s+/)
+  .slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+/** Morning, afternoon or evening, from the reader's own clock. */
+function partOfDay() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
+/**
+ * The player's own header.
+ *
+ * Their page opened with four grey KPI tiles and no indication whose page it
+ * was. A name, what they are a member of, and when they last played costs one
+ * strip of screen and is the difference between a report and somewhere you
+ * belong.
+ */
+function renderHero(d) {
+  const host = $('dashHero');
+  if (!host) return;
+  const last = d.last_game;
+  const said = { won: 'you won', drawn: 'a draw', lost: 'you lost' }[last?.outcome];
+  const memberships = d.contracts.map(c => esc(c.name)).join(' · ');
+
+  host.innerHTML = `
+    <div class="dash-hero">
+      <span class="hero-badge" aria-hidden="true">${esc(initials(d.name))}</span>
+      <div class="hero-text">
+        <div class="hero-hi">${partOfDay()},</div>
+        <h2 class="hero-name">${esc(d.name || 'there')}</h2>
+        <div class="hero-sub">
+          ${memberships ? `<span>${memberships}</span>` : ''}
+          ${last ? `<span>Last out ${esc(fmtDate(last.date))}${last.score
+    ? ` — ${esc(last.score)}${said ? `, ${said}` : ''}` : ''}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
+ * The player's last few games, with a way to say one of them is wrong.
+ *
+ * The report button is the whole reason this is a list of matches rather than
+ * a list of deductions: the twelve who were there are the only people who can
+ * catch a mistyped score, and they have never had anywhere to say so.
+ */
+async function renderMyGames() {
+  const card = $('myGamesCard');
+  const host = $('myGames');
+  if (!card || !host) return;
+  card.hidden = false;
+  host.innerHTML = '<p class="hint">Loading…</p>';
+
+  let games = [];
+  let mine = { reports: [] };
+  try {
+    [games, mine] = await Promise.all([
+      api.get('/my/games?limit=8'),
+      api.get('/my/issues').catch(() => ({ reports: [] })),
+    ]);
+  } catch (e) {
+    host.innerHTML = `<p class="hint">${esc(e.message)}</p>`;
+    return;
+  }
+
+  if (!games.length) {
+    host.innerHTML = '<p class="hint">You have not been in a recorded game yet.</p>';
+    return;
+  }
+
+  const badge = { won: ['is-won', 'Won'], drawn: ['is-drawn', 'Drew'], lost: ['is-lost', 'Lost'] };
+  host.innerHTML = renderMyIssues(mine.reports) + games.map((g, i) => {
+    const [cls, word] = badge[g.outcome] || ['is-unknown', g.tournament ? 'Tournament' : 'No result'];
+    const capts = g.captains.map(c => `${esc(c.team)}: ${esc(c.name)}`).join(' · ');
+    return `<div class="game-row">
+      <div class="game-when">
+        <strong>${esc(fmtDate(g.date))}</strong>
+        <span class="hint">${esc(g.contract_name)}</span>
+      </div>
+      <div class="game-what">
+        <span class="game-badge ${cls}">${word}</span>
+        <span class="game-score">${g.score ? esc(g.score) : '<span class="hint">not recorded</span>'}</span>
+        <span class="hint">${g.my_team ? `you played for ${esc(g.my_team)}` : 'side not recorded'}${
+  g.was_captain ? ' · you captained' : ''}${capts ? ` · ${capts}` : ''}</span>
+      </div>
+      <div class="game-cost">${g.charged ? money(g.charged) : '<span class="hint">—</span>'}</div>
+      <button class="link-btn game-report" data-report="${i}">Something wrong?</button>
+    </div>`;
+  }).join('');
+
+  host.querySelectorAll('[data-report]').forEach(b =>
+    b.addEventListener('click', () => reportIssue(games[Number(b.dataset.report)])));
+}
+
+export { setClubContact };

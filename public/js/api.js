@@ -11,7 +11,10 @@ async function req(method, path, body) {
   // 401, and the handler below then cleared the token and reloaded. Opening
   // that screen logged you straight out, which is why it never worked.
   if (path !== '/login') {
-    const token = localStorage.getItem('fmss_token');
+    // sessionStorage first: signing in on a shared device keeps the token there
+    // instead, so closing the tab ends the session rather than leaving it
+    // sitting on somebody else's phone for a week.
+    const token = sessionStorage.getItem('fmss_token') || localStorage.getItem('fmss_token');
     if (token) {
       opts.headers['Authorization'] = `Bearer ${token}`;
     }
@@ -26,6 +29,7 @@ async function req(method, path, body) {
   // If 401, token expired — clear and reload to show login
   if (res.status === 401) {
     localStorage.removeItem('fmss_token');
+    sessionStorage.removeItem('fmss_token');
     window.location.reload();
     return;
   }

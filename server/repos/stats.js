@@ -4,6 +4,82 @@ import { normaliseScore, winningTeam, isTournament } from '../results_import.js'
 
 export const statsRepo = {
   /**
+   * A player's last few games, as football rather than as bookkeeping.
+   *
+   * The player side could show a balance and a list of deductions and nothing
+   * about the match. "−35 on 12 September" is a line on a bank statement; "12
+   * September, Red 8 Blue 6, you were on Red, you had the armband" is the
+   * thing they turned up for. It is also the only way anybody other than the
+   * person typing the results in is ever going to notice one is wrong, which
+   * is what the report button beside each of these is for.
+   *
+   * Resolves the outcome the same way matchRecord does — from the game_results
+   * row where there is one, from the text where there is not — because a
+   * player seeing "lost" here and a win on their record would be worse than
+   * showing neither.
+   */
+  playerGames(playerId, limit = 10) {
+    const rows = db.prepare(`
+      SELECT g.id, g.date, g.contract_id, c.name AS contract_name,
+             g.score, g.scoreline, g.game_type, g.hours,
+             ch.team, ch.is_captain, ch.amount, ch.rate_type
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      LEFT JOIN contracts c ON c.id = g.contract_id
+      WHERE COALESCE(ch.charged_to, ch.player_id) = ? OR ch.player_id = ?
+      ORDER BY g.date DESC, g.id DESC LIMIT ?`).all(playerId, playerId, limit);
+
+    const teamsOf = db.prepare(
+      "SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND team != ''");
+    const resultOf = db.prepare(`SELECT team_a_name, team_b_name, goals_team_a,
+      goals_team_b, result FROM game_results WHERE gameweek_id = ?`);
+    const captainsOf = db.prepare(`
+      SELECT ch.team, p.name FROM charges ch JOIN players p ON p.id = ch.player_id
+      WHERE ch.gameweek_id = ? AND ch.is_captain = 1`);
+
+    return rows.map((row) => {
+      const teams = teamsOf.all(row.id).map(t => t.team);
+      const tournament = isTournament(row.game_type, teams);
+      const gr = resultOf.get(row.id);
+      let outcome = null;          // 'won' | 'drawn' | 'lost' | null = not known
+      let line = row.score || '';
+
+      if (!tournament && row.team) {
+        if (gr) {
+          const winner = gr.result === 'draw' ? 'draw'
+            : (gr.result === 'a_wins' ? gr.team_a_name : gr.team_b_name);
+          outcome = winner === 'draw' ? 'drawn'
+            : (String(winner).toLowerCase() === String(row.team).toLowerCase() ? 'won' : 'lost');
+          line = line || `${gr.team_a_name} ${gr.goals_team_a} - ${gr.team_b_name} ${gr.goals_team_b}`;
+        } else {
+          const sc = normaliseScore(row.score || row.scoreline || '');
+          const w = sc && winningTeam(sc, teams);
+          if (w === 'draw') outcome = 'drawn';
+          else if (w) {
+            outcome = String(w).toLowerCase() === String(row.team).toLowerCase() ? 'won' : 'lost';
+          }
+        }
+      }
+
+      return {
+        gameweek_id: row.id,
+        date: row.date,
+        contract_id: row.contract_id,
+        contract_name: row.contract_name || row.contract_id,
+        score: line,
+        outcome,
+        tournament,
+        my_team: row.team || null,
+        was_captain: !!row.is_captain,
+        captains: captainsOf.all(row.id).map(r => ({ team: r.team, name: r.name })),
+        charged: Math.round((Number(row.amount) || 0) * 100) / 100,
+        rate_type: row.rate_type || '',
+        hours: Number(row.hours) || 1,
+      };
+    });
+  },
+
+  /**
    * A player's match record: won/drawn/lost, goals and captaincy.
    *
    * Shares normaliseScore/winningTeam with the Results view on purpose. The

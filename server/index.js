@@ -34,7 +34,8 @@ import express from 'express';
 import { initSchema, seed, applyRoles, db } from './db.js';
 import { auth, authMiddleware } from './auth.js';
 import { authUsersRepo } from './repos/auth_users.js';
-import { checkLoginAllowed, recordLoginFailure, clearLoginFailures } from './rate-limit.js';
+import { checkLoginAllowed, recordLoginFailure, clearLoginFailures, clientIp } from './rate-limit.js';
+import { noteLogin } from './devices.js';
 import api from './routes/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,10 +103,16 @@ app.post('/api/login', (req, res) => {
     // announcing that in the login response would tell anyone probing the form
     // which single name is worth attacking. The client reads its role from
     // /me, which needs the token it has just been given.
+    // Whether this account has signed in from here before. Told only to
+    // somebody who has just proved they hold the account, and it says nothing
+    // about who they are — so it leaks nothing to a prober while giving the
+    // one person who would recognise an unfamiliar sign-in the chance to.
+    const { isNew } = noteLogin(db, result.userId, clientIp(req));
     res.json({
       token: result.token,
       expiresIn: result.expiresIn,
       requiresPinChange: result.requiresPinChange === true,
+      newDevice: isNew,
     });
   } catch (e) {
     recordLoginFailure(req, accountKey);

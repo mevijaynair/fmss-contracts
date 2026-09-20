@@ -6,21 +6,70 @@ import { buildNav, showView } from './router.js';
 import { initTheme } from './theme.js';
 import { $, closeModal } from './util.js';
 
-// Token & user management
+// Token & user management.
+//
+// Two places to keep a token, and which one is a security decision the person
+// makes at sign-in. localStorage survives closing the browser, which is what
+// you want on your own phone and exactly what you do not want on a borrowed
+// one; sessionStorage dies with the tab. Everything reads sessionStorage first,
+// so the shared-device choice always wins.
 const TOKEN_KEY = 'fmss_token';
 const USER_KEY = 'fmss_user';
-export function getToken() { return localStorage.getItem(TOKEN_KEY); }
-export function setToken(token) { localStorage.setItem(TOKEN_KEY, token); }
+export function getToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+}
+export function setToken(token, { thisSessionOnly = false } = {}) {
+  clearAuth();
+  (thisSessionOnly ? sessionStorage : localStorage).setItem(TOKEN_KEY, token);
+}
 export function getUser() {
-  const u = localStorage.getItem(USER_KEY);
+  const u = sessionStorage.getItem(USER_KEY) || localStorage.getItem(USER_KEY);
   return u ? JSON.parse(u) : null;
 }
-export function setUser(user) { localStorage.setItem(USER_KEY, JSON.stringify(user)); }
+export function setUser(user) {
+  // Beside the token, wherever that went, so the two can never be split.
+  const store = sessionStorage.getItem(TOKEN_KEY) ? sessionStorage : localStorage;
+  store.setItem(USER_KEY, JSON.stringify(user));
+}
 export function clearAuth() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  for (const store of [localStorage, sessionStorage]) {
+    store.removeItem(TOKEN_KEY);
+    store.removeItem(USER_KEY);
+  }
 }
 export function isAuthenticated() { return !!getToken(); }
+
+/**
+ * Sign out, and mean it.
+ *
+ * There was no way out of the app at all: a token lasts a week, so anyone who
+ * signed in on a shared phone stayed signed in on it. Clearing both stores and
+ * reloading puts the login screen back. The view-as choice goes too — it is a
+ * property of the session, not of the person.
+ */
+export function signOut() {
+  clearAuth();
+  try { sessionStorage.removeItem(VIEW_AS_KEY); } catch { /* private mode */ }
+  window.location.replace('/');
+}
+
+// Seeing the app as a player sees it. Kept in sessionStorage because it is a
+// thing you do for a minute to check something, not a setting — and because it
+// must never outlive the tab and leave an admin wondering where the app went.
+// It changes ONLY what is drawn: the token is untouched, so this is a preview,
+// not a privilege drop, and the screens a player cannot reach are still
+// refused by the server either way.
+const VIEW_AS_KEY = 'fmss_view_as';
+export function viewingAsPlayer() {
+  try { return sessionStorage.getItem(VIEW_AS_KEY) === 'player'; } catch { return false; }
+}
+function setViewingAsPlayer(on) {
+  try {
+    if (on) sessionStorage.setItem(VIEW_AS_KEY, 'player');
+    else sessionStorage.removeItem(VIEW_AS_KEY);
+  } catch { /* private mode: the toggle just will not stick */ }
+  window.location.reload();
+}
 
 import { loadDashboard } from './modules/dashboard.js';
 import { initResults, loadResults } from './modules/results.js';
@@ -66,12 +115,50 @@ async function start() {
   $('loginView').style.display = 'none';
   document.querySelector('.shell').style.display = '';
 
-  // Load app with role-based nav
-  const user = getUser();
-  document.body.classList.toggle('role-player', user?.role === 'player');
-  document.body.classList.toggle('role-admin', user?.role === 'admin');
-  buildNav(user?.role);
+  // Ask the server who this is, every time, rather than trusting what was
+  // cached at sign-in.
+  //
+  // The cached copy is written once, by the login form. When the rules about
+  // who gets what changed — the cashier signing in under their own name now
+  // gets the admin side — everyone already holding a seven-day token went on
+  // seeing the role they were given the week before. Vijay stayed in the
+  // read-only player view, which looks exactly like an app with no data in it,
+  // and no amount of reloading fixed it because reloading is precisely the
+  // path that used the stale copy. A token is proof of who you are; what that
+  // is worth today is the server's to say.
+  let user = getUser();
+  try {
+    const fresh = await api.get('/me');
+    if (fresh) { user = fresh; setUser(fresh); }
+  } catch {
+    // A network blip should not lock somebody out of a session they hold. Fall
+    // back to the cached role; an invalid token is already handled by api.js,
+    // which clears it and reloads to the login screen.
+  }
+  // An admin who has asked to look at the player side is drawn as a player.
+  // The token still says admin — this is a preview of the other view, not a
+  // change of who you are.
+  const realRole = user?.role;
+  const shownRole = realRole === 'admin' && viewingAsPlayer() ? 'player' : realRole;
+  document.body.classList.toggle('role-player', shownRole === 'player');
+  document.body.classList.toggle('role-admin', shownRole === 'admin');
+  document.body.classList.toggle('is-view-as', shownRole !== realRole);
+  buildNav(shownRole);
   [store.contracts, store.players] = await Promise.all([api.contracts(), api.players()]);
+  // After the roster loads: the strip names the person, and a player id is all
+  // the token carries.
+  wireIdentity(user, realRole, shownRole);
+
+  // A sign-in from somewhere this account has not been seen before. Shown once
+  // and then forgotten, and worded as a question rather than an alarm — the
+  // usual cause is a new phone or a different network, and an app that shouts
+  // at you for changing wifi is an app whose warnings you stop reading.
+  try {
+    if (sessionStorage.getItem('fmss_new_device') === '1') {
+      sessionStorage.removeItem('fmss_new_device');
+      toast('First sign-in from this network. If that was not you, change your PIN.');
+    }
+  } catch { /* private mode */ }
   store.activeContract = defaultContract();
   store.user = user;
 
@@ -99,6 +186,33 @@ async function start() {
   document.querySelector('#modal .modal-overlay').addEventListener('click', closeModal);
 
   showView('dashboard');
+}
+
+/**
+ * The topbar's identity strip: who you are, the way out, and — for an admin —
+ * the way to see what a player sees.
+ */
+function wireIdentity(user, realRole, shownRole) {
+  const who = $('whoami');
+  if (who) {
+    const name = user?.playerId
+      ? (store.players?.find(p => p.id === user.playerId)?.name || user.playerId)
+      : 'Administrator';
+    who.textContent = shownRole !== realRole ? `${name} — seeing the player view` : name;
+    who.title = shownRole !== realRole
+      ? 'You are still signed in as an administrator'
+      : 'Signed in';
+  }
+  const viewAs = $('viewAs');
+  if (viewAs) {
+    // Drawn only for a real admin. In player view the role-admin-only rule
+    // hides it, so it is shown explicitly and labelled to get back.
+    viewAs.hidden = realRole !== 'admin';
+    viewAs.textContent = shownRole === 'player' ? '← Back to admin' : 'View as player';
+    viewAs.onclick = () => setViewingAsPlayer(shownRole !== 'player');
+  }
+  const out = $('signOut');
+  if (out) out.onclick = () => signOut();
 }
 
 let loginWired = false;
@@ -152,6 +266,24 @@ function showLoginView() {
   modeToggle.addEventListener('click', () => { adminMode = !adminMode; applyMode(); });
   applyMode();
 
+  // Ticking "shared device" also tells the browser not to autofill or offer to
+  // remember. Browsers do not always honour it on a password field, which is
+  // why the notice below says what to do if it asks anyway — promising more
+  // than the platform delivers would be worse than saying nothing.
+  const shared = $('loginShared');
+  const notice = $('loginNotice');
+  shared?.addEventListener('change', () => {
+    passwordInput.setAttribute('autocomplete', shared.checked ? 'off' : 'current-password');
+    passwordInput.value = '';
+    if (notice) {
+      notice.hidden = !shared.checked;
+      notice.textContent = shared.checked
+        ? 'You will be signed out when this tab closes. If the browser offers to save '
+          + 'your PIN, say no.'
+        : '';
+    }
+  });
+
   // Wire login form
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -169,10 +301,21 @@ function showLoginView() {
     }
 
     try {
+      const shared = $('loginShared')?.checked === true;
       const result = await api.post('/login', body);
-      setToken(result.token);
+      // On a shared device the session dies with the tab. Everywhere else it
+      // lasts, because asking somebody to sign in on their own phone every
+      // morning is how you teach them to pick a PIN they will not forget
+      // rather than one nobody can guess.
+      setToken(result.token, { thisSessionOnly: shared });
       const user = await api.get('/me');
       setUser(user);
+      if (result.newDevice) {
+        // Said once, after the fact, because this is not a gate — it is the
+        // one moment somebody could notice that a PIN they shared over
+        // WhatsApp is being used by somebody else.
+        sessionStorage.setItem('fmss_new_device', '1');
+      }
       // A club-issued PIN arrives over WhatsApp, so it is known to whoever
       // passed it on. The server has always flagged that it must be replaced;
       // nothing ever acted on the flag, so every player kept the shared one.

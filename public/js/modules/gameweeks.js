@@ -856,6 +856,63 @@ async function saveGameweekEdits(gameweekId) {
 
 export function initGameweeks() {}
 
+/**
+ * What players have said is wrong with a result.
+ *
+ * On this screen because this is where a result gets corrected, and above the
+ * fixture list because it is a queue with people waiting at the end of it.
+ * Each report names the exact stat, so the admin can see in one line whether
+ * they agree before opening anything.
+ *
+ * Closing a report changes no result. The correction is made in the game
+ * itself; this only says the message has been dealt with, so the person who
+ * sent it is not left wondering.
+ */
+async function renderIssues() {
+  const host = $('gwIssues');
+  if (!host || store.user?.role !== 'admin') return;
+  let reports = [];
+  try { reports = await api.get('/admin/issues?status=open'); }
+  catch { host.innerHTML = ''; return; }
+
+  if (!reports.length) { host.innerHTML = ''; return; }
+  host.innerHTML = `<div class="panel panel-warn">
+    <div class="panel-title">${reports.length} thing${reports.length === 1 ? '' : 's'}
+      a player says ${reports.length === 1 ? 'is' : 'are'} wrong</div>
+    <div class="panel-scroll">
+      ${reports.map(r => `<div class="panel-row">
+        <span><strong>${esc(r.player_name)}</strong> ·
+          ${esc(r.field_label)}${r.game_date ? ` on ${fmtDate(r.game_date)}` : ''}
+          ${r.contract_name ? `<span class="hint">${esc(r.contract_name)}</span>` : ''}<br>
+          <span class="hint">app has: ${esc(r.says || '—')} · they say:
+            <strong>${esc(r.should_be)}</strong></span></span>
+        <span class="row-actions">
+          ${r.gameweek_id
+    ? `<button class="btn btn-sm" data-issue-open="${esc(r.gameweek_id)}">Open game</button>` : ''}
+          <button class="btn btn-secondary btn-sm" data-issue-fixed="${esc(r.id)}">Fixed</button>
+          <button class="link-btn" data-issue-no="${esc(r.id)}" title="No change needed">✕</button>
+        </span>
+      </div>`).join('')}
+    </div>
+  </div>`;
+
+  host.querySelectorAll('[data-issue-open]').forEach(b =>
+    b.addEventListener('click', () => window.editGameweekClick(b.dataset.issueOpen)));
+  const close = async (id, status) => {
+    try {
+      await api.post(`/admin/issues/${id}/resolve`, { status });
+      toast(status === 'resolved' ? 'Marked fixed' : 'Closed');
+      renderIssues();
+    } catch (e) { toast(e.message, true); }
+  };
+  host.querySelectorAll('[data-issue-fixed]').forEach(b =>
+    b.addEventListener('click', () => close(b.dataset.issueFixed, 'resolved')));
+  host.querySelectorAll('[data-issue-no]').forEach(b =>
+    b.addEventListener('click', () => {
+      if (confirm('Close this without changing anything?')) close(b.dataset.issueNo, 'declined');
+    }));
+}
+
 export function loadGameweeks() {
   if (contractId === undefined) contractId = defaultContract();
   // Both, like Results: a season read across the two nights answers "what have
@@ -864,5 +921,5 @@ export function loadGameweeks() {
   contractSeg($('gwContractSeg'), store.contracts, contractId, (id) => {
     contractId = id || null; render(); renderSchedule();
   }, { allLabel: 'Both' });
-  return Promise.all([render(), renderSchedule()]);
+  return Promise.all([render(), renderSchedule(), renderIssues()]);
 }

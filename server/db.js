@@ -902,6 +902,69 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_vc_contract ON venue_contracts(contract_id, start_date)');
       }
     },
+    // issue_reports — a player saying "that is not what happened".
+    //
+    // The results are entered by one person from a WhatsApp message, and the
+    // people who would spot a mistake are the twelve who were on the pitch. Up
+    // to now they had nowhere to say so inside the app, so a wrong score either
+    // reached the cashier as a message he had to act on from memory, or it
+    // stood. Both of those are worse than a row in a table.
+    //
+    // `field` names the exact stat, from a fixed list, so a report is
+    // actionable rather than "something is wrong with last Thursday". Nothing
+    // here changes a result: a report is a message with a subject line, and an
+    // admin still makes the correction.
+    () => {
+      try {
+        db.prepare('SELECT id FROM issue_reports LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE issue_reports (
+          id           TEXT PRIMARY KEY,
+          player_id    TEXT NOT NULL REFERENCES players(id),
+          gameweek_id  TEXT REFERENCES gameweeks(id) ON DELETE CASCADE,
+          field        TEXT NOT NULL,
+          says         TEXT NOT NULL DEFAULT '',
+          should_be    TEXT NOT NULL DEFAULT '',
+          status       TEXT NOT NULL DEFAULT 'open'
+                       CHECK(status IN ('open', 'resolved', 'declined')),
+          resolution   TEXT NOT NULL DEFAULT '',
+          resolved_by  TEXT,
+          resolved_at  TEXT,
+          created_at   TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_issue_status ON issue_reports(status, created_at)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_issue_player ON issue_reports(player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_issue_gw ON issue_reports(gameweek_id)');
+      }
+    },
+
+    // login_devices — where an account has signed in from before.
+    //
+    // Not for blocking anything. It exists so the app can say "this is the
+    // first time you have signed in from here", which is the one moment a
+    // person can notice that somebody else has their PIN. Club PINs travel
+    // over WhatsApp and are known to whoever passed them on, so noticing is
+    // most of the defence available.
+    //
+    // The address is stored as a SALTED HASH, never in the clear. The club
+    // does not need to know where anybody lives to answer "have I seen this
+    // before", and a plain IP log is a thing that can leak.
+    () => {
+      try {
+        db.prepare('SELECT id FROM login_devices LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE login_devices (
+          id          TEXT PRIMARY KEY,
+          user_id     TEXT NOT NULL REFERENCES auth_users(id),
+          ip_hash     TEXT NOT NULL,
+          first_seen  TEXT NOT NULL,
+          last_seen   TEXT NOT NULL,
+          logins      INTEGER NOT NULL DEFAULT 1
+        )`);
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_device_user_ip ON login_devices(user_id, ip_hash)');
+      }
+    },
+
     // gameweeks: how long the pitch was booked for.
     //
     // A venue bundle is sold in HOURS — O365's is "20 + 3hrs free" — and an

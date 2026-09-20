@@ -58,7 +58,16 @@
           <input type="password" id="loginPassword" placeholder="Enter your PIN" required
             autocomplete="off" inputmode="numeric">
         </div>
+        <!-- The one security question worth asking at sign-in, phrased as the
+             thing that is actually true rather than as jargon. Unticked by
+             default, because nearly everyone is on their own phone and making
+             the common case tick a box to stay signed in is friction for
+             nothing. -->
+        <label class="login-shared"><input type="checkbox" id="loginShared">
+          <span>This is a shared or public device — sign me out when I close the tab,
+            and don't let the browser save my PIN</span></label>
         <button type="submit" class="btn">Sign in</button>
+        <div id="loginNotice" class="login-notice" hidden></div>
         <div id="loginError" class="login-error" style="display:none;"></div>
         <p class="login-alt">
           <button type="button" class="link-btn" id="loginModeToggle">Sign in as administrator</button>
@@ -102,7 +111,18 @@
           </div>
         </div>
         <div class="topbar-right">
+          <!-- Who you are, and the way out. In the topbar because it is on
+               every screen: somebody on a shared phone should never have to go
+               looking for the way to sign out, and until now there was none at
+               all. -->
+          <!-- Shown and hidden from main.js, not by the role-admin-only rule:
+               in player view the body carries role-player, and a CSS rule that
+               hid this would take away the only way back. -->
+          <button class="btn btn-secondary btn-sm" id="viewAs" hidden
+            title="See the app as an ordinary player sees it">View as player</button>
+          <span class="whoami" id="whoami"></span>
           <button class="icon-btn" id="themeToggle" title="Toggle dark mode" aria-label="Toggle dark mode"></button>
+          <button class="btn btn-secondary btn-sm" id="signOut" title="Sign out of this device">Sign out</button>
         </div>
       </header>
 
@@ -110,11 +130,25 @@
 
         <!-- DASHBOARD -->
         <section class="view" data-view="dashboard">
+          <!-- A player's own page should look like it belongs to them. Written
+               by the dashboard and left empty for an admin, whose first screen
+               is about the club and not about themselves. -->
+          <div id="dashHero"></div>
           <div class="kpi-strip" id="kpiStrip"></div>
+          <!-- Written by the dashboard: what needs doing today, before any of
+               the standing figures. Empty and hidden when there is nothing. -->
+          <div id="dashAction"></div>
           <div class="sams-grid" id="contractCards"></div>
+          <!-- The player's own last games. Not drawn for an admin, who has the
+               Season screen for the same thing across everybody. -->
+          <div class="sams-card" id="myGamesCard" hidden>
+            <div class="card-header"><h3 class="card-title">Your last games</h3>
+              <span class="card-sub">Something wrong? Tell us which bit</span></div>
+            <div id="myGames"></div>
+          </div>
           <div class="sams-card">
-            <div class="card-header"><h3 class="card-title">Refill watchlist</h3>
-              <span class="card-sub">Players in the red — need a top-up</span></div>
+            <div class="card-header"><h3 class="card-title" id="watchTitle">Refill watchlist</h3>
+              <span class="card-sub" id="watchSub">Players in the red — need a top-up</span></div>
             <div id="watchlist" class="watch-wrap"></div>
           </div>
         </section>
@@ -362,6 +396,9 @@
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Game history</h3>
               <span class="seg" id="gwContractSeg"></span></div>
+            <!-- What players have said is wrong. Above the fixture list
+                 because it is a queue with people waiting at the end of it. -->
+            <div id="gwIssues" class="role-admin-only"></div>
             <div id="gwSchedule"></div>
             <!-- Which games are still short of a result, a captain or sides.
                  Outside the scroll box on purpose: it is a control, and it
@@ -477,7 +514,20 @@
               <span class="card-sub">Edit venue, cost per game and per-player rates</span></div>
             <div id="settingsCards"></div>
           </div>
-          <div class="sams-card role-admin-only" id="backupCard">
+          <div class="sams-card role-admin-only">
+            <div class="card-header"><h3 class="card-title">Club WhatsApp</h3>
+              <span class="card-sub">Where a player is pointed when a result is wrong</span></div>
+            <div class="form-row">
+              <div class="form-group"><label for="s_whatsapp">Number</label>
+                <input type="tel" id="s_whatsapp" placeholder="+971 50 123 4567"></div>
+              <div class="form-group" style="align-self:end;">
+                <button class="btn" id="s_whatsapp_save">Save</button></div>
+            </div>
+            <p class="hint">Optional. With a number set, reporting a wrong result offers a
+              ready-written WhatsApp message; without one it offers to copy the same text.
+              It is shown to signed-in players only.</p>
+          </div>
+          <div class="sams-card role-admin-only" id="backupCard"
             <div class="card-header"><h3 class="card-title">Backup &amp; restore</h3>
               <span class="card-sub">Take the whole database offline, or load it back</span></div>
             <div id="backupPanel"></div>
