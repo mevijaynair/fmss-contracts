@@ -10,6 +10,8 @@
 
 import { db } from '../db.js';
 
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 // Movements with no home in contributions/charges: transfers between players,
 // external-event deductions, introducer credits, manual adjustments. Amounts are
 // already signed (positive = credit), so this adds rather than subtracts.
@@ -149,6 +151,72 @@ export const ledgersRepo = {
   },
   forPlayer(playerId) {
     return db.prepare(`${SELECT} WHERE l.player_id = ?`).all(playerId);
+  },
+
+  /**
+   * One row per PLAYER instead of one per player and contract.
+   *
+   * A view, not a merge. Every balance stays where it is and every charge
+   * stays attributed to the contract it was played on — this only adds them
+   * up, the way Results already reads a season across both nights. The
+   * question it answers is the one a cashier actually asks before chasing
+   * somebody: does this person owe the club money, or are they short on one
+   * night and in credit on the other?
+   *
+   * Twenty-four people are in the red on a contract today, and some of them
+   * are holding more than that on the other one. Chasing those is chasing
+   * money the club already has.
+   *
+   * The per-contract figures come with each row, because "300 in total"
+   * without knowing it is all on Saturdays does not tell you whether they can
+   * play on Monday.
+   */
+  allCombined() {
+    const rows = db.prepare(`${SELECT} ORDER BY p.name`).all();
+    const byPlayer = new Map();
+    for (const l of rows) {
+      if (!byPlayer.has(l.player_id)) {
+        byPlayer.set(l.player_id, {
+          player_id: l.player_id,
+          player_name: l.player_name,
+          player_type: l.player_type,
+          special_role: l.special_role,
+          hide_from_sheet: l.hide_from_sheet,
+          opening_balance: 0, contributed: 0, charged: 0, adjusted: 0,
+          cash_owed: 0, games: 0, games_billed: 0,
+          present_balance: 0,
+          last_incoming_date: null, last_game_date: null,
+          contracts: {},
+        });
+      }
+      const row = byPlayer.get(l.player_id);
+      for (const k of ['opening_balance', 'contributed', 'charged', 'adjusted',
+        'cash_owed', 'games', 'games_billed', 'present_balance']) {
+        row[k] += Number(l[k]) || 0;
+      }
+      // The later of the two, so "last played" means last played anywhere
+      // rather than last played on whichever contract sorted last.
+      for (const k of ['last_incoming_date', 'last_game_date']) {
+        if (l[k] && (!row[k] || l[k] > row[k])) row[k] = l[k];
+      }
+      row.contracts[l.contract_id] = {
+        present_balance: round2(l.present_balance),
+        contributed: round2(l.contributed),
+        charged: round2(l.charged),
+        cash_owed: round2(l.cash_owed || 0),
+        games: l.games,
+        status: l.status,
+      };
+    }
+    return [...byPlayer.values()].map(r => ({
+      ...r,
+      opening_balance: round2(r.opening_balance),
+      contributed: round2(r.contributed),
+      charged: round2(r.charged),
+      adjusted: round2(r.adjusted),
+      cash_owed: round2(r.cash_owed),
+      present_balance: round2(r.present_balance),
+    }));
   },
 
   // Combined view: aggregate all contracts for a player into single row

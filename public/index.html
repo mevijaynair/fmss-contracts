@@ -310,9 +310,21 @@
                  scrolling a nine-column table sideways carried the search box
                  off the screen with it. -->
             <div class="filter-bar" data-player-controls></div>
+            <!-- Appears only once something is ticked. Outside the scroll box,
+                 like the filters, or it slides away with the columns. -->
+            <div id="plBulkBar" class="filter-bar" hidden>
+              <div class="hint" style="flex:1"><strong id="plSelCount">0</strong> selected</div>
+              <button class="btn btn-secondary btn-sm" data-bulk="aside">⏸ Not playing now</button>
+              <button class="btn btn-secondary btn-sm" data-bulk="back">▶ Playing again</button>
+              <button class="btn btn-secondary btn-sm" data-bulk="guest">→ Guest list</button>
+              <button class="link-btn" data-bulk="none">clear</button>
+            </div>
             <div class="table-scroll">
               <table class="sams-table" id="playersTable">
-                <thead><tr><th>Player</th><th>Status</th><th class="num">Opening</th>
+                <thead><tr>
+                  <th class="num"><input type="checkbox" id="plSelAll"
+                    title="Select everyone showing"></th>
+                  <th>Player</th><th>Status</th><th class="num">Opening</th>
                   <th class="num">Contributed</th><th class="num">Charged</th>
                   <th class="num" title="Games played">Games</th><th class="num">Balance</th>
                   <th class="num" title="How many more games this balance covers">Games<br>left</th>

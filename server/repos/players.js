@@ -185,6 +185,71 @@ export const playersRepo = {
   },
 
   /**
+   * Move somebody between the squad and the guest list.
+   *
+   * Looks like a label and is not. Whether a charge comes off a balance or is
+   * cash owed on the day is read from the SETTLER'S kind — so making a member
+   * a guest does not just change how they are listed, it retrospectively
+   * turns every game they ever settled off their balance into cash they owe.
+   * Their balance jumps up by the lot and they are suddenly a debtor for
+   * football they have already paid for.
+   *
+   * So it is allowed when it moves nothing, which is the ordinary case — the
+   * walk-ups sitting in the ledger at zero, which is exactly who this is for
+   * — and refused with the arithmetic when it would. Same rule as the split:
+   * this changes WHAT SOMEBODY IS, never how a game was settled, and the
+   * second is a decision to make on the game.
+   */
+  setKind(playerId, kind, { outsideCost = null } = {}) {
+    if (!['regular', 'outside'].includes(kind)) throw new Error('Unknown kind');
+    const p = this.get(playerId);
+    if (!p) throw new Error('No such player');
+    if ((p.player_type || 'regular') === kind) return p;
+    if (p.special_role === 'cashier' && kind === 'outside') {
+      throw new Error('The cashier funds the contracts; they cannot be a guest');
+    }
+
+    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const snapshot = () => {
+      const rows = ledgersRepo.forPlayer(playerId);
+      return {
+        balance: r2(rows.reduce((s, l) => s + l.present_balance, 0)),
+        owed: r2(rows.reduce((s, l) => s + (l.cash_owed || 0), 0)),
+        kitty: r2(kittyRepo.balance().balance),
+      };
+    };
+    const before = snapshot();
+    const games = db.prepare(
+      `SELECT DISTINCT gameweek_id FROM charges
+       WHERE COALESCE(charged_to, player_id) = ?`).all(playerId).map(r => r.gameweek_id);
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE players SET player_type = ?, outside_cost = ? WHERE id = ?')
+        .run(kind, kind === 'outside' && Number(outsideCost) > 0 ? Number(outsideCost) : null,
+          playerId);
+      for (const g of games) gameweeksRepo.recomputeGameKitty(g);
+
+      const after = snapshot();
+      if (after.balance !== before.balance || after.owed !== before.owed
+          || after.kitty !== before.kitty) {
+        const moved = r2(Math.abs(after.balance - before.balance));
+        throw new Error(
+          `${p.name} has ${moved} of football settled off a balance. Making them a `
+          + `${kind === 'outside' ? 'guest' : 'member'} would turn that into `
+          + `${kind === 'outside' ? 'cash they owe' : 'a balance charge'} and change what they `
+          + 'hold, so nothing was done. Switch those games on the game itself first, in Game '
+          + 'history, if that is really what happened.');
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return this.get(playerId);
+  },
+
+  /**
    * One record turns out to be two people. Pull the second one out of it.
    *
    * The club has two men called Rohit. Every "Rohit" in a pasted team sheet

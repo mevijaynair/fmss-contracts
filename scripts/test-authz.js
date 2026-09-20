@@ -61,6 +61,8 @@ const login = async (body) => (await fetch(`${BASE}/api/login`, {
 
 const playerToken = (await login({ player_id: 'tp', pin: '1234' })).token;
 assert.ok(playerToken, 'the test player could not sign in');
+const adminToken = (await login({ password: process.env.FMSS_AUTH_PASSWORD })).token;
+assert.ok(adminToken, 'the admin could not sign in');
 
 /** Every route the API declares, read from the source. */
 function routes() {
@@ -150,6 +152,37 @@ test('a player dashboard carries only their own money', async () => {
   for (const clubWide of ['total_', 'kitty', 'in_debt', 'watchlist', 'held_in_credit']) {
     assert.ok(!text.includes(clubWide), `a player dashboard should not carry ${clubWide}`);
   }
+});
+
+test('a bulk action is per person, so one refusal does not lose the rest', async () => {
+  // These are independent decisions made in one go. All-or-nothing would mean
+  // one member with games settled off a balance stops the walk-ups beside
+  // them being moved — and the list stays wrong, which is the problem.
+  const now = new Date().toISOString();
+  for (const id of ['bulk_a', 'bulk_b']) {
+    db.prepare("INSERT OR IGNORE INTO players (id,name,aliases,created_at) VALUES (?,?,'[]',?)")
+      .run(id, id, now);
+  }
+  // One of them has a game off a balance, so moving them must be refused.
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('bc','B','{}',0,9)").run();
+  db.prepare("INSERT OR IGNORE INTO gameweeks (id,contract_id,date,cost_per_gw,num_players,teams_raw,captains_raw,score,comments,historical,created_at) VALUES ('bg','bc','2026-01-01',0,0,'','','','',0,?)").run(now);
+  db.prepare("INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status) VALUES ('bulk_b','bc',100,'')").run();
+  db.prepare("INSERT OR IGNORE INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid) VALUES ('bch','bg','bulk_b','',0,'',30,'bulk_b',0)").run();
+
+  const res = await fetch(`${BASE}/api/admin/players/bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ ids: ['bulk_a', 'bulk_b'], action: 'kind', kind: 'outside' }),
+  });
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  assert.deepEqual(out.done, ['bulk_a'], 'the clean one went through');
+  assert.equal(out.refused.length, 1, 'and the other came back by name');
+  assert.equal(out.refused[0].name, 'bulk_b');
+  assert.match(out.refused[0].why, /settled off a balance/);
+  assert.equal(
+    db.prepare("SELECT player_type FROM players WHERE id = 'bulk_b'").get().player_type,
+    'regular', 'the refused one is unchanged');
 });
 
 test('a report is filed under whoever is signed in, never whoever is named', async () => {

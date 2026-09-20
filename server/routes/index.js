@@ -220,6 +220,44 @@ r.get('/ledgers', wrap((req) => {
     return ledgersRepo.forPlayer(req.user.playerId)
       .filter(l => !req.query.contract || l.contract_id === req.query.contract);
   }
+  // `combined` is one row per PLAYER rather than one per player and contract:
+  // a view across both nights, the way Results already reads a season. It is
+  // not a merge — every balance stays where it is — but it answers the
+  // question a cashier asks before chasing anybody, which is whether they owe
+  // the club money at all or are simply short on one night and in credit on
+  // the other.
+  if (req.query.contract === 'combined') {
+    const meta = Object.fromEntries(playersRepo.all().map(p => [p.id, p]));
+    const rateFor = {};
+    for (const c of contractsRepo.all()) {
+      const rates = typeof c.rates === 'string'
+        ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
+        : (c.rates || {});
+      rateFor[c.id] = { name: c.name, rate: Number(rates.contracted_10) || Number(rates.noncontract) || 0 };
+    }
+    return ledgersRepo.allCombined().map((l) => {
+      const p = meta[l.player_id] || {};
+      // Runway across a combined balance is not one number: the same money
+      // buys fewer Saturdays than Mondays. Said per contract rather than
+      // averaged into a figure that is true of neither.
+      const covers = Object.entries(rateFor).map(([id, r]) => ({
+        contract_id: id, name: r.name, rate: r.rate,
+        games_left: r.rate > 0 ? Math.floor(l.present_balance / r.rate) : null,
+      }));
+      return {
+        ...l,
+        covers,
+        // The tightest of them, which is the one that decides whether they can
+        // play the next game whatever night it falls on.
+        games_left: covers.reduce((m, c) =>
+          c.games_left === null ? m : (m === null ? c.games_left : Math.min(m, c.games_left)), null),
+        player_type: p.player_type || 'regular',
+        is_sandbox: p.is_sandbox ? 1 : 0,
+        special_role: p.special_role || null,
+      };
+    });
+  }
+
   const rows = req.query.contract
     ? ledgersRepo.forContract(req.query.contract)
     : ledgersRepo.all();
@@ -529,6 +567,45 @@ r.post('/admin/players/:playerId/split', wrap((req) => {
     playerType: player_type || null,
     outsideCost: outside_cost ?? null,
   });
+}));
+
+// Squad or guest list. Not a label — see setKind, which refuses when moving
+// somebody would retrospectively change how their games were settled.
+r.put('/admin/players/:playerId/kind', wrap((req) => {
+  requireAdmin(req);
+  return playersRepo.setKind(req.params.playerId, req.body?.kind,
+    { outsideCost: req.body?.outside_cost ?? null });
+}));
+
+/**
+ * The same two things to a list of people at once.
+ *
+ * PER PERSON, not all or nothing. These are independent decisions that happen
+ * to be made in one go: one member with games settled off a balance must not
+ * stop the twelve walk-ups beside them being moved to the guest list. Each is
+ * applied on its own terms and the refusals come back by name, so what did
+ * not happen is visible rather than silently dropped.
+ */
+r.post('/admin/players/bulk', wrap((req) => {
+  requireAdmin(req);
+  const { ids, action, kind, hidden } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) throw new Error('Nobody selected');
+  if (ids.length > 200) throw new Error('Too many at once');
+  if (!['kind', 'sheet'].includes(action)) throw new Error('Unknown action');
+
+  const done = [];
+  const refused = [];
+  for (const id of ids) {
+    try {
+      const name = playersRepo.get(id)?.name || id;
+      if (action === 'kind') playersRepo.setKind(id, kind);
+      else playersRepo.update(id, { hide_from_sheet: !!hidden });
+      done.push(name);
+    } catch (e) {
+      refused.push({ id, name: playersRepo.get(id)?.name || id, why: e.message });
+    }
+  }
+  return { done, refused };
 }));
 
 r.get('/admin/name-collisions', wrap((req) => {

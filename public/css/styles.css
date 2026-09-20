@@ -1535,3 +1535,9 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
    lying about the date the only way to record a real game. */
 .gd-offday { font-weight: 700;
   color: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
+
+/* Row picker for bulk actions on the ledger. A third of the roster is
+   walk-ups who belong on the guest list and people who have stopped turning
+   up; one at a time through a ⋮ menu is forty clicks and a job nobody does,
+   which is why the list stays wrong. */
+.pl-pick { cursor: pointer; }

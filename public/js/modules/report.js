@@ -144,8 +144,8 @@ export async function renderStandingSheet(host, contractId) {
       ? ` ${data.dormant_hidden} player${data.dormant_hidden === 1 ? '' : 's'} holding no money and
          with nothing this period ${data.dormant_hidden === 1 ? 'is' : 'are'} not listed.`
       : ''}${data.flag_hidden
-      ? ` ${data.flag_hidden} player${data.flag_hidden === 1 ? '' : 's'} marked as having left
-         ${data.flag_hidden === 1 ? 'is' : 'are'} not listed${data.flag_hidden_balance
+      ? ` ${data.flag_hidden} player${data.flag_hidden === 1 ? '' : 's'} set aside as not
+         playing ${data.flag_hidden === 1 ? 'is' : 'are'} not listed${data.flag_hidden_balance
     ? `, still holding ${money(data.flag_hidden_balance)} between them` : ''} —
          you can put them back from the Players screen.`
       : ''}

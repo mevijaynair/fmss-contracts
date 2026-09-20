@@ -21,8 +21,9 @@ let contractId = null;   // resolved on first load — see defaultContract()
 // contract you had chosen did not follow you between them. One shape shows at
 // a time — the sheet is not much use as a screenshot with a filter bar and an
 // actions column in it.
-let viewMode = 'ledger';   // 'ledger' | 'sheet' | 'guests'
-const MODES = [['ledger', 'Working', 'The squad, with filters and actions'],
+let viewMode = 'ledger';   // 'ledger' | 'both' | 'sheet' | 'guests'
+const MODES = [['ledger', 'Working', 'The squad on one contract, with filters and actions'],
+  ['both', 'Both', 'Every member across both contracts at once — a view, not a merge'],
   ['sheet', 'Standing sheet', 'The same balances, laid out as the sheet you send round'],
   ['guests', 'Guests', 'One-off players who pay cash — who owes what']];
 
@@ -174,6 +175,179 @@ async function splitPlayerModal(playerId) {
  * what banks it in the pot. Offering a second button here would be a second
  * way to move the same money.
  */
+/**
+ * Doing the same thing to a dozen people at once.
+ *
+ * A third of the roster is walk-ups sitting in the ledger who ought to be on
+ * the guest list, and another handful have stopped turning up. One at a time
+ * through a ⋮ menu, that is forty clicks and a job nobody does — so the list
+ * stays wrong, which is the actual problem.
+ *
+ * Applied PER PERSON on the server, not all or nothing: one member with games
+ * settled off a balance must not stop the twelve beside them being moved. The
+ * refusals come back by name and are shown, because a bulk action that
+ * silently skips people is worse than one that refuses outright.
+ */
+function wireBulk() {
+  const bar = $('plBulkBar');
+  const all = $('plSelAll');
+  if (!bar) return;
+  const boxes = () => [...$('playersTable').querySelectorAll('.pl-pick')];
+  const picked = () => boxes().filter(b => b.checked).map(b => b.value);
+
+  const sync = () => {
+    const n = picked().length;
+    bar.hidden = n === 0;
+    $('plSelCount').textContent = n;
+    if (all) all.checked = n > 0 && n === boxes().length;
+  };
+  boxes().forEach(b => b.addEventListener('change', sync));
+  if (all) {
+    all.checked = false;
+    all.onchange = () => { boxes().forEach(b => { b.checked = all.checked; }); sync(); };
+  }
+  sync();
+
+  const run = async (label, body, confirmText) => {
+    const ids = picked();
+    if (!ids.length) return;
+    if (!confirm(`${confirmText}\n\n${ids.length} player(s) selected.`)) return;
+    try {
+      const out = await api.post('/admin/players/bulk', { ids, ...body });
+      store.players = await api.players();
+      toast(out.refused.length
+        ? `${out.done.length} ${label}. ${out.refused.length} refused — see below.`
+        : `${out.done.length} ${label}`);
+      if (out.refused.length) {
+        // Named, with the reason each was refused. A list of what did not
+        // happen is the whole value of a per-person bulk action.
+        openModal('Some were not changed', `
+          <p class="hint">${out.done.length} went through. These did not, and why:</p>
+          <div class="split-list mt">${out.refused.map(r => `
+            <div class="split-row"><span></span>
+              <span><strong>${esc(r.name)}</strong><br>
+                <span class="hint">${esc(r.why)}</span></span><span></span></div>`).join('')}</div>
+          <button class="btn full-w mt" onclick="document.getElementById('modalClose').click()">Close</button>`,
+        { wide: true });
+      }
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  bar.querySelectorAll('[data-bulk]').forEach(btn => {
+    btn.onclick = () => {
+      const what = btn.dataset.bulk;
+      if (what === 'none') { boxes().forEach(b => { b.checked = false; }); sync(); return; }
+      if (what === 'aside') {
+        return run('set aside', { action: 'sheet', hidden: true },
+          'Set these players aside as not playing?\n\nThey come off the Standing sheet and the '
+          + 'rankings and keep their balance, their history and their place on this screen. '
+          + 'No money moves.');
+      }
+      if (what === 'back') {
+        return run('back on the sheet', { action: 'sheet', hidden: false },
+          'Put these players back on the Standing sheet and the rankings?');
+      }
+      return run('moved to the guest list', { action: 'kind', kind: 'outside' },
+        'Move these players to the guest list?\n\nGuests pay cash on the day and keep no '
+        + 'balance, so they leave the ledger and the standing sheet.\n\nAnyone whose games '
+        + 'were settled off a balance is refused and listed, because moving them would turn '
+        + 'football they have paid for into cash they owe.');
+    };
+  });
+}
+
+/**
+ * Every member's money across both nights at once.
+ *
+ * Not a merge — the balances stay exactly where they are and every charge
+ * keeps the contract it was played on. This adds them up, the way Results
+ * already reads a season across both nights, and it answers the question a
+ * cashier asks before chasing anybody: does this person owe the club
+ * anything, or are they simply short on one night and in credit on the other?
+ *
+ * The split is on the row beside the total, because "300 in credit" without
+ * knowing it is all on Saturdays does not tell you whether they can play on
+ * Monday. Runway is given per contract for the same reason: the same money
+ * buys fewer Saturdays than Mondays, and one averaged number would be true of
+ * neither night.
+ */
+async function renderCombined(host) {
+  host.innerHTML = '<p class="hint">Loading…</p>';
+  let rows = [];
+  try { rows = await api.ledgers('combined') || []; }
+  catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+
+  const cs = store.contracts || [];
+  const members = rows.filter(l => l.player_type !== 'outside' && !l.is_sandbox
+    && (l.present_balance !== 0 || l.games > 0));
+  const chaseable = members.filter(l => l.special_role !== 'cashier');
+  // Short on one night, covered once you look at both. Chasing these is
+  // chasing money the club is already holding.
+  const evensOut = chaseable.filter(l => l.present_balance >= 0
+    && Object.values(l.contracts).some(c => c.present_balance < 0));
+  const reallyOwes = chaseable.filter(l => l.present_balance < 0);
+  const owedTotal = reallyOwes.reduce((s, l) => s + l.present_balance, 0);
+
+  members.sort((a, b) => a.present_balance - b.present_balance);
+
+  host.innerHTML = `
+    <div class="sams-card">
+      <div class="card-header">
+        <h3 class="card-title">Both contracts together</h3>
+        <span class="card-sub">A view, not a merge — every balance stays where it is</span>
+      </div>
+      ${evensOut.length ? `<div class="rep-collect">
+        <div class="rep-collect-head">${evensOut.length} ${evensOut.length === 1
+    ? 'player is' : 'players are'} in the red on one night but square across both</div>
+        <div class="rep-collect-row"><span class="rep-collect-k">No need to chase</span>
+          <span class="rep-collect-v">${evensOut.map(l =>
+    `<span class="rep-owe"><strong>${esc(l.player_name)}</strong> ${money(l.present_balance)}</span>`)
+    .join('')}</span></div>
+      </div>` : ''}
+      ${reallyOwes.length ? `<p class="hint">
+        <strong>${reallyOwes.length}</strong> genuinely short, ${money(Math.abs(owedTotal))} in all.</p>` : ''}
+      <div class="table-scroll">
+        <table class="sams-table">
+          <thead><tr><th>Player</th>
+            ${cs.map(c => `<th class="num">${esc(c.name)}</th>`).join('')}
+            <th class="num">Together</th>
+            <!-- No sub-label: "Mon / Saturdays" reads as nonsense, and the
+                 two figures are in the same order as the two balance columns
+                 immediately to the left, which says it without saying it.
+                 Each cell carries the full names and rates on hover. -->
+            <th class="num" title="More games the whole balance buys on each contract, in the same order as the columns to the left">Covers</th>
+            <th class="num">Games</th><th class="num">Paid in</th></tr></thead>
+          <tbody>${members.map(l => `
+            <tr>
+              <td><strong>${esc(l.player_name)}</strong>${l.special_role === 'cashier'
+    ? ' <span class="hint">cashier</span>' : ''}${l.hide_from_sheet
+    ? ' <span class="hint">left</span>' : ''}</td>
+              ${cs.map((c) => {
+    const s = l.contracts[c.id];
+    return `<td class="num">${s ? balCell(s.present_balance)
+      : '<span class="hint">—</span>'}</td>`;
+  }).join('')}
+              <td class="num">${l.special_role === 'cashier'
+    ? `<span class="bal zero" title="The float. Money put in up front to run the contracts.">${money(l.present_balance)}</span>`
+    : balCell(l.present_balance)}</td>
+              <td class="num" title="${esc((l.covers || [])
+    .map(c => `${c.name}: ${Math.max(0, c.games_left ?? 0)} more at ${c.rate} a game`)
+    .join(' · '))}">${l.special_role === 'cashier' ? '<span class="hint">—</span>'
+    : (l.covers || []).map(c => `${Math.max(0, c.games_left ?? 0)}`).join(' / ')}</td>
+              <td class="num">${l.games || 0}</td>
+              <td class="num">${money(l.contributed)}</td>
+            </tr>`).join('') || `<tr><td colspan="${cs.length + 5}" class="hint">Nobody yet.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint rep-key">Guests are not here — they keep no balance. "Covers" is how many
+        more games the whole balance buys on each contract; the same money buys fewer of the
+        dearer night, so it is given per contract rather than averaged into a figure that is
+        true of neither.</p>
+    </div>`;
+}
+
 async function renderGuests(host) {
   host.innerHTML = '<p class="hint">Loading…</p>';
   let owed = [];
@@ -212,6 +386,10 @@ async function renderGuests(host) {
               <td class="row-actions">
                 <button class="btn btn-secondary btn-sm" data-goto="gameweeks"
                   title="Marking it collected on the game is what puts the cash in the pot">Collect</button>
+                ${(nameOf[r.player_id]?.player_type || 'regular') === 'outside'
+    ? `<button class="btn btn-sm" data-kind="${esc(r.player_id)}" data-to="regular"
+        title="They have joined a contract: move them to the squad, where they keep a balance">→ Squad</button>`
+    : ''}
               </td>
             </tr>`).join('')}</tbody>
         </table>
@@ -232,7 +410,11 @@ async function renderGuests(host) {
  * reflect state either of them can change.
  */
 function drawScreenControls() {
-  contractSeg($('plContractSeg'), store.contracts, contractId,
+  // Which contract has no meaning on a view that spans them, so it is put
+  // away rather than left showing a choice that changes nothing.
+  const seg = $('plContractSeg');
+  seg.hidden = viewMode === 'both';
+  contractSeg(seg, store.contracts, contractId,
     (id) => { contractId = id; render(); });
 
   document.querySelectorAll('[data-pl-modeseg]').forEach(seg => {
@@ -268,11 +450,11 @@ async function render() {
     return;
   }
 
-  if (viewMode === 'guests') {
+  if (viewMode === 'guests' || viewMode === 'both') {
     closePlayerDetail();
     ledgerCard.hidden = true;
     sheetHost.hidden = false;
-    await renderGuests(sheetHost);
+    await (viewMode === 'both' ? renderCombined(sheetHost) : renderGuests(sheetHost));
     drawScreenControls();
     return;
   }
@@ -365,7 +547,7 @@ async function render() {
       <option value="all" ${filterActivity === 'all' ? 'selected' : ''}>Everyone</option>
       <option value="quiet" ${filterActivity === 'quiet' ? 'selected' : ''}>Not played in ${QUIET_DAYS}+ days${
   quietCount ? ` (${quietCount})` : ''}</option>
-      <option value="left" ${filterActivity === 'left' ? 'selected' : ''}>Marked as left${
+      <option value="left" ${filterActivity === 'left' ? 'selected' : ''}>Set aside — not playing${
   leftCount ? ` (${leftCount})` : ''}</option>
     </select>
   `;
@@ -437,6 +619,7 @@ async function render() {
 
     return `
     <tr class="${!isCashier && (l.present_balance < 0 || owed > 0) ? 'row-alert' : ''}">
+      <td class="num"><input type="checkbox" class="pl-pick" value="${esc(l.player_id)}"></td>
       <td><strong class="link-name" onclick="window.showPlayerDetail('${l.player_id}')">${esc(l.player_name)}</strong>${isCashier ? ' <span class="tag tag-cashier" title="Cashier — excluded from contributions">💰 Cashier</span>' : ''}${
         l.player_type === 'outside' ? ' <span class="tag tag-due" title="Guest — not on a contract">Guest</span>' : ''}${
         owed > 0 ? ` <span class="tag tag-due" title="Cash still to collect">to collect ${money(owed)}</span>` : ''}${
@@ -445,7 +628,7 @@ async function render() {
         // ⋮ menu, so without this the only way to tell whether someone was
         // hidden was to open the menu for each of them one at a time.
         hiddenIds.has(l.player_id)
-    ? ' <span class="tag" title="Marked as having left — kept out of the Standing sheet and the rankings. Their history is untouched.">🚪 Left</span>'
+    ? ' <span class="tag" title="Set aside as not playing — kept out of the Standing sheet and the rankings. Their balance and history are untouched.">⏸ Not playing</span>'
     : (() => {
       const d = daysSince(l.last_game_date);
       if (d === null) return ' <span class="tag" title="Has never played a game">never played</span>';
@@ -472,9 +655,12 @@ async function render() {
       </td>
       <td style="display: none;" data-actions="${l.player_id}">
         <button class="btn btn-sm" data-sheet="${l.player_id}" data-hidden="${hiddenIds.has(l.player_id) ? 1 : 0}"
-          title="Marks someone as having left the club: they drop off the Standing sheet and out of the rankings, and stay on this screen so you can put them back. Moves no money — no balance, no charge, no total."
+          title="Takes them off the Standing sheet and out of the rankings until they are back. They keep their balance, their history and their place on this screen — it moves no money at all. For somebody who has stopped turning up, whether for a season or for good."
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
-  hiddenIds.has(l.player_id) ? '👁 Mark as playing' : '🚪 Mark as left'}</button>
+  hiddenIds.has(l.player_id) ? '▶ Playing again' : '⏸ Not playing now'}</button>
+        <button class="btn btn-sm" data-kind="${l.player_id}" data-to="outside"
+          title="Move them to the guest list: somebody who turns up now and then and pays cash, rather than a member on a contract. They leave the ledger and the standing sheet. Refused if any of their games were settled off a balance, because that would turn football they have paid for into cash they owe."
+          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">→ Guest list</button>
         <button class="btn btn-sm" data-split="${l.player_id}"
           title="One record, two people with the same name — pull the second one out, taking their games with them"
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">⑂ Two people</button>
@@ -482,7 +668,10 @@ async function render() {
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
     </tr>`
-  }).join('') || '<tr><td colspan="9" class="hint">No players in this contract yet.</td></tr>';
+  // Counted from the header rather than typed, so a column added later cannot
+  // leave the empty state spanning the wrong width.
+  }).join('') || `<tr><td colspan="${
+  $('playersTable').querySelectorAll('thead th').length}" class="hint">No players in this contract yet.</td></tr>`;
 
   $('playersTable').querySelector('tbody').innerHTML = cardsHtml;
 
@@ -507,6 +696,21 @@ async function render() {
     });
   });
 
+  wireBulk();
+  $('playersTable').querySelectorAll('[data-kind]').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const name = store.players.find(p => p.id === btn.dataset.kind)?.name || 'them';
+      if (!confirm(`Move ${name} to the guest list?\n\n`
+        + 'Guests pay cash on the day and keep no balance, so they leave the ledger and the '
+        + 'standing sheet and appear under Guests instead.\n\n'
+        + 'Nothing is written if it would change what they hold.')) return;
+      try {
+        await api.put(`/admin/players/${btn.dataset.kind}/kind`, { kind: btn.dataset.to });
+        store.players = await api.players();
+        toast(`${name} is on the guest list now`);
+        render();
+      } catch (e) { toast(e.message, true); }
+    }));
   $('playersTable').querySelectorAll('[data-split]').forEach(btn =>
     btn.addEventListener('click', () => splitPlayerModal(btn.dataset.split)));
   $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
@@ -523,7 +727,7 @@ async function render() {
         await api.updatePlayer(btn.dataset.sheet, { hide_from_sheet: hide });
         store.players = await api.players();
         toast(hide
-          ? 'Marked as left — off the Standing sheet and the rankings'
+          ? 'Set aside — off the Standing sheet and the rankings, balance untouched'
           : 'Back on the Standing sheet and the rankings');
         render();
       } catch (e) { toast(e.message, true); }

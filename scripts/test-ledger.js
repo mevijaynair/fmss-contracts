@@ -1493,6 +1493,49 @@ test('two players can be added to a game back to back', () => {
   assert.equal(balanceOf(b), 70);
 });
 
+test('moving somebody to the guest list is free when it moves nothing', () => {
+  // The ordinary case, and the one this exists for: a walk-up sitting in the
+  // ledger at zero who was never a member.
+  const p = playersRepo.create({ name: 'Turns up sometimes' });
+  assert.equal(playersRepo.setKind(p.id, 'outside').player_type, 'outside');
+  assert.equal(playersRepo.setKind(p.id, 'regular').player_type, 'regular', 'and back again');
+  // Somebody whose games were all cash already: also free, because nothing
+  // about how they settle changes.
+  const c = playersRepo.create({ name: 'Always pays cash' });
+  const g = game();
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,settles_cash,paid)
+              VALUES (?,?,?,'',0,'noncontract',35,?,1,1)`).run(`ch${++seq}`, g, c.id, c.id);
+  gameweeksRepo.recomputeGameKitty(g);
+  assert.equal(playersRepo.setKind(c.id, 'outside').player_type, 'outside');
+});
+
+test('it is refused when it would turn paid football into a debt', () => {
+  // Whether a charge is cash is read from the settler's KIND, so making a
+  // member a guest retrospectively converts every game they settled off a
+  // balance into cash they owe — their balance jumps and they become a
+  // debtor for football they have already paid for.
+  const p = playersRepo.create({ name: 'Proper member' });
+  db.prepare('UPDATE ledgers SET opening_balance = 200 WHERE player_id = ? AND contract_id = ?')
+    .run(p.id, CONTRACT);
+  const g = game();
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'contracted_12',30,?,0)`).run(`ch${++seq}`, g, p.id, p.id);
+  gameweeksRepo.recomputeGameKitty(g);
+  assert.equal(balanceOf(p.id), 170);
+  const kitty = kittyRepo.balance().balance;
+
+  assert.throws(() => playersRepo.setKind(p.id, 'outside'),
+    /30 of football settled off a balance/);
+  assert.equal(balanceOf(p.id), 170, 'balance untouched');
+  assert.equal(kittyRepo.balance().balance, kitty, 'pot untouched');
+  assert.equal(playersRepo.get(p.id).player_type, 'regular', 'and they are still a member');
+
+  // The cashier can never be a guest — they fund the contracts.
+  const cash = playersRepo.create({ name: 'The money' });
+  playersRepo.update(cash.id, { special_role: 'cashier' });
+  assert.throws(() => playersRepo.setKind(cash.id, 'outside'), /cannot be a guest/);
+});
+
 test('the second person can be a guest, which is the usual reason there are two', () => {
   // The club's second Rohit is a walk-up who pays cash and happens to share a
   // name with a member. Without saying so in the split, it produced another
