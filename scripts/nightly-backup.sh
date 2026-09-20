@@ -64,6 +64,13 @@ if [ "$(sqlite3 "$tmp" 'PRAGMA integrity_check;')" != "ok" ]; then
 fi
 mv -f "$tmp" "$OUT/fmss-$DAY.db"
 
+# umask only applies to files being CREATED. Rewriting a file that already
+# exists — a second run on the same day, or a file somebody made by hand —
+# keeps whatever mode it already had, which is how a backup full of PINs ends
+# up world-readable despite the umask at the top of this script.
+chmod 600 "$OUT/fmss-$DAY.json" "$OUT/fmss-$DAY.db"
+chmod 700 "$OUT"
+
 rows=$(sqlite3 "$OUT/fmss-$DAY.db" 'SELECT (SELECT COUNT(*) FROM players)||" players, "
   ||(SELECT COUNT(*) FROM gameweeks)||" games, "
   ||(SELECT COUNT(*) FROM charges)||" charges, "
