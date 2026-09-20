@@ -1,0 +1,11 @@
+# FMSS contract manager — a private club's accounts.
+#
+# Nothing here is meant to be indexed. Everything past the login page needs a
+# token anyway, but the login page itself is public and carries the club's
+# name, and there is no reason for any of it to turn up in a search result.
+#
+# This is a request, not a control: a crawler that ignores robots.txt still
+# gets only what an unauthenticated visitor gets, which is the sign-in form
+# and the list of names you pick yours from.
+User-agent: *
+Disallow: /
