@@ -79,6 +79,43 @@ const txn = (pid, type, amount, status = 'approved', contractId = CONTRACT) =>
 const balanceOf = (pid) => ledgersRepo.get(pid, CONTRACT).present_balance;
 const round2 = (n) => Math.round(n * 100) / 100;
 
+test('two charges in one game can be corrected together', () => {
+  // applyChargeEdits walks the edits in a loop, and the audit row it writes
+  // per edit was keyed on the millisecond. Two edits land inside the same one,
+  // so the second insert died on a UNIQUE violation and took the whole edit
+  // back with it: correcting one charge worked, correcting two never did.
+  const a = player('Edit me', 200);
+  const b = player('Edit me too', 200);
+  const g = game();
+  const ca = `ch${++seq}`;
+  const cb = `ch${++seq}`;
+  for (const [id, pid] of [[ca, a], [cb, b]]) {
+    db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+                VALUES (?,?,?,'',0,'',30,?,0)`).run(id, g, pid, pid);
+  }
+  assert.equal(balanceOf(a), 170);
+
+  // Freeze the clock. Whether two edits land in the same millisecond is a race
+  // on a fast machine, and a test that only catches the bug when it happens to
+  // lose that race is a test that passes on the day it matters. Held still,
+  // the collision is certain — which is the point: the key must not depend on
+  // how quickly the loop runs.
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    gameweeksRepo.applyChargeEdits(g, [
+      { chargeId: ca, newAmount: 27 }, { chargeId: cb, newAmount: 27 },
+    ], { reason: 'both at once', changedBy: 'test' });
+  } finally {
+    Date.now = realNow;
+  }
+
+  assert.equal(balanceOf(a), 173, 'the first correction stuck');
+  assert.equal(balanceOf(b), 173, 'and so did the second');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM charge_audit WHERE charge_id IN (?,?)')
+    .get(ca, cb).n, 2, 'both edits left a trail');
+});
+
 test('opening balance alone is the balance', () => {
   assert.equal(balanceOf(player('Opening only', 250)), 250);
   assert.equal(balanceOf(player('Negative opening', -137)), -137);

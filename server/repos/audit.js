@@ -3,7 +3,14 @@ import { db } from '../db.js';
 
 export const auditRepo = {
   create(chargeId, originalAmount, newAmount, reason, changedBy, autoRecalculate = true) {
-    const id = `audit_${Date.now()}`;
+    // A millisecond is not unique enough to be a primary key, and this is
+    // called in a LOOP — applyChargeEdits walks every edited charge in a game,
+    // and correcting two of them takes well under a millisecond. The second
+    // insert died on "UNIQUE constraint failed: charge_audit.id", which rolled
+    // the whole edit back: correcting one charge in a game worked, correcting
+    // two never did. Same fault movements.js and contributions.js each hit and
+    // fixed separately; this one was still here.
+    const id = `audit_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     db.prepare(`INSERT INTO charge_audit
       (id, charge_id, original_amount, new_amount, reason, changed_by, auto_recalculate, created_at)
       VALUES (?,?,?,?,?,?,?,?)`).run(
