@@ -1123,6 +1123,48 @@ test('paying from another pot is priced at the out-of-contract rate', () => {
   assert.equal(priced.amount, 35, 'not the 27 a contracted player pays');
 });
 
+test('naming a captain after the night offers the discount they are owed', () => {
+  // Game Day applies the captain rate on the night. Setting the armband
+  // afterwards did not, so the five games still missing a captain could not
+  // be corrected without leaving whoever was named paying the full contract
+  // rate — overcharged by exactly the discount, and labelled as one rate
+  // while carrying another.
+  db.prepare(`UPDATE contracts SET rates = '{"contracted_10":30,"contracted_12":27,
+    "captain_10":25,"captain_12":20,"noncontract":35}' WHERE id = ?`).run(CONTRACT);
+  const p = player('Named later', 200);
+  const g = game();
+  const c = `ch${++seq}`;
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'Red',0,'contracted_10',30,?,0)`).run(c, g, p, p);
+  gameweeksRepo.recomputeGameKitty(g);
+  assert.equal(balanceOf(p), 170);
+
+  // Told, not done.
+  const asked = gameweeksRepo.updateCharge(g, c, { team: 'Red', is_captain: true });
+  assert.equal(asked.charges.find(x => x.id === c).is_captain, 1, 'the armband is set');
+  assert.equal(balanceOf(p), 170, 'and the money has not moved');
+  assert.deepEqual(
+    { was: asked.captain_rate.was, would_be: asked.captain_rate.would_be, applied: asked.captain_rate.applied },
+    { was: 30, would_be: 25, applied: false }, 'but the discount is offered');
+
+  // Done when asked for.
+  gameweeksRepo.updateCharge(g, c, { team: 'Red', is_captain: false });
+  gameweeksRepo.updateCharge(g, c, { team: 'Red', is_captain: true, reprice: true });
+  assert.equal(balanceOf(p), 175, 'five back — the captain rate');
+  assert.equal(db.prepare('SELECT rate_type FROM charges WHERE id = ?').get(c).rate_type,
+    'captain_10', 'and the label says what they actually paid');
+
+  // A guest's cash is not on the contract's card, so there is nothing to offer.
+  const walkup = player('Walk-up captain');
+  makeOutside(walkup);
+  const gc = `ch${++seq}`;
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'Blue',0,'noncontract',35,?,0)`).run(gc, g, walkup, walkup);
+  const guestOut = gameweeksRepo.updateCharge(g, gc, { team: 'Blue', is_captain: true });
+  assert.equal(guestOut.captain_rate, null,
+    'the captain discount is something being in the contract buys');
+});
+
 test('the captain discount does not survive paying from another pot', () => {
   const g = game();
   const asCaptain = gameweeksRepo.rateForCharge({

@@ -668,13 +668,61 @@ export const gameweeksRepo = {
   },
 
   /** Change a player's team or captaincy without touching the amount. */
-  updateCharge(gameweekId, chargeId, { team, is_captain }) {
+  /**
+   * Which side somebody was on, and whether they wore the armband.
+   *
+   * The captain rate is a DISCOUNT — 20 against 27 on Mon/Thu, 27 against 32
+   * on Saturdays — and Game Day applies it when the armband is set on the
+   * night. Setting it afterwards did not: the flag changed, the stats
+   * changed, and the captain went on paying the full contract rate. So the
+   * five games still missing a captain could not be corrected without
+   * overcharging whoever was named by exactly the discount they were owed,
+   * and the charge would end up labelled as one rate while carrying another.
+   *
+   * `reprice` is opt-in rather than automatic, because this is a game that
+   * has already been played and settled, and moving money on it is a decision
+   * somebody makes, not a side effect of ticking a box. The caller is told
+   * what it would be either way — see `captain_rate` on the result.
+   */
+  updateCharge(gameweekId, chargeId, { team, is_captain, reprice = false }) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);
     if (!row) throw new Error('Charge not found');
+    const wantsCaptain = is_captain === undefined ? !!row.is_captain : !!is_captain;
+    const changed = wantsCaptain !== !!row.is_captain;
+
     db.prepare('UPDATE charges SET team = ?, is_captain = ? WHERE id = ?')
-      .run(team ?? row.team, is_captain === undefined ? row.is_captain : (is_captain ? 1 : 0), chargeId);
-    return this.get(gameweekId);
+      .run(team ?? row.team, wantsCaptain ? 1 : 0, chargeId);
+
+    // What the armband is worth on this night, so the caller can offer it.
+    // Only for a charge priced from the contract at all: a guest's cash and a
+    // place funded from another pot are both on the non-contract rate, and
+    // the captain discount is something being in the contract buys.
+    const settler = db.prepare(
+      "SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?")
+      .get(row.charged_to || row.player_id)?.t;
+    const onTheCard = settler !== 'outside' && !row.settles_cash
+      && !row.settled_from_kitty && !row.settle_contract_id;
+    const priced = onTheCard
+      ? this.rateForCharge({ gameweekId, isCaptain: wantsCaptain, fromOtherContract: false })
+      : null;
+
+    if (changed && reprice && priced && priced.amount !== row.amount) {
+      this.applyChargeEdits(gameweekId, [{ chargeId, newAmount: priced.amount }], {
+        reason: wantsCaptain ? 'Captain rate applied' : 'Captain rate removed',
+        changedBy: 'web-ui',
+      });
+      db.prepare('UPDATE charges SET rate_type = ? WHERE id = ?').run(priced.rate_type, chargeId);
+    }
+
+    const out = this.get(gameweekId);
+    // Told, not done: what this charge would become if the rate were applied,
+    // so a screen can ask rather than move money behind somebody's back.
+    out.captain_rate = changed && priced && priced.amount !== row.amount
+      ? { charge_id: chargeId, was: row.amount, would_be: priced.amount,
+        rate_type: priced.rate_type, applied: !!reprice }
+      : null;
+    return out;
   },
   get(id) {
     const g = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(id);

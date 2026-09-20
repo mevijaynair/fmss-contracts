@@ -675,11 +675,39 @@ async function detail(id) {
       catch (e) { toast(e.message, true); }
     }));
 
+  /**
+   * Save a row's side and armband — and, if the armband moved, ask about the
+   * rate.
+   *
+   * The captain rate is a discount the contract pays for. Game Day applies it
+   * on the night; setting the armband afterwards did not, so naming a captain
+   * weeks later left them paying the full contract rate and the charge
+   * labelled as one rate while carrying another. Asked rather than applied,
+   * because this is a game that has been played and settled and moving money
+   * on it is a decision, not a side effect of ticking a box.
+   */
   const patch = async (chargeId) => {
     const team = document.querySelector(`.ch-team[data-charge="${chargeId}"]`).value;
     const capt = document.querySelector(`.ch-capt[data-charge="${chargeId}"]`).checked;
-    try { await api.updateCharge(id, chargeId, { team, is_captain: capt }); toast('Updated'); }
-    catch (e) { toast(e.message, true); }
+    try {
+      const out = await api.updateCharge(id, chargeId, { team, is_captain: capt });
+      const r = out?.captain_rate;
+      if (!r) { toast('Updated'); return; }
+      const apply = confirm(
+        `${capt ? 'Captain' : 'Ordinary'} rate on this contract is ${money(r.would_be)}, `
+        + `and they are charged ${money(r.was)}.\n\nApply it?\n\n`
+        + `${capt ? 'The armband is a discount the contract pays for' : 'They are no longer '
+          + 'getting the captain discount'} — this moves ${money(Math.abs(r.would_be - r.was))} `
+        + 'on a game already played, and goes on the audit trail. '
+        + 'Cancel to set the armband and leave the money alone.');
+      if (apply) {
+        await api.updateCharge(id, chargeId, { team, is_captain: capt, reprice: true });
+        toast(`Armband set and re-priced to ${money(r.would_be)}`);
+      } else {
+        toast('Armband set — the charge is unchanged');
+      }
+      reopen(); render();
+    } catch (e) { toast(e.message, true); }
   };
   document.querySelectorAll('.ch-paid').forEach(el =>
     el.addEventListener('change', async () => {
