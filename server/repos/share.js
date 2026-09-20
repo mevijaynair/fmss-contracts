@@ -115,10 +115,14 @@ function stillToPay() {
     }
     const row = byPlayer.get(l.player_id);
     row.total += l.present_balance;
-    if (l.present_balance !== 0) {
-      row.parts.push({ contract: names[l.contract_id] || l.contract_id,
-        balance: round2(l.present_balance) });
-    }
+    // Every contract they are actually on, including one they are level on.
+    // The picture lays these out as columns, and a column that silently drops
+    // the zeros puts the next person's Saturday figure under Monday's heading.
+    // "Not on that contract" and "on it, at nothing" are different facts and
+    // the reader can only tell them apart if the empty one is still a cell.
+    row.parts.push({ contract_id: l.contract_id,
+      contract: names[l.contract_id] || l.contract_id,
+      balance: round2(l.present_balance) });
   }
 
   const topUp = [...byPlayer.values()]

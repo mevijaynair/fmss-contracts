@@ -1382,6 +1382,38 @@ test('the picture asks each person for money once, across everything', () => {
     'their own money covers it — asking them to pay is asking twice');
 });
 
+test('the split is one entry per contract they are on, zero included', () => {
+  // The picture lays the split out as columns — name, each contract, total —
+  // and it matches a cell to a column by contract_id. Dropping the contracts
+  // they happen to be level on would leave a hole, and a hole in a column
+  // layout is not read as "nothing": the next figure along slides under the
+  // wrong heading. A contract they are genuinely not on has no entry, which
+  // is what lets the picture show a dash there instead of a nought.
+  const other = 'testc7';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Third night','{}',0,7)`).run(other);
+
+  const both = player('Level on one', 0);
+  ledgersRepo.ensure(both, other);       // joined, never paid in, never played
+  db.prepare('UPDATE ledgers SET opening_balance = -70 WHERE player_id = ? AND contract_id = ?')
+    .run(both, CONTRACT);
+
+  const onlyHere = player('One night only', -40);
+
+  const pay = shareRepo.club({ weeks: 3 }).still_to_pay;
+  const split = pay.top_up.find(r => r.name === 'Level on one');
+  assert.equal(split.total, -70, 'the nought changes nothing about what they owe');
+  const zero = split.parts.find(p => p.contract_id === other);
+  assert.ok(zero, 'the contract they are level on still has a cell');
+  assert.equal(zero.balance, 0, 'showing the nought it actually is');
+
+  const lone = pay.top_up.find(r => r.name === 'One night only');
+  assert.ok(!lone.parts.some(p => p.contract_id === other),
+    'a contract they were never on has no cell, so the picture can say so');
+  assert.ok(split.parts.every(p => p.contract_id && p.contract),
+    'every cell names its contract by id, not by the order it came back in');
+});
+
 test('an ordinary charge is not reported as pending', () => {
   // Charges settled off a prepaid balance are never marked paid. Reading
   // `paid = 0` as "outstanding" would publish the whole season as a debt.
