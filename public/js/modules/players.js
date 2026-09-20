@@ -103,9 +103,13 @@ async function splitPlayerModal(playerId) {
       new record; everything left stays here. No amount changes and the pot does not move —
       this only says whose game was whose.</p>
     <div class="form-group mt"><label for="sp_name">The other person's name</label>
-      <input type="text" id="sp_name" placeholder="e.g. ${esc(player.name)} K, or a surname">
+      <input type="text" id="sp_name" placeholder="e.g. ${esc(player.name)} 2, or a surname">
       <p class="hint" style="margin:0.35rem 0 0">It has to be tellable apart from
         ${esc(player.name)} in a pasted team sheet, or you are back where you started.</p></div>
+    <label class="login-shared" style="margin:0 0 1rem"><input type="checkbox" id="sp_guest">
+      <span>They are a guest — a walk-up who pays cash on the day and keeps no balance.
+        This is the usual case when two people share a name: one is on a contract and the
+        other is somebody who came along.</span></label>
     <h4 class="mini-h mt">Games (${charges.length})</h4>
     <div class="split-list">${charges.map(c => `
       <label class="split-row">
@@ -139,8 +143,10 @@ async function splitPlayerModal(playerId) {
       + `from ${player.name} to ${name}?\n\nNo amount changes. If the two balances do not add `
       + 'up to what they add up to now, nothing is written at all.')) return;
     try {
-      const out = await api.post(`/admin/players/${playerId}/split`,
-        { name, charge_ids: chargeIds, contribution_ids: contributionIds });
+      const out = await api.post(`/admin/players/${playerId}/split`, {
+        name, charge_ids: chargeIds, contribution_ids: contributionIds,
+        player_type: $('sp_guest').checked ? 'outside' : 'regular',
+      });
       closeModal();
       store.players = await api.players();
       toast(`${out.created.name} pulled out of ${out.original.name}'s record`);
@@ -1087,12 +1093,19 @@ function addPlayerModal() {
     <div class="form-group"><label>Name</label><input type="text" id="np_name" placeholder="Player name"></div>
     <div class="form-group mt"><label>WhatsApp aliases (comma-separated)</label>
       <input type="text" id="np_aliases" placeholder="e.g. Tush, Tushi"></div>
+    <label class="login-shared mt"><input type="checkbox" id="np_guest">
+      <span>A guest — pays cash on the day, keeps no balance, and stays off the ledger and
+        the standing sheet. Leave this off for anyone joining a contract.</span></label>
     <button class="btn full-w mt" id="np_save">Create player</button>`);
   $('np_save').addEventListener('click', async () => {
     const name = $('np_name').value.trim();
     if (!name) { toast('Name required', true); return; }
     try {
-      await api.createPlayer({ name, aliases: $('np_aliases').value.split(',').map(s => s.trim()).filter(Boolean) });
+      await api.createPlayer({
+        name,
+        aliases: $('np_aliases').value.split(',').map(s => s.trim()).filter(Boolean),
+        player_type: $('np_guest').checked ? 'outside' : 'regular',
+      });
       store.players = await api.players();
       closeModal(); toast('Player created ✓'); render();
     } catch (e) { toast(e.message, true); }

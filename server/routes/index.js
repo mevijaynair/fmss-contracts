@@ -521,11 +521,13 @@ r.get('/admin/players/:playerId/split-preview', wrap((req) => {
 
 r.post('/admin/players/:playerId/split', wrap((req) => {
   requireAdmin(req);
-  const { name, charge_ids, contribution_ids } = req.body || {};
+  const { name, charge_ids, contribution_ids, player_type, outside_cost } = req.body || {};
   return playersRepo.splitInto(req.params.playerId, {
     name,
     chargeIds: Array.isArray(charge_ids) ? charge_ids : [],
     contributionIds: Array.isArray(contribution_ids) ? contribution_ids : [],
+    playerType: player_type || null,
+    outsideCost: outside_cost ?? null,
   });
 }));
 

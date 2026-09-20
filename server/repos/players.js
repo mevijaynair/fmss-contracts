@@ -25,7 +25,8 @@ export const playersRepo = {
   get(id) {
     return row(db.prepare('SELECT * FROM players WHERE id = ?').get(id));
   },
-  create({ name, aliases = [], allowDuplicateName = false }) {
+  create({ name, aliases = [], allowDuplicateName = false,
+    player_type = 'regular', outside_cost = null }) {
     // Two people with the same name is a real situation — the club has two
     // Rohits — but it must be a decision, not an accident. The parser takes
     // the first record that matches a token, so an unnoticed duplicate means
@@ -36,9 +37,19 @@ export const playersRepo = {
         `${clash.name} is already on the roster, and a team sheet cannot tell the two apart. `
         + 'Add something that distinguishes them — a surname or an initial.');
     }
+    // A guest could only be made by pasting an unknown name into Game Day and
+    // answering a prompt, which meant the one thing you might want to do
+    // deliberately — write down the walk-up who keeps turning up, as a guest —
+    // could only happen by accident. outside_cost stays null unless a rate has
+    // actually been agreed with them; null means the contract's own guest rate,
+    // which is right for nearly everybody.
+    const type = player_type === 'outside' ? 'outside' : 'regular';
+    const cost = type === 'outside' && Number(outside_cost) > 0
+      ? Number(outside_cost) : null;
     const id = slug(name);
-    db.prepare('INSERT INTO players (id,name,aliases,created_at) VALUES (?,?,?,?)')
-      .run(id, name.trim(), JSON.stringify(aliases), new Date().toISOString());
+    db.prepare(`INSERT INTO players (id,name,aliases,player_type,outside_cost,created_at)
+                VALUES (?,?,?,?,?,?)`)
+      .run(id, name.trim(), JSON.stringify(aliases), type, cost, new Date().toISOString());
 
     // Create ledger rows for all existing contracts so player appears everywhere
     const contracts = db.prepare('SELECT id FROM contracts ORDER BY sort, name').all();
@@ -192,7 +203,8 @@ export const playersRepo = {
    * The new person is given a distinguishable name, because leaving two
    * records reading "Rohit" would rebuild the exact problem being fixed here.
    */
-  splitInto(playerId, { name, chargeIds = [], contributionIds = [] } = {}) {
+  splitInto(playerId, { name, chargeIds = [], contributionIds = [],
+    playerType = null, outsideCost = null } = {}) {
     const original = this.get(playerId);
     if (!original) throw new Error('No such player');
     const newName = String(name || '').trim();
@@ -235,10 +247,21 @@ export const playersRepo = {
     const newId = slug(newName);
     db.exec('BEGIN IMMEDIATE');
     try {
+      // The second person is usually the same kind as the first, but not
+      // always — and the case that prompted this is exactly the exception.
+      // The club's second Rohit is a walk-up who pays cash, sharing a name
+      // with a contracted member. Without being able to say so here, the
+      // split produced another member and the guest had to be made by hand
+      // afterwards, which is where the games get left behind.
+      const type = playerType === 'outside' ? 'outside'
+        : playerType === 'regular' ? 'regular'
+          : (original.player_type || 'regular');
+      const cost = type === 'outside'
+        ? (Number(outsideCost) > 0 ? Number(outsideCost) : original.outside_cost ?? null)
+        : null;
       db.prepare(`INSERT INTO players (id,name,aliases,player_type,outside_cost,created_at)
                   VALUES (?,?,'[]',?,?,?)`)
-        .run(newId, newName, original.player_type || 'regular', original.outside_cost ?? null,
-          new Date().toISOString());
+        .run(newId, newName, type, cost, new Date().toISOString());
       for (const c of db.prepare('SELECT id FROM contracts').all()) {
         ledgersRepo.ensure(newId, c.id);
       }
@@ -275,13 +298,29 @@ export const playersRepo = {
         drift.push(`kitty moved ${before.kitty} -> ${after.kitty}`);
       }
       if (drift.length) {
-        // Balances drifting would mean the reassignment itself is wrong. The
-        // kitty drifting almost certainly means one of these games had a
-        // stale pot entry that recomputing has just corrected — a real fault,
-        // but somebody else's, and not one to fix silently in the middle of
-        // splitting a person in two. Either way: nothing is written.
+        // This tool reassigns WHO, never HOW something is settled, so the
+        // money must come out the same. Three reasons it might not, and the
+        // reader needs to know which:
+        //
+        //   Making the second person a guest, while one of the moved games
+        //   was funded off a balance. A guest keeps no balance, so that game
+        //   turns into cash they owe — a real change, and a legitimate one,
+        //   but it is a change of SETTLEMENT and belongs on the game, where
+        //   Game history already offers it.
+        //
+        //   A stale pot entry on one of these games, which recomputing has
+        //   just corrected. Somebody else's fault, and not one to fix
+        //   silently in the middle of splitting a person in two.
+        //
+        //   The reassignment itself being wrong, which is the case this
+        //   whole check exists for.
+        const guesty = playerType === 'outside' && drift.some(d => !d.startsWith('kitty'));
         throw new Error(`Splitting would have changed the money, so nothing was done: ${
           drift.join('; ')}.`
+          + (guesty
+            ? ' One of those games comes off a balance, and a guest keeps none — switch it to'
+              + ' cash on the game first, in Game history, then split.'
+            : '')
           + (drift.some(d => d.startsWith('kitty'))
             ? ' A game\'s pot entry looks out of date — run the kitty reconcile first.' : ''));
       }

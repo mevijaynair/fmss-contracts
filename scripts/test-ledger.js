@@ -1473,6 +1473,50 @@ test('splitting one record into two moves games without moving money', () => {
     'the two are now distinguishable in a team sheet');
 });
 
+test('the second person can be a guest, which is the usual reason there are two', () => {
+  // The club's second Rohit is a walk-up who pays cash and happens to share a
+  // name with a member. Without saying so in the split, it produced another
+  // member and the guest had to be made by hand afterwards — which is where
+  // the games get left behind.
+  const one = playersRepo.create({ name: 'Sunil' });
+  const g1 = game(); const g2 = game();
+  const mine = `ch${++seq}`; const theirs = `ch${++seq}`;
+  // Both already settled in cash, which is what a walk-up's games look like.
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,settles_cash,paid)
+              VALUES (?,?,?,'',0,'noncontract',35,?,1,1)`).run(mine, g1, one.id, one.id);
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,settles_cash,paid)
+              VALUES (?,?,?,'',0,'noncontract',35,?,1,1)`).run(theirs, g2, one.id, one.id);
+  for (const g of [g1, g2]) gameweeksRepo.recomputeGameKitty(g);
+
+  const { created } = playersRepo.splitInto(one.id, {
+    name: 'Sunil 2', chargeIds: [theirs], playerType: 'outside',
+  });
+  assert.equal(playersRepo.get(created.id).player_type, 'outside', 'a guest, as asked');
+  assert.equal(statsRepo.playerGames(created.id, 5).length, 1, 'with their game');
+  assert.equal(statsRepo.playerGames(one.id, 5).length, 1, 'and the member keeps theirs');
+});
+
+test('turning a balance-funded game into a guest game is refused, and says why', () => {
+  // A guest keeps no balance, so a game that came off one becomes cash they
+  // owe. That is a real change and a legitimate one — but it is a change of
+  // SETTLEMENT, which belongs on the game, not hidden inside renaming people.
+  const one = playersRepo.create({ name: 'Pradeep', aliases: [] });
+  db.prepare('UPDATE ledgers SET opening_balance = 200 WHERE player_id = ? AND contract_id = ?')
+    .run(one.id, CONTRACT);
+  const g = game();
+  const c = `ch${++seq}`;
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'contracted_12',30,?,0)`).run(c, g, one.id, one.id);
+  gameweeksRepo.recomputeGameKitty(g);
+  assert.equal(balanceOf(one.id), 170);
+
+  assert.throws(() => playersRepo.splitInto(one.id,
+    { name: 'Pradeep 2', chargeIds: [c], playerType: 'outside' }),
+  /switch it to cash on the game first/);
+  assert.equal(balanceOf(one.id), 170, 'and nothing moved');
+  assert.ok(!playersRepo.get('pradeep_2'), 'nor was the record left behind');
+});
+
 test('a split that would move money is refused whole', () => {
   const p = playersRepo.create({ name: 'Unsplittable' });
   const other = playersRepo.create({ name: 'Somebody Else Entirely' });
