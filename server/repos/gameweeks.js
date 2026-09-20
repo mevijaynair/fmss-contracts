@@ -847,6 +847,10 @@ export const gameweeksRepo = {
         .get(id);
       sets.push('hours=?');
       values.push(Math.round(h * 100) / 100);
+      // Saving the duration is a person looking at it, whether or not they
+      // changed it. That is what stops the P&L flagging the same night for
+      // ever once somebody has checked and it really was an hour.
+      sets.push('hours_confirmed=1');
       if (before && before.h > 0 && h !== before.h) {
         sets.push('cost_per_gw=?');
         values.push(Math.round((before.c / before.h) * h * 100) / 100);

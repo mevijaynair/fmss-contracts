@@ -430,12 +430,17 @@ export const financeRepo = {
       // — and that night eats two hours of the bundle while looking on every
       // screen exactly like the one before it. Reported, never applied: the
       // duration decides the cost, and a guessed duration is a guessed cost.
+      //
+      // Once somebody has looked at a night and saved its duration it drops
+      // off, even if they saved the same hour back. A warning that cannot be
+      // answered is one that gets ignored, including on the day it is right.
       hours_to_check: ids.length ? db.prepare(`
-        SELECT g.date, COUNT(ch.id) AS players
+        SELECT g.id, g.date, COUNT(ch.id) AS players
         FROM gameweeks g JOIN charges ch ON ch.gameweek_id = g.id
         WHERE g.id IN (${ids.map(() => '?').join(',')}) AND COALESCE(g.hours, 1) = 1
+          AND COALESCE(g.hours_confirmed, 0) = 0
         GROUP BY g.id HAVING players > 12 ORDER BY g.date`)
-        .all(...ids).map(r => ({ date: r.date, players: r.players })) : [],
+        .all(...ids).map(r => ({ id: r.id, date: r.date, players: r.players })) : [],
       // Two routes to the same figure. Anything other than zero is a bug in one
       // of them, not a rounding curiosity.
       kitty_says: kittyFromGames,

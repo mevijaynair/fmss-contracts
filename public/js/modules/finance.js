@@ -102,12 +102,18 @@ function pnlCard(p) {
       (${signed(p.profit_per_game_contracted)} a game). The games have not been
       repriced; that would move money on nights already shared with the club.</p>` : ''}
 
-    ${p.hours_to_check.length ? `<p class="hint fin-drift">
+    ${p.hours_to_check.length ? `<div class="fin-drift fin-note">
       ${p.hours_to_check.length} night${p.hours_to_check.length === 1 ? '' : 's'} had more than
-      two teams out but ${p.hours_to_check.length === 1 ? 'is' : 'are'} recorded as one hour
-      — ${p.hours_to_check.map(h => `${fmtDate(h.date)} (${h.players})`).join(', ')}.
-      If the court was held longer, set it on the game and this cost follows. Nothing has
-      been assumed.</p>` : ''}
+      two teams out but ${p.hours_to_check.length === 1 ? 'is' : 'are'} recorded as one hour.
+      Nothing has been assumed — if the court was held longer, set it on the game and the cost
+      follows.
+      <div class="quick-row">${p.hours_to_check.map(h =>
+    `<span class="fin-check"><strong>${fmtDate(h.date)}</strong>
+      <span class="hint">${h.players} players</span>
+      <button class="btn btn-secondary btn-sm" data-hours-ok="${esc(h.id)}"
+        title="Record that you have checked, and stop asking">An hour is right</button></span>`)
+    .join('')}</div>
+    </div>` : ''}
 
     ${p.cost.sessions_priced_from_a_contract === 0 ? `<p class="hint fin-note">
       No venue booking is wired to this contract yet, so the pitch above is the
@@ -345,6 +351,17 @@ async function load() {
           <div class="es-sub">Add the O365 deal below and the profit on Mon/Thu stops being
             a guess at what a pitch costs.</div></div>`;
     renderStatement(statement);
+
+    // "An hour is right" — saves the duration back unchanged, which is what
+    // records that somebody looked. Nothing about the game moves.
+    $('finPnl').querySelectorAll('[data-hours-ok]').forEach(b =>
+      b.addEventListener('click', async () => {
+        try {
+          await api.put(`/gameweeks/${b.dataset.hoursOk}`, { metadata: { hours: 1 } });
+          toast('Noted — that night is settled at an hour');
+          load();
+        } catch (e) { toast(e.message, true); }
+      }));
 
     const byId = new Map(venues.map(v => [v.id, v]));
     $('finVenues').querySelectorAll('[data-pay]').forEach(b =>

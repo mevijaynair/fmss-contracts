@@ -1500,3 +1500,8 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
   color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.03em; }
 .rec-item strong { font-size: 1.35rem; font-weight: 800; color: var(--text-main);
   text-transform: none; letter-spacing: 0; }
+
+/* One flagged night and the button that answers it. */
+.fin-check { display: inline-flex; align-items: baseline; gap: 0.45rem;
+  padding: 0.3rem 0.5rem; border-radius: 8px; background: var(--bg-subtle);
+  font-size: 0.8rem; color: var(--text-muted); }

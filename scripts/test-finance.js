@@ -208,7 +208,7 @@ test('a game with more than two teams out is flagged, never assumed', () => {
   gameweeksRepo.recomputeGameKitty(big);
   try {
     const p = financeRepo.pnl(C);
-    assert.deepEqual(p.hours_to_check, [{ date: '2026-09-15', players: 15 }],
+    assert.deepEqual(p.hours_to_check, [{ id: big, date: '2026-09-15', players: 15 }],
       'fifteen out on a one-hour booking is worth asking about');
     assert.equal(p.hours, 4, 'but nothing was changed — it still counts as one hour');
 
@@ -228,6 +228,33 @@ test('a game with more than two teams out is flagged, never assumed', () => {
     assert.equal(financeRepo.pnl(C).hours, 5, 'and a refused edit left it alone');
   } finally {
     dropGame(big);
+  }
+});
+
+test('a night that really was an hour can be answered, and stays answered', () => {
+  // Thirteen turned up and they played an hour. Without a way to say so, the
+  // same night is flagged every time the screen is opened — and a warning
+  // that cannot be answered is one that gets ignored, including on the day it
+  // is right.
+  const g = game('2026-09-16');
+  for (let i = 0; i < 13; i++) charge(g, ajay, 35);
+  gameweeksRepo.recomputeGameKitty(g);
+  try {
+    assert.equal(financeRepo.pnl(C).hours_to_check.length, 1, 'flagged to begin with');
+
+    // Saving the SAME hour back is what records that somebody looked.
+    const before = { hours: financeRepo.pnl(C).hours, pitch: financeRepo.pnl(C).cost.pitch_booked };
+    gameweeksRepo.updateMetadata(g, { hours: 1 });
+    const after = financeRepo.pnl(C);
+    assert.deepEqual(after.hours_to_check, [], 'answered');
+    assert.equal(after.hours, before.hours, 'and nothing about the night moved');
+    assert.equal(after.cost.pitch_booked, before.pitch);
+    assert.equal(after.drift, 0);
+
+    // Still answered on the next read — it is recorded, not a UI dismissal.
+    assert.deepEqual(financeRepo.pnl(C).hours_to_check, []);
+  } finally {
+    dropGame(g);
   }
 });
 

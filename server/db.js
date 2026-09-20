@@ -984,6 +984,18 @@ export function initSchema() {
       if (!cols.includes('hours')) {
         db.exec('ALTER TABLE gameweeks ADD COLUMN hours REAL NOT NULL DEFAULT 1');
       }
+      // Whether a person has actually looked at the duration.
+      //
+      // The P&L flags a night with more than two teams out that is recorded as
+      // one hour, because that is usually a game that ran long. Sometimes it
+      // is not — thirteen turned up and they played an hour — and without
+      // somewhere to record "yes, I checked, it was an hour", the same game is
+      // flagged every time the screen is opened. A warning that cannot be
+      // answered is a warning that gets ignored, including on the day it is
+      // right. Saving the duration, whatever value is saved, sets this.
+      if (!cols.includes('hours_confirmed')) {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN hours_confirmed INTEGER NOT NULL DEFAULT 0');
+      }
     },
 
     // venue_contracts: sessions thrown in free.
