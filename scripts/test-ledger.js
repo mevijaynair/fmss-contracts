@@ -1329,6 +1329,109 @@ test('a charge settled by someone else says whose game it was', () => {
     'two identical lines on one date read as a double charge unless named');
 });
 
+test('paying for somebody does not put their game on your list', () => {
+  // Vijay covered Rahul's guest fee on 12 September. Reading charged_to as
+  // well as player_id put Rahul's game on Vijay's "your last games" — the same
+  // night listed twice, the second on a side he was not on, with a button
+  // beside it inviting him to report it as wrong.
+  const host = player('Pays for people', 500);
+  const visitor = player('Brought along');
+  makeOutside(visitor);
+  const g = game();
+  charge(g, host, 30);
+  charge(g, visitor, 40, { chargedTo: host });
+
+  const mine = statsRepo.playerGames(host, 10);
+  assert.equal(mine.length, 1, 'one night, one row');
+  assert.equal(mine[0].charged, 30, 'and it is what THEY were charged');
+
+  // The guest's own list still has it — they played it.
+  assert.equal(statsRepo.playerGames(visitor, 10).length, 1);
+
+  // And the record, which has always keyed on player_id, agrees.
+  assert.equal(statsRepo.matchRecord(host).games, 1);
+});
+
+// ---------------------------------------------------------------------------
+// One record, two people.
+
+test('a name already on the roster is refused, whichever end it comes from', () => {
+  playersRepo.create({ name: 'Dinesh' });
+  assert.throws(() => playersRepo.create({ name: 'dinesh' }), /cannot tell the two apart/,
+    'case is not a distinction a team sheet can make');
+  assert.throws(() => playersRepo.create({ name: ' Dinesh ' }), /cannot tell the two apart/);
+  // Renaming onto an existing name is the same hazard from the other end.
+  const other = playersRepo.create({ name: 'Ganesh' });
+  assert.throws(() => playersRepo.update(other.id, { name: 'Dinesh' }), /already how/);
+  assert.throws(() => playersRepo.update(other.id, { aliases: ['Dinesh'] }), /already how/,
+    'an alias resolves a token just as a name does');
+  // And renaming somebody to what they are already called is not a clash.
+  assert.equal(playersRepo.update(other.id, { name: 'Ganesh' }).name, 'Ganesh');
+  // Deliberate duplicates stay possible for a caller that means it.
+  const twin = playersRepo.create({ name: 'Dinesh', allowDuplicateName: true });
+  assert.equal(playersRepo.nameCollisions().filter(c => c.name === 'dinesh').length, 1,
+    'and then it is reported rather than hidden');
+  playersRepo.delete(twin.id);
+});
+
+test('splitting one record into two moves games without moving money', () => {
+  // The club has two men called Rohit. Every "Rohit" in a pasted sheet went to
+  // whichever record matched first, so one person's games landed on the other.
+  const one = playersRepo.create({ name: 'Rohit' });
+  db.prepare('UPDATE ledgers SET opening_balance = 300 WHERE player_id = ? AND contract_id = ?')
+    .run(one.id, CONTRACT);
+  contribute(one.id, 100);
+  const gA = game(); const gB = game(); const gC = game();
+  const cA = `ch${++seq}`; const cB = `ch${++seq}`; const cC = `ch${++seq}`;
+  for (const [cid, gid] of [[cA, gA], [cB, gB], [cC, gC]]) {
+    db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+                VALUES (?,?,?,'',0,'',30,?,0)`).run(cid, gid, one.id, one.id);
+    // As a real game is: its pot entry already derived from its charges. The
+    // split recomputes them, and without this the recompute would be creating
+    // entries that had never existed rather than confirming them — which the
+    // guard correctly refuses.
+    gameweeksRepo.recomputeGameKitty(gid);
+  }
+  const before = balanceOf(one.id);
+  const kittyBefore = kittyRepo.balance().balance;
+  assert.equal(before, 310, '300 opening + 100 in − 3 games at 30');
+
+  const { created } = playersRepo.splitInto(one.id, {
+    name: 'Rohit K', chargeIds: [cB, cC],
+  });
+
+  assert.equal(balanceOf(one.id), 370, 'kept the opening, the payment and one game');
+  assert.equal(balanceOf(created.id), -60, 'took two games and nothing else');
+  assert.equal(round2(balanceOf(one.id) + balanceOf(created.id)), before,
+    'a split reassigns; it never creates or destroys');
+  assert.equal(kittyRepo.balance().balance, kittyBefore, 'and the pot is untouched');
+  assert.equal(playersRepo.nameCollisions().filter(c => c.name === 'rohit').length, 0,
+    'the two are now distinguishable in a team sheet');
+});
+
+test('a split that would move money is refused whole', () => {
+  const p = playersRepo.create({ name: 'Unsplittable' });
+  const other = playersRepo.create({ name: 'Somebody Else Entirely' });
+  const g = game();
+  const mine = `ch${++seq}`; const theirs = `ch${++seq}`;
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'',30,?,0)`).run(mine, g, p.id, p.id);
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'',30,?,0)`).run(theirs, g, other.id, other.id);
+
+  // Reaching into somebody else's charge through the selection.
+  assert.throws(() => playersRepo.splitInto(p.id, { name: 'Thief', chargeIds: [theirs] }),
+    /not Unsplittable's to move/);
+  assert.equal(balanceOf(other.id), -30, 'and their charge stayed where it was');
+  assert.ok(!playersRepo.get('thief'), 'no new record was created');
+
+  // A name that cannot be told apart from the original.
+  assert.throws(() => playersRepo.splitInto(p.id, { name: 'Unsplittable', chargeIds: [mine] }),
+    /indistinguishable/);
+  // Nothing selected is not a split.
+  assert.throws(() => playersRepo.splitInto(p.id, { name: 'Nobody' }), /Nothing selected/);
+});
+
 process.on('exit', () => {
   try { fs.rmSync(path.dirname(scratch), { recursive: true, force: true }); } catch { /* temp dir */ }
 });

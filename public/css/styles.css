@@ -1505,3 +1505,27 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
 .fin-check { display: inline-flex; align-items: baseline; gap: 0.45rem;
   padding: 0.3rem 0.5rem; border-radius: 8px; background: var(--bg-subtle);
   font-size: 0.8rem; color: var(--text-muted); }
+
+/* --- "Is this the right person?" on Game Day ----------------------------
+   A name in a sheet resolves to whichever record matches first, and the app
+   cannot tell two people apart by name alone. Both of these are questions
+   asked where the charge is about to be made, rather than discovered in
+   somebody's balance three weeks later. Neither blocks anything. */
+.id-warn { display: inline-block; margin-left: 0.35rem; padding: 0.05rem 0.4rem;
+  border-radius: 6px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.03em; white-space: nowrap; cursor: help; }
+.id-warn.is-same { background: color-mix(in srgb, var(--danger) 16%, var(--bg-card));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text-main)); }
+.id-warn.is-back { background: color-mix(in srgb, var(--warning) 16%, var(--bg-card));
+  color: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
+
+/* --- Splitting one record into two ------------------------------------- */
+.split-list { max-height: 15rem; overflow-y: auto; border: 1px solid var(--border-color);
+  border-radius: 10px; padding: 0.35rem 0.5rem; }
+.split-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 4.5rem;
+  gap: 0.6rem; align-items: baseline; padding: 0.35rem 0.25rem; font-size: 0.84rem;
+  border-bottom: 1px solid var(--border-color); cursor: pointer; }
+.split-row:last-child { border-bottom: none; }
+.split-row:hover { background: var(--bg-subtle); }
+.split-row .num { text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--text-muted); }

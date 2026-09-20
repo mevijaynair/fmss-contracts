@@ -447,7 +447,78 @@ r.post('/parse', wrap((req) => {
   const players = playersRepo.all();
   const statusOf = {};
   for (const l of ledgersRepo.forContract(contract_id)) statusOf[l.player_id] = l.status;
-  return parseTeams(text || '', players, statusOf, contract.rates);
+  const parsed = parseTeams(text || '', players, statusOf, contract.rates);
+
+  // Two things the person pasting the sheet cannot see for themselves, and
+  // which are the same hazard from two directions.
+  //
+  // A name in a sheet resolves to whichever record matches first. If two
+  // people share a name, one of them silently collects the other's games —
+  // which is exactly how the club's two Rohits ended up on one record.
+  //
+  // And a contract player turning out after months away is worth a second
+  // look for the same reason: either they really are back, in which case
+  // their balance almost certainly needs a top-up, or this is somebody new
+  // with a familiar name and the charge is about to land on the wrong person.
+  const ambiguous = new Map();
+  for (const c of playersRepo.nameCollisions()) {
+    for (const p of c.players) ambiguous.set(p.id, c.players.map(x => x.name));
+  }
+  const lastPlayed = new Map(db.prepare(`
+    SELECT ch.player_id, MAX(g.date) AS d FROM charges ch
+    JOIN gameweeks g ON g.id = ch.gameweek_id
+    GROUP BY ch.player_id`).all().map(r => [r.player_id, r.d]));
+  const today = new Date().toISOString().slice(0, 10);
+  const daysBetween = (a, b) =>
+    Math.round((new Date(b) - new Date(a)) / 864e5);
+
+  for (const row of parsed.rows || []) {
+    if (!row.player_id) continue;
+    const shared = ambiguous.get(row.player_id);
+    if (shared) row.shares_name_with = shared.filter(n => n !== row.display_name);
+    const last = lastPlayed.get(row.player_id);
+    row.last_played = last || null;
+    row.days_away = last ? daysBetween(last, today) : null;
+  }
+  return parsed;
+}));
+
+// ---- one record, two people ----
+r.get('/admin/players/:playerId/split-preview', wrap((req) => {
+  requireAdmin(req);
+  const id = req.params.playerId;
+  const p = playersRepo.get(id);
+  if (!p) throw new Error('No such player');
+  return {
+    player: { id: p.id, name: p.name },
+    charges: db.prepare(`
+      SELECT ch.id, g.date, g.contract_id, c.name AS contract_name, ch.team,
+             ch.is_captain, ch.amount, ch.rate_type, ch.paid, ch.settles_cash,
+             ch.player_id, ch.charged_to
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      LEFT JOIN contracts c ON c.id = g.contract_id
+      WHERE ch.player_id = ? OR ch.charged_to = ?
+      ORDER BY g.date DESC`).all(id, id),
+    contributions: db.prepare(`
+      SELECT q.id, q.date, q.contract_id, q.amount, q.comments
+      FROM contributions q WHERE q.player_id = ? ORDER BY q.date DESC`).all(id),
+  };
+}));
+
+r.post('/admin/players/:playerId/split', wrap((req) => {
+  requireAdmin(req);
+  const { name, charge_ids, contribution_ids } = req.body || {};
+  return playersRepo.splitInto(req.params.playerId, {
+    name,
+    chargeIds: Array.isArray(charge_ids) ? charge_ids : [],
+    contributionIds: Array.isArray(contribution_ids) ? contribution_ids : [],
+  });
+}));
+
+r.get('/admin/name-collisions', wrap((req) => {
+  requireAdmin(req);
+  return playersRepo.nameCollisions();
 }));
 
 // ---- results sheet import ----
@@ -1022,7 +1093,12 @@ r.get('/dashboard', wrap((req) => {
   const contracts = contractsRepo.all();
   const perContract = contracts.map((c) => {
     const all = ledgersRepo.forContract(c.id);
-    const ledgers = all.filter(l => !cashiers.has(l.player_id));
+    // Guests are out, for the same reason they are out of the ledger and the
+    // standing sheet: they keep no balance and buy no games, so they add a row
+    // at zero to every count on this screen and a name at zero to the chase
+    // list. What they owe is cash, reported separately, and is not a balance.
+    const ledgers = all.filter(l => !cashiers.has(l.player_id)
+      && (l.player_type || 'regular') !== 'outside');
     const cashierFloat = round2(Math.abs(all
       .filter(l => cashiers.has(l.player_id) && l.present_balance < 0)
       .reduce((s, l) => s + l.present_balance, 0)));

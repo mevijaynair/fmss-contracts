@@ -26,8 +26,13 @@ export const statsRepo = {
       FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
       LEFT JOIN contracts c ON c.id = g.contract_id
-      WHERE COALESCE(ch.charged_to, ch.player_id) = ? OR ch.player_id = ?
-      ORDER BY g.date DESC, g.id DESC LIMIT ?`).all(playerId, playerId, limit);
+      -- player_id ONLY. charged_to says whose money paid, which is a different
+      -- question: Vijay covered Rahul's guest fee on 12 September, and reading
+      -- both columns put Rahul's game on Vijay's list — the same night twice,
+      -- the second one on a side Vijay was not on, with a "report a problem"
+      -- button beside it. Who played is who played.
+      WHERE ch.player_id = ?
+      ORDER BY g.date DESC, g.id DESC LIMIT ?`).all(playerId, limit);
 
     const teamsOf = db.prepare(
       "SELECT DISTINCT team FROM charges WHERE gameweek_id = ? AND team != ''");

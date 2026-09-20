@@ -1,7 +1,7 @@
 // gameday.js — paste WhatsApp teams → parse → editable preview → confirm & deduct.
 import { api } from '../api.js';
 import { store, toast, defaultContract } from '../store.js';
-import { $, esc, money, today, contractSeg, rosterOptions } from '../util.js';
+import { $, esc, money, today, fmtDate, contractSeg, rosterOptions } from '../util.js';
 import { loadDashboard } from './dashboard.js';
 import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.js';
 
@@ -189,6 +189,40 @@ function findPlayerByToken(token) {
   if (p) return p;
 
   return null;
+}
+
+// How long away before a familiar name deserves a second look. Two months is
+// most of a season's break; anything shorter is a holiday.
+const AWAY_DAYS = 60;
+
+/**
+ * Is this the person the sheet means?
+ *
+ * A name in a team sheet resolves to whichever record matches first, and the
+ * app cannot tell two people apart by name alone — which is how the club's two
+ * Rohits ended up on one record, one of them quietly collecting the other's
+ * games. Two signs of it, shown where the charge is about to be made rather
+ * than discovered in a balance three weeks later:
+ *
+ *   shares a name   there is genuinely more than one of them on the roster,
+ *                   so the match is a coin toss and needs choosing by hand.
+ *   long gone       a contract player who has not turned out for months is
+ *                   either really back — in which case their balance almost
+ *                   certainly needs topping up before they play — or this is
+ *                   somebody new with a familiar name.
+ *
+ * Neither blocks anything. Both are questions, because only the person who was
+ * there can answer them.
+ */
+function identityWarning(r) {
+  const bits = [];
+  if (r.shares_name_with?.length) {
+    bits.push(`<span class="id-warn is-same" title="More than one ${esc(r.display_name)} on the roster — make sure this charge lands on the right one">two people share this name</span>`);
+  } else if (r.matched && r.days_away !== null && r.days_away >= AWAY_DAYS) {
+    const months = Math.round(r.days_away / 30);
+    bits.push(`<span class="id-warn is-back" title="Last played ${esc(fmtDate(r.last_played))} — check their balance, and check it is the same person">back after ${months} month${months === 1 ? '' : 's'}</span>`);
+  }
+  return bits.join('');
 }
 
 async function showUnmatchedMapping(unmatched) {
@@ -451,7 +485,7 @@ function renderPreview(meta) {
     return `
     <tr>
       <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}${
-        !r.matched ? ' <span class="miss-badge">new / unmatched</span>' : ''}</td>
+  !r.matched ? ' <span class="miss-badge">new / unmatched</span>' : ''}${identityWarning(r)}</td>
       <td><span class="team-dot team-${esc(r.team)}"></span>${esc(r.team)}</td>
       <td>${typeControl}</td>
       <td><span class="tag">${

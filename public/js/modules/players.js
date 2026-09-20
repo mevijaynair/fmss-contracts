@@ -21,9 +21,10 @@ let contractId = null;   // resolved on first load — see defaultContract()
 // contract you had chosen did not follow you between them. One shape shows at
 // a time — the sheet is not much use as a screenshot with a filter bar and an
 // actions column in it.
-let viewMode = 'ledger';   // 'ledger' | 'sheet'
-const MODES = [['ledger', 'Working', 'Every player, with filters and actions'],
-  ['sheet', 'Standing sheet', 'The same balances, laid out as the sheet you send round']];
+let viewMode = 'ledger';   // 'ledger' | 'sheet' | 'guests'
+const MODES = [['ledger', 'Working', 'The squad, with filters and actions'],
+  ['sheet', 'Standing sheet', 'The same balances, laid out as the sheet you send round'],
+  ['guests', 'Guests', 'One-off players who pay cash — who owes what']];
 
 let currentDetailPlayerId = null;
 let searchQuery = '';
@@ -44,11 +45,16 @@ function daysSince(iso) {
   if (!iso) return null;
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
-// Guests are one-off outside players. They outnumber the regulars after a season
-// import and push the contracted squad off the screen, so the ledger shows only
-// contract players unless this is turned on. Guest debts are chased from the
-// gameweek settlement view instead.
-let showGuests = false;
+// Guests are one-off outside players, and there are more of them than there
+// are members — twenty-one against forty-two. They keep no balance and buy no
+// games: they hand over cash on the day, and that is the whole of their
+// involvement with the ledger. So they are not in it at all. A row of theirs
+// would read 0, "Out of contract", no games left, which is three columns of
+// nothing three times a week.
+//
+// What the club actually needs to know about a guest is who owes cash, and
+// that has a tab of its own now. The old "show guests" tick was a way of
+// putting them back into a sheet they do not belong in.
 
 const STATUSES = ['In Contract', 'Refill needed', 'Out of contract'];
 
@@ -67,6 +73,150 @@ function statusFromBalance(balance, gamesLeft) {
   if (gamesLeft < 1) return { text: '⚠️ Cannot cover next game', cls: 'tag-due' };
   if (gamesLeft < 2) return { text: '⚠️ 1 game left', cls: 'tag-due' };
   return { text: `✓ ${gamesLeft} games left`, cls: 'tag-paid' };
+}
+
+/**
+ * One record turns out to be two people.
+ *
+ * The club has two men called Rohit. A name in a team sheet resolves to
+ * whichever record matches first, so one of them quietly collected the other's
+ * games — and nothing on any screen said so.
+ *
+ * The modal asks the only question a person can answer: of these games, which
+ * ones are the OTHER Rohit's? Everything is shown, nothing is guessed. The
+ * server moves the ticked rows and refuses the whole thing unless the two
+ * balances afterwards add up to the one balance before.
+ */
+async function splitPlayerModal(playerId) {
+  let data;
+  try { data = await api.get(`/admin/players/${playerId}/split-preview`); }
+  catch (e) { toast(e.message, true); return; }
+
+  const { player, charges, contributions } = data;
+  if (!charges.length && !contributions.length) {
+    toast(`${player.name} has no games or payments to divide`, true);
+    return;
+  }
+
+  openModal(`Two people called ${player.name}`, `
+    <p class="hint">Tick what belongs to the <strong>other</strong> person. Those rows move to a
+      new record; everything left stays here. No amount changes and the pot does not move —
+      this only says whose game was whose.</p>
+    <div class="form-group mt"><label for="sp_name">The other person's name</label>
+      <input type="text" id="sp_name" placeholder="e.g. ${esc(player.name)} K, or a surname">
+      <p class="hint" style="margin:0.35rem 0 0">It has to be tellable apart from
+        ${esc(player.name)} in a pasted team sheet, or you are back where you started.</p></div>
+    <h4 class="mini-h mt">Games (${charges.length})</h4>
+    <div class="split-list">${charges.map(c => `
+      <label class="split-row">
+        <input type="checkbox" data-split-charge="${esc(c.id)}">
+        <span><strong>${esc(fmtDate(c.date))}</strong>
+          <span class="hint">${esc(c.contract_name || c.contract_id)}${c.team ? ` · ${esc(c.team)}` : ''}${
+  c.is_captain ? ' · captain' : ''}${c.settles_cash ? ` · cash${c.paid ? ', paid' : ', owed'}` : ''}</span></span>
+        <span class="num">${money(c.amount)}</span>
+      </label>`).join('')}</div>
+    ${contributions.length ? `<h4 class="mini-h mt">Payments in (${contributions.length})</h4>
+    <div class="split-list">${contributions.map(q => `
+      <label class="split-row">
+        <input type="checkbox" data-split-contrib="${esc(q.id)}">
+        <span><strong>${esc(fmtDate(q.date))}</strong>
+          <span class="hint">${esc(q.comments || '')}</span></span>
+        <span class="num">${money(q.amount)}</span>
+      </label>`).join('')}</div>` : ''}
+    <button class="btn full-w mt" id="sp_go">Split them apart</button>`, { wide: true });
+
+  $('sp_go').addEventListener('click', async () => {
+    const pick = (attr) => [...document.querySelectorAll(`[data-split-${attr}]:checked`)]
+      .map(el => el.dataset[attr === 'charge' ? 'splitCharge' : 'splitContrib']);
+    const chargeIds = pick('charge');
+    const contributionIds = pick('contrib');
+    const name = $('sp_name').value.trim();
+    if (!name) { toast('The other person needs a name', true); return; }
+    if (!chargeIds.length && !contributionIds.length) {
+      toast('Tick what belongs to them', true); return;
+    }
+    if (!confirm(`Move ${chargeIds.length} game(s) and ${contributionIds.length} payment(s) `
+      + `from ${player.name} to ${name}?\n\nNo amount changes. If the two balances do not add `
+      + 'up to what they add up to now, nothing is written at all.')) return;
+    try {
+      const out = await api.post(`/admin/players/${playerId}/split`,
+        { name, charge_ids: chargeIds, contribution_ids: contributionIds });
+      closeModal();
+      store.players = await api.players();
+      toast(`${out.created.name} pulled out of ${out.original.name}'s record`);
+      render();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
+/**
+ * The guests, and the only thing about them the club needs: who owes cash.
+ *
+ * They are out of the ledger and out of the standing sheet, and both are
+ * better for it — twenty-one one-off names at a 0 balance and "Out of
+ * contract" is three columns of nothing, three times a week, on top of the
+ * squad you are actually trying to read. But out of sight is not the same as
+ * gone: a guest who played and has not paid is real money, and this is where
+ * it is chased.
+ *
+ * It lists ANYONE who owes cash, guest or not — a member can settle a single
+ * night in cash too, and splitting that across two screens by what kind of
+ * person they are would be organising the list by the wrong thing. What these
+ * rows have in common is that somebody has to hand over notes.
+ *
+ * Collecting is marked on the game itself, in Game History, because that is
+ * what banks it in the pot. Offering a second button here would be a second
+ * way to move the same money.
+ */
+async function renderGuests(host) {
+  host.innerHTML = '<p class="hint">Loading…</p>';
+  let owed = [];
+  try { owed = await api.cashOutstanding(contractId) || []; }
+  catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+
+  const guests = (store.players || []).filter(p => p.player_type === 'outside');
+  const total = owed.reduce((s, r) => s + r.owed, 0);
+  const nameOf = Object.fromEntries((store.players || []).map(p => [p.id, p]));
+
+  host.innerHTML = `
+    <div class="sams-card">
+      <div class="card-header">
+        <h3 class="card-title">Cash to collect</h3>
+        <span class="card-sub">${guests.length} guest${guests.length === 1 ? '' : 's'} on the
+          roster · they keep no balance, so nothing here is a ledger figure</span>
+      </div>
+      ${owed.length ? `
+      <div class="rep-collect">
+        <div class="rep-collect-head">${owed.length} ${owed.length === 1 ? 'person owes' : 'people owe'}
+          <strong>${money(total)}</strong> between them</div>
+      </div>
+      <div class="table-scroll">
+        <table class="sams-table">
+          <thead><tr><th>Who</th><th>Contract</th><th class="num">Games</th>
+            <th class="num">Owes</th><th>Last played</th><th></th></tr></thead>
+          <tbody>${owed.map(r => `
+            <tr>
+              <td><strong>${esc(r.player_name || 'Guest')}</strong>${
+  (nameOf[r.player_id]?.player_type || 'regular') !== 'outside'
+    ? ' <span class="hint">member, paying cash</span>' : ''}</td>
+              <td>${esc(store.contracts.find(c => c.id === r.contract_id)?.name || r.contract_id)}</td>
+              <td class="num">${r.games}</td>
+              <td class="num"><span class="bal neg">${money(r.owed)}</span></td>
+              <td>${esc(fmtDate(r.last_game_date))}</td>
+              <td class="row-actions">
+                <button class="btn btn-secondary btn-sm" data-goto="gameweeks"
+                  title="Marking it collected on the game is what puts the cash in the pot">Collect</button>
+              </td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <p class="hint rep-key">Collecting is marked on the game itself, in Game history — that is
+        what banks it in the kitty. A second button here would be a second way to move the same
+        money.</p>`
+    : `<div class="empty-state"><div class="es-icon">✅</div>
+        <div class="es-title">Nothing to collect</div>
+        <div class="es-sub">Every guest who has played has settled up.</div></div>`}
+    </div>`;
 }
 
 /**
@@ -99,7 +249,7 @@ async function render() {
   const sheetHost = $('reportRoot');
   // Adding a player and importing a roster are things you do to the ledger.
   // They mean nothing on a sheet you are about to send to the club.
-  $('plLedgerActions').style.display = viewMode === 'sheet' ? 'none' : 'flex';
+  $('plLedgerActions').style.display = viewMode === 'ledger' ? 'flex' : 'none';
 
   if (viewMode === 'sheet') {
     // The detail panel belongs to the working ledger — leaving it open under a
@@ -108,6 +258,15 @@ async function render() {
     ledgerCard.hidden = true;
     sheetHost.hidden = false;
     await renderStandingSheet(sheetHost, contractId);
+    drawScreenControls();
+    return;
+  }
+
+  if (viewMode === 'guests') {
+    closePlayerDetail();
+    ledgerCard.hidden = true;
+    sheetHost.hidden = false;
+    await renderGuests(sheetHost);
     drawScreenControls();
     return;
   }
@@ -132,8 +291,9 @@ async function render() {
       l.player_name.toLowerCase().includes(p.toLowerCase())
     );
     if (isTestPlayer) return false;
-    // Guests are hidden unless asked for — see showGuests.
-    if (!showGuests && l.player_type === 'outside') return false;
+    // Guests are never in the ledger — see the note above. They have their
+    // own tab, because what matters about them is cash owed, not a balance.
+    if (l.player_type === 'outside') return false;
     // Search by name
     if (searchQuery && !l.player_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     // Filter by status
@@ -190,10 +350,6 @@ async function render() {
       <option value="in contract" ${filterStatus === 'in contract' ? 'selected' : ''}>In contract</option>
       <option value="out of contract" ${filterStatus === 'out of contract' ? 'selected' : ''}>Out of contract</option>
     </select>
-    <label class="guest-toggle" title="Outside players who are not on a contract">
-      <input type="checkbox" id="pl_show_guests" ${showGuests ? 'checked' : ''}>
-      <span>Show guests<span id="pl_guest_count" class="hint"></span></span>
-    </label>
     <select id="pl_filter_balance">
       <option value="all" ${filterBalance === 'all' ? 'selected' : ''}>Any balance</option>
       <option value="positive" ${filterBalance === 'positive' ? 'selected' : ''}>In credit</option>
@@ -208,12 +364,9 @@ async function render() {
     </select>
   `;
 
-  // How many guests are being withheld, and whether any of them owe. Hiding them
-  // silently would be worse than the clutter — a guest in debt still matters.
-  // A guest owes through cash_owed, not through a negative balance: they keep no
-  // prepaid balance to go into the red. This counted negative balances, which
-  // after that correction is always nobody.
-  const guestRows = ledgers.filter(l => l.player_type === 'outside');
+  // A guest owes through cash_owed, not through a negative balance: they keep
+  // no prepaid balance to go into the red. Kept here because a MEMBER can also
+  // settle a game in cash, and their row should say so.
   const owedById = Object.fromEntries((cashOwed || []).map(c => [c.player_id, c.owed]));
   const hiddenIds = new Set((store.players || [])
     .filter(p => p.hide_from_sheet).map(p => p.id));
@@ -236,16 +389,7 @@ async function render() {
   $('pl_filter_status').addEventListener('change', (e) => { filterStatus = e.target.value; updateRender(); });
   $('pl_filter_balance').addEventListener('change', (e) => { filterBalance = e.target.value; updateRender(); });
   $('pl_filter_activity').addEventListener('change', (e) => { filterActivity = e.target.value; updateRender(); });
-  $('pl_show_guests')?.addEventListener('change', (e) => { showGuests = e.target.checked; updateRender(); });
-  const guestNote = $('pl_guest_count');
-  if (guestNote) {
-    guestNote.textContent = guestRows.length
-      ? (guestsOwing.length
-        ? ` (${guestRows.length}, ${guestsOwing.length} owing ${money(guestDebt)})`
-        : ` (${guestRows.length})`)
-      : '';
-    if (guestsOwing.length) guestNote.classList.add('is-owing');
-  }
+
 
   // Fetch last transaction for each player
   const lastTransactionMap = {};
@@ -325,6 +469,9 @@ async function render() {
           title="Marks someone as having left the club: they drop off the Standing sheet and out of the rankings, and stay on this screen so you can put them back. Moves no money — no balance, no charge, no total."
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
   hiddenIds.has(l.player_id) ? '👁 Mark as playing' : '🚪 Mark as left'}</button>
+        <button class="btn btn-sm" data-split="${l.player_id}"
+          title="One record, two people with the same name — pull the second one out, taking their games with them"
+          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">⑂ Two people</button>
         <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
         <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
       </td>
@@ -354,6 +501,8 @@ async function render() {
     });
   });
 
+  $('playersTable').querySelectorAll('[data-split]').forEach(btn =>
+    btn.addEventListener('click', () => splitPlayerModal(btn.dataset.split)));
   $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
     btn.addEventListener('click', () => resetPlayerModal(btn.dataset.reset)));
   $('playersTable').querySelectorAll('[data-delete]').forEach(btn =>
