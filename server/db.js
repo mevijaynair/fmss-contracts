@@ -996,6 +996,21 @@ export function initSchema() {
       if (!cols.includes('hours_confirmed')) {
         db.exec('ALTER TABLE gameweeks ADD COLUMN hours_confirmed INTEGER NOT NULL DEFAULT 0');
       }
+      // WHERE it was played, which is not the same as which contract it
+      // belongs to.
+      //
+      // The pitch is bought by the ground: O365 sells a block of hours, Koora
+      // sells another, and an hour is only used up at the ground it was bought
+      // from. Pricing from the CONTRACT assumed the two never crossed — so a
+      // Mon/Thu-contract game played at Koora ate an O365 hour it had nothing
+      // to do with, and cost whatever Mon/Thu costs rather than what Koora
+      // charged.
+      //
+      // NULL means the contract's own venue, which is nearly every game, so
+      // nothing existing changes.
+      if (!cols.includes('venue')) {
+        db.exec('ALTER TABLE gameweeks ADD COLUMN venue TEXT');
+      }
     },
 
     // venue_contracts: sessions thrown in free.

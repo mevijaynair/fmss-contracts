@@ -79,14 +79,36 @@ function cashier() {
  * contract (no end_date — the Saturday booking until it is renewed) covers
  * everything from its start onwards, which is what "let it run loose" means.
  */
-function sessionsIn(contractId, from, to) {
+/**
+ * A game's ground: what it says, or the contract's own if it says nothing.
+ *
+ * Kept as SQL because every query that prices a night needs it, and two
+ * different expressions of the same rule is how they drift apart.
+ */
+const GAME_VENUE = "COALESCE(NULLIF(TRIM(g.venue), ''), c.venue, '')";
+
+/**
+ * The hours a booking has actually had used, counted BY GROUND.
+ *
+ * An hour bought from O365 is only used up by playing at O365. Counting by
+ * contract instead assumed the two never crossed: a Mon/Thu-contract game
+ * played at Koora ate an O365 hour it had nothing to do with, and a Saturday
+ * game moved onto the Mon/Thu contract stopped consuming Koora's. Which is
+ * precisely what happened on 19 September.
+ *
+ * Matched on the vendor's name against the game's venue, case- and
+ * space-insensitively, because both are typed by a person.
+ */
+function sessionsIn(vendor, from, to) {
   return db.prepare(
     `SELECT COUNT(*) n,
-            COALESCE(SUM(COALESCE(hours, 1)), 0) hours,
-            COALESCE(SUM(cost_per_gw), 0) booked
-     FROM gameweeks
-     WHERE contract_id = ? AND historical = 0 AND date >= ? AND date <= ?`
-  ).get(contractId, from, to || '9999-12-31');
+            COALESCE(SUM(COALESCE(g.hours, 1)), 0) hours,
+            COALESCE(SUM(g.cost_per_gw), 0) booked
+     FROM gameweeks g
+     LEFT JOIN contracts c ON c.id = g.contract_id
+     WHERE g.historical = 0 AND g.date >= ? AND g.date <= ?
+       AND LOWER(TRIM(${GAME_VENUE})) = LOWER(TRIM(?))`
+  ).get(from, to || '9999-12-31', vendor || '');
 }
 
 /** One venue contract with everything derived from it. */
@@ -97,7 +119,7 @@ function decorate(vc) {
   const paid = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
 
   const upto = vc.end_date && vc.end_date < today() ? vc.end_date : today();
-  const played = sessionsIn(vc.contract_id, vc.start_date, upto);
+  const played = sessionsIn(vc.vendor, vc.start_date, upto);
 
   // HOURS bought, including the ones thrown in. O365 sells "20 + 3hrs free",
   // so the bundle buys twenty-three hours; Koora sells twenty with nothing
@@ -309,10 +331,11 @@ export const financeRepo = {
     const end = to || '9999-12-31';
 
     const games = db.prepare(
-      `SELECT id, date, cost_per_gw, game_cost, game_cost_paid_by,
-              COALESCE(hours, 1) AS hours
-       FROM gameweeks WHERE contract_id = ? AND historical = 0
-         AND date >= ? AND date <= ? ORDER BY date`
+      `SELECT g.id, g.date, g.cost_per_gw, g.game_cost, g.game_cost_paid_by,
+              COALESCE(g.hours, 1) AS hours, ${GAME_VENUE} AS venue
+       FROM gameweeks g LEFT JOIN contracts c ON c.id = g.contract_id
+       WHERE g.contract_id = ? AND g.historical = 0
+         AND g.date >= ? AND g.date <= ? ORDER BY g.date`
     ).all(contractId, start, end);
     const ids = games.map(g => g.id);
 
@@ -342,10 +365,17 @@ export const financeRepo = {
     // been entered. Falls back to the booked cost for any date no contract
     // covers — the Saturday deal until it is renewed — so the figure is never a
     // guess dressed up as a contract price.
-    const bookings = this.venueContracts(contractId);
-    const rateOn = (date) => {
-      const vc = bookings.find(v => v.start_date <= date
-        && (!v.end_date || v.end_date >= date) && v.cost_per_session !== null);
+    // EVERY booking, not just this contract's, because a night is priced by
+    // the ground it was played at. A Mon/Thu game at Koora is bought out of
+    // Koora's block, and the fact that the players are on the Mon/Thu
+    // contract has nothing to do with what the pitch cost.
+    const bookings = this.venueContracts();
+    const same = (a, b) => String(a || '').trim().toLowerCase()
+      === String(b || '').trim().toLowerCase();
+    const rateOn = (date, venue) => {
+      const vc = bookings.find(v => same(v.vendor, venue)
+        && v.start_date <= date && (!v.end_date || v.end_date >= date)
+        && v.cost_per_session !== null);
       return vc ? vc.cost_per_session : null;
     };
     let pitchContracted = 0;
@@ -354,7 +384,7 @@ export const financeRepo = {
     for (const g of games) {
       const h = Number(g.hours) || 1;
       hours += h;
-      const r = rateOn(g.date);
+      const r = rateOn(g.date, g.venue);
       // Priced by the hour. A tournament night holds the court for two, so it
       // costs two — while cost_per_gw still records it as one booking, which is
       // exactly the gap this pricing exists to close.
@@ -393,6 +423,12 @@ export const financeRepo = {
       hours,
       long_games: games.filter(g => (Number(g.hours) || 1) !== 1)
         .map(g => ({ date: g.date, hours: Number(g.hours) || 1 })),
+      // Nights this contract played somewhere other than its usual ground.
+      // Worth saying, because the pitch cost on those comes from a different
+      // booking and will not match the contract's own figure.
+      away_games: [...new Set(games.map(g => g.venue))].length > 1
+        ? games.filter(g => !same(g.venue, c.venue))
+          .map(g => ({ date: g.date, venue: g.venue })) : [],
       players_billed: ids.length ? db.prepare(
         `SELECT COUNT(*) n FROM charges WHERE gameweek_id IN (${ids.map(() => '?').join(',')})`)
         .get(...ids).n : 0,

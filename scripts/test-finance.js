@@ -260,7 +260,7 @@ test('a night that really was an hour can be answered, and stays answered', () =
 
 test('an open-ended booking refuses to invent a per-session rate', () => {
   const vc = financeRepo.createVenueContract({
-    contract_id: C, vendor: 'Koora', start_date: '2026-08-01',
+    contract_id: C, vendor: 'O365', start_date: '2026-08-01',
     sessions_total: null, amount_total: 900,
   });
   assert.equal(vc.cost_per_session, null, 'a total with no session count is not a rate');
@@ -269,6 +269,45 @@ test('an open-ended booking refuses to invent a per-session rate', () => {
   assert.equal(vc.is_open_ended, true);
   assert.equal(vc.games_played, 3, 'it still covers every game from its start');
   financeRepo.removeVenueContract(vc.id);
+});
+
+test('a booking is used up at its own ground, not by its contract', () => {
+  // An hour bought from O365 is only spent by playing at O365. Counting by
+  // contract assumed the two never crossed, so a Mon/Thu night played at
+  // Koora ate an O365 hour it had nothing to do with — and a Saturday game
+  // refiled onto Mon/Thu stopped consuming Koora's.
+  const koora = financeRepo.createVenueContract({
+    contract_id: C, vendor: 'Koora', start_date: '2026-08-01', end_date: '2026-12-31',
+    sessions_total: 10, amount_total: 1000,
+  });
+  assert.equal(koora.games_played, 0, 'every game so far was at O365');
+
+  // One night away from the usual ground.
+  const away = game('2026-09-02', { pitch: 300 });
+  db.prepare("UPDATE gameweeks SET venue = 'Koora' WHERE id = ?").run(away);
+  charge(away, ajay, 35);
+  gameweeksRepo.recomputeGameKitty(away);
+
+  assert.equal(financeRepo.venueContract(koora.id).games_played, 1, 'Koora has it now');
+  assert.equal(financeRepo.venueContract(koora.id).hours_played, 1);
+
+  // And the P&L prices that night from Koora's rate, not the contract's.
+  const o365 = financeRepo.createVenueContract({
+    contract_id: C, vendor: 'O365', start_date: '2026-08-01', end_date: '2026-12-31',
+    sessions_total: 10, amount_total: 2000,           // 200 a night
+  });
+  const p = financeRepo.pnl(C);
+  assert.deepEqual(p.away_games, [{ date: '2026-09-02', venue: 'Koora' }]);
+  assert.equal(p.cost.sessions_priced_from_a_contract, 4, 'three at O365, one at Koora');
+  assert.equal(p.cost.pitch_contracted, 200 * 3 + 100 * 1,
+    'each night at the rate of the ground it was played on');
+  assert.equal(financeRepo.venueContract(o365.id).games_played, 3, 'and O365 keeps only its own');
+
+  financeRepo.removeVenueContract(koora.id);
+  financeRepo.removeVenueContract(o365.id);
+  db.prepare('DELETE FROM charges WHERE gameweek_id = ?').run(away);
+  db.prepare('DELETE FROM kitty WHERE scope = ?').run(away);
+  db.prepare('DELETE FROM gameweeks WHERE id = ?').run(away);
 });
 
 test('payments accumulate, and removing the booking takes them with it', () => {

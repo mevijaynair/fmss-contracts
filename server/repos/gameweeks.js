@@ -749,8 +749,8 @@ export const gameweeksRepo = {
       db.prepare(`INSERT INTO gameweeks
         (id,contract_id,gw_number,contract_number,date,cost_per_gw,num_players,
          teams_raw,captains_raw,score,comments,historical,created_at,
-         scoreline,teams_json,whatsapp_message,game_cost,game_cost_paid_by,kitty_earned,hours)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)`).run(
+         scoreline,teams_json,whatsapp_message,game_cost,game_cost_paid_by,kitty_earned,hours,venue)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)`).run(
         id, gw.contract_id, gw.gw_number ?? this.nextGwNumber(gw.contract_id),
         gw.contract_number ?? 0, gw.date || now.slice(0, 10), gw.cost_per_gw || 0,
         charges.length, gw.teams_raw || '', gw.captains_raw || '', gw.score || '',
@@ -759,7 +759,10 @@ export const gameweeksRepo = {
         gw.game_cost || 0, gw.game_cost_paid_by || 'self', gw.kitty_earned || 0,
         // How long the court was held. One hour unless Game Day says otherwise,
         // which is what every ordinary two-team night is.
-        Number(gw.hours) > 0 ? Math.round(Number(gw.hours) * 100) / 100 : 1);
+        Number(gw.hours) > 0 ? Math.round(Number(gw.hours) * 100) / 100 : 1,
+        // Where it was played. Null means the contract's own ground, which is
+        // nearly every game, so the common case stores nothing.
+        (gw.venue && String(gw.venue).trim()) || null);
 
       const insCharge = db.prepare(`INSERT INTO charges
         (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash,
@@ -928,7 +931,8 @@ export const gameweeksRepo = {
    * counted for nothing.
    */
   updateMetadata(id, fields = {}) {
-    const columns = ['game_type', 'tournament_name', 'comments', 'teams_raw', 'captains_raw'];
+    const columns = ['game_type', 'tournament_name', 'comments', 'teams_raw', 'captains_raw',
+      'venue'];
     const sets = [];
     const values = [];
     for (const col of columns) {

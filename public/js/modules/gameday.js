@@ -195,6 +195,100 @@ function findPlayerByToken(token) {
 // most of a season's break; anything shorter is a holiday.
 const AWAY_DAYS = 60;
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** The weekdays a contract normally plays, from its own schedule. */
+function contractDays(id) {
+  const c = store.contracts?.find(x => x.id === id);
+  let days = c?.game_days ?? [];
+  if (typeof days === 'string') { try { days = JSON.parse(days); } catch { days = []; } }
+  return Array.isArray(days) ? days : [];
+}
+
+/**
+ * Is this date a night this contract plays?
+ *
+ * 19 September was a Saturday entered against Mon/Thu and nothing said a word,
+ * so it sat on the wrong contract, at the wrong rates, eating an hour of the
+ * wrong ground's booking, until somebody noticed their own result was missing
+ * from the Saturdays table three weeks later.
+ *
+ * A warning, not a block. Clubs do play the odd extra session on an off day,
+ * and refusing it outright would mean the only way to record a real game is to
+ * lie about its date — which is worse than what this prevents. It names the
+ * contract the date DOES belong to, because that is nearly always the answer.
+ */
+function offDayNote() {
+  const note = document.querySelector('[data-gd-daynote]');
+  if (!note) return;
+  const date = $('gdDate')?.value;
+  const days = contractDays(contractId);
+  if (!date || !days.length) { note.innerHTML = ''; return; }
+  const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+  if (days.includes(dow)) { note.innerHTML = ''; return; }
+
+  const elsewhere = (store.contracts || []).find(c =>
+    c.id !== contractId && contractDays(c.id).includes(dow));
+  const here = store.contracts?.find(c => c.id === contractId);
+  note.innerHTML = `<span class="gd-offday">${DAY_NAMES[dow]}</span> is not a
+    ${esc(here?.name || 'contract')} night${elsewhere
+    ? ` — it is a ${esc(elsewhere.name)} one.
+        <button type="button" class="link-btn" data-gd-switch="${esc(elsewhere.id)}">switch to
+        ${esc(elsewhere.name)}</button>` : '.'}
+    Carry on if this really was an extra ${esc(here?.name || '')} session.`;
+  note.querySelector('[data-gd-switch]')?.addEventListener('click', (e) => {
+    const seg = $('gdContractSeg');
+    seg.querySelector(`[data-id="${e.target.dataset.gdSwitch}"]`)?.click();
+  });
+}
+
+// Grounds seen on a venue booking. Fetched once; the contracts supply the
+// rest, so the picker is never empty even before this lands.
+let bookedVenues = [];
+
+/** The grounds the club uses, from the contracts and every venue booking. */
+function knownVenues() {
+  const names = new Set();
+  for (const c of store.contracts || []) if (c.venue) names.add(String(c.venue).trim());
+  for (const v of bookedVenues) if (v) names.add(String(v).trim());
+  return [...names].filter(Boolean).sort();
+}
+
+/**
+ * Fill the ground picker, defaulting to the contract's own.
+ *
+ * Redrawn when the contract changes, because the default follows it — the
+ * whole point is that the usual case needs no thought.
+ */
+function drawVenues() {
+  const sel = $('gdVenue');
+  if (!sel) return;
+  const home = store.contracts?.find(c => c.id === contractId)?.venue || '';
+  const keep = sel.dataset.touched === '1' ? sel.value : home;
+  sel.innerHTML = knownVenues()
+    .map(v => `<option value="${esc(v)}"${v === keep ? ' selected' : ''}>${esc(v)}${
+  v === home ? ' — usual' : ''}</option>`).join('');
+  venueNote();
+}
+
+/**
+ * Where it was played, and what that means for the pitch.
+ *
+ * The pitch is bought by the GROUND — an hour out of the O365 block is only
+ * used up at O365 — so a night away from the usual ground is priced from that
+ * ground's booking, not from the contract's figure.
+ */
+function venueNote() {
+  const note = document.querySelector('[data-gd-venuenote]');
+  if (!note) return;
+  const chosen = $('gdVenue')?.value || '';
+  const home = store.contracts?.find(c => c.id === contractId)?.venue || '';
+  note.textContent = !chosen || chosen === home
+    ? ''
+    : `Played away from ${home || 'the usual ground'} — this night comes out of ${chosen}'s`
+      + ' booking, not the contract\'s.';
+}
+
 /**
  * Is this the person the sheet means?
  *
@@ -855,6 +949,11 @@ async function doConfirm() {
     scoreline: `${d.aGoals}-${d.bGoals}`,
     teams_json: JSON.stringify(rows.map(r => ({ player_id: r.player_id, team: r.team }))),
     whatsapp_message: $('gdGameMessage').value.trim(),
+    // Where it was played. Null when it is the contract's usual ground, so
+    // the overwhelmingly common case stores nothing and reads as "as usual".
+    venue: ($('gdVenue')?.value || '')
+      === (store.contracts.find(c => c.id === contractId)?.venue || '')
+      ? null : ($('gdVenue')?.value || null),
     game_cost: Number($('gdGameCost').value) || 0,
     game_cost_paid_by: $('gdCostPaidBy').value || 'self',
     // How long the court was held, which is what the venue bundle is sold in.
@@ -938,6 +1037,8 @@ function clearForm() {
   $('gdCostPaidBy').value = 'self';
   $('gdGameCost').value = '15'; // Reset to default water cost
   if ($('gdHours')) $('gdHours').value = '1';
+  if ($('gdVenue')) delete $('gdVenue').dataset.touched;
+  drawVenues();
   showHoursNote();
   $('gdPreviewCard').hidden = true;
   // Release the date so the next fixture can prefill it again, and re-read the
@@ -949,10 +1050,12 @@ function clearForm() {
 
 export function initGameday() {
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
-    contractId = id; recalcTotal(); renderFixture();
+    contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
   });
   $('gdDate').value = today();
   $('gdGameCost').value = '15'; // Default water cost
+  drawVenues();
+  offDayNote();
 
   // Populate "Who Paid Water Cost" dropdown with players
   const costPaidBySelect = $('gdCostPaidBy');
@@ -977,6 +1080,12 @@ export function initGameday() {
   $('gdCostPaidBy')?.addEventListener('change', () => recomputeKitty());
   // The duration drives the pitch cost now, so it drives the profit too.
   $('gdHours')?.addEventListener('change', () => recomputeKitty());
+  $('gdVenue')?.addEventListener('change', (e) => {
+    e.target.dataset.touched = '1'; venueNote(); recomputeKitty();
+  });
+  // A date on a night this contract does not play is nearly always the wrong
+  // contract, and nothing used to say so.
+  $('gdDate')?.addEventListener('change', offDayNote);
 
   $('gdScore').addEventListener('input', showScoreNote);
   // A date the user set themselves must not be overwritten by the next fixture.
@@ -988,9 +1097,16 @@ export function initGameday() {
 
 export function loadGameday() {
   contractId ??= defaultContract();
+  // The grounds the club has bookings at, so a night away from the usual one
+  // can be picked. Quietly skipped for anyone who cannot read the bookings —
+  // the contracts' own venues still fill the picker.
+  api.venueContracts().then((vs) => {
+    bookedVenues = [...new Set((vs || []).map(v => v.vendor))];
+    drawVenues();
+  }).catch(() => { /* the contract venues are enough */ });
   // Keep the contract segment in sync if contracts loaded after init.
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
-    contractId = id; recalcTotal(); renderFixture();
+    contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
   });
   renderFixture();
 

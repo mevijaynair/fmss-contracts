@@ -1529,3 +1529,9 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
 .split-row:hover { background: var(--bg-subtle); }
 .split-row .num { text-align: right; font-variant-numeric: tabular-nums;
   color: var(--text-muted); }
+
+/* The date is on a night this contract does not play. A warning, not a block:
+   clubs do play the odd extra session, and refusing it outright would make
+   lying about the date the only way to record a real game. */
+.gd-offday { font-weight: 700;
+  color: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
