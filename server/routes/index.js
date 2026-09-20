@@ -29,6 +29,7 @@ import { issuesRepo } from '../repos/issues.js';
 import { parseTeams } from '../parser.js';
 import { parseResultsSheet, normaliseScore, winningTeam, isTournament } from '../results_import.js';
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
+import { exportWorkbook } from '../repos/export_workbook.js';
 
 const r = Router();
 
@@ -886,6 +887,23 @@ r.get('/admin/backup', wrap((req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="fmss-backup-${stamp}.json"`);
   res.send(JSON.stringify(doc, null, 2));
+}));
+
+// The same data as a spreadsheet, for working offline.
+//
+// Not a second backup: this one cannot be restored from, and says so on its
+// first sheet. It exists because JSON is the right thing to restore and the
+// wrong thing to read on a laptop with no internet. It carries no PINs or
+// hashes — see server/repos/export_workbook.js.
+r.get('/admin/export/workbook', wrap((req, res) => {
+  requireAdmin(req);
+  const { buffer } = exportWorkbook();
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="fmss-${stamp}.xlsx"`);
+  res.setHeader('Content-Length', buffer.length);
+  res.send(buffer);
 }));
 
 // Describe what a backup would do, without writing anything.

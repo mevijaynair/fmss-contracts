@@ -107,21 +107,54 @@ function renderBackupPanel() {
   if (!el) return;
   el.innerHTML = `
     <div class="quick-row">
-      <button class="btn" id="bkExport">⬇️ Download full backup</button>
+      <button class="btn" id="bkExcel">📊 Download Excel workbook</button>
+      <button class="btn btn-secondary" id="bkExport">⬇️ Full backup (JSON)</button>
       <button class="btn btn-secondary" id="bkExportSafe">⬇️ Without PINs</button>
       <label class="hint" style="display:flex;align-items:center;gap:.4rem">
         <input type="file" id="bkFile" accept="application/json,.json" style="max-width:230px">
       </label>
       <button class="btn btn-secondary" id="bkPreview">Preview restore</button>
     </div>
-    <p class="hint mt">The download is a single JSON file holding every table — keep it somewhere
-      safe. A full backup <strong>contains PINs and password hashes</strong>; use “Without PINs”
+    <p class="hint mt">The <strong>Excel workbook</strong> is for working offline: a sheet each for
+      balances, games, charges, money in, the pot, the cashier statement, profit and loss, and the
+      venue contracts. It holds no PINs, so it is safe to send on. It is <em>not</em> a backup —
+      nothing reads it back in.</p>
+    <p class="hint">The <strong>JSON backup</strong> is what you restore from: a single file holding
+      every table. A full one <strong>contains PINs and password hashes</strong>; use “Without PINs”
       for a copy you will share or store loosely.</p>
     <div id="bkResult" class="mt"></div>`;
 
+  $('bkExcel').addEventListener('click', downloadWorkbook);
   $('bkExport').addEventListener('click', () => downloadBackup(true));
   $('bkExportSafe').addEventListener('click', () => downloadBackup(false));
   $('bkPreview').addEventListener('click', previewRestore);
+}
+
+/**
+ * The spreadsheet. Fetched rather than linked, because the download needs the
+ * bearer token and an <a href> cannot carry one.
+ */
+async function downloadWorkbook() {
+  const btn = $('bkExcel');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Building the workbook…';
+  try {
+    const res = await fetch('/api/admin/export/workbook', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('fmss_token')}` },
+    });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fmss-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast('Workbook downloaded ✓');
+  } catch (e) { toast(`Export failed: ${e.message}`, true); }
+  finally { btn.disabled = false; btn.textContent = label; }
 }
 
 async function downloadBackup(withCredentials) {
