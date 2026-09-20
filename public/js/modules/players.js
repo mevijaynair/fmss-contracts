@@ -5,7 +5,9 @@ import { $, esc, money, balCell, contractSeg, openModal, closeModal, today, fmtD
 import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 import { splitNote, wireSplitNotes } from './contributions.js';
+import { showView } from '../router.js';
 import { renderStandingSheet } from './report.js';
+import { renderClubStanding } from './standing.js';
 import { shareClubSnapshot, sharePlayerSnapshot } from './share.js';
 
 let contractId = null;   // resolved on first load — see defaultContract()
@@ -26,6 +28,14 @@ const MODES = [['ledger', 'Working', 'The squad on one contract, with filters an
   ['both', 'Both', 'Every member across both contracts at once — a view, not a merge'],
   ['sheet', 'Standing sheet', 'The same balances, laid out as the sheet you send round'],
   ['guests', 'Guests', 'One-off players who pay cash — who owes what']];
+
+// A player gets two of the same kind of switch: their own account, and the
+// club's. The standing already goes to the whole group as a picture every
+// week, so the second one publishes nothing new — it just makes it something
+// you can look up rather than scroll back for.
+let playerMode = 'mine';   // 'mine' | 'club'
+const PLAYER_MODES = [['mine', 'My account', 'Your balance on each contract'],
+  ['club', 'Everyone', 'Where the whole club stands, both contracts']];
 
 let currentDetailPlayerId = null;
 let searchQuery = '';
@@ -984,7 +994,40 @@ async function render() {
 
 // Player "My Ledger": their own balances across all contracts (read-only), and
 // clicking a contract row opens their timeline for that contract.
+/**
+ * The player's own two shapes: their account, and the club's standing.
+ *
+ * Drawn into the same control slot the admin's shapes use, so there is one
+ * place that knows what a shape switch looks like.
+ */
+function drawPlayerModeSeg() {
+  document.querySelectorAll('[data-pl-modeseg]').forEach((seg) => {
+    seg.innerHTML = PLAYER_MODES.map(([id, label, why]) =>
+      `<button data-pl-pmode="${id}" class="${playerMode === id ? 'active' : ''}"
+        title="${esc(why)}">${label}</button>`).join('');
+    seg.querySelectorAll('[data-pl-pmode]').forEach(b =>
+      b.addEventListener('click', () => {
+        if (playerMode === b.dataset.plPmode) return;
+        playerMode = b.dataset.plPmode;
+        renderPlayerLedger();
+      }));
+  });
+}
+
 async function renderPlayerLedger() {
+  drawPlayerModeSeg();
+
+  const ledgerCard = $('plLedgerCard');
+  const host = $('reportRoot');
+  if (playerMode === 'club') {
+    closePlayerDetail();
+    ledgerCard.hidden = true;
+    host.hidden = false;
+    return renderClubStanding(host);
+  }
+  ledgerCard.hidden = false;
+  host.hidden = true;
+
   const ledgers = await api.myLedgers();
   $('playersTable').querySelector('tbody').innerHTML = ledgers.map(l => `
     <tr>
@@ -1624,13 +1667,27 @@ export function initPlayers() {
 }
 
 
+/**
+ * Open the Players screen already showing the club's standing.
+ *
+ * For the link on the player's dashboard: sending them to the ledger and
+ * leaving them to find the switch is not taking them anywhere.
+ */
+export function showClubStanding() {
+  playerMode = 'club';
+  showView('players');
+}
+
 export function loadPlayers() {
   contractId ??= defaultContract();
   if (isPlayer()) {
-    // Hide admin-only chrome; "My Ledger" lists all contracts as rows.
-    // The standing sheet is the club's view of everybody, so a player has no
-    // shape to switch to and the switch itself would be a dead control.
-    $('plScreenControls').hidden = true;
+    // The strip stays, carrying one control: their account or the club's
+    // standing. Everything else on it is the cashier's — which contract the
+    // working ledger is showing, sending the picture, adding a player.
+    $('plScreenControls').hidden = false;
+    $('plContractSeg').hidden = true;
+    $('plShare').hidden = true;
+    $('plLedgerActions').style.display = 'none';
     const banner = $('setupBanner');
     if (banner) banner.style.display = 'none';
     return render();

@@ -239,6 +239,25 @@ function renderPlayerDashboard(d) {
       </div>
     </div>`).join('') || '<p class="hint">No contracts yet.</p>';
 
+  // The club's standing, which members can now open for themselves. It lives
+  // on the ledger screen, and nobody would think to look for everybody else
+  // behind a tab called "My ledger" — so it is offered from here, where the
+  // question ("am I the only one behind?") actually occurs to them.
+  $('contractCards').insertAdjacentHTML('beforeend', `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">The rest of the club</h3></div>
+      <p class="hint">Where everyone stands on both contracts — the same figures that go
+        round the group each week.</p>
+      <button class="btn btn-secondary btn-sm" id="dashClubStanding">See the club standing</button>
+    </div>`);
+  // Lands ON the standing rather than on the ledger with a switch to find:
+  // a button that takes you somewhere and then asks you to press something
+  // else has not taken you anywhere.
+  $('dashClubStanding').addEventListener('click', async () => {
+    const { showClubStanding } = await import('./players.js');
+    showClubStanding();
+  });
+
   renderMyGames();
 
   const title = $('watchTitle');

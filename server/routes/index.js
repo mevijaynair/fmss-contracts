@@ -369,6 +369,22 @@ r.get('/report/:contractId', wrap((req) => {
   return periodReportRepo.report(req.params.contractId, { since: req.query.since || null, includeDormant: req.query.all === '1' });
 }));
 
+// ---- where the whole club stands ----
+//
+// Open to any signed-in member, not just the cashier. The same figures go out
+// to the whole group as a picture every week, so this publishes nothing that
+// was not already published — it makes it something a player can look up
+// instead of scrolling back through the chat for last week's screenshot. It
+// is the one screen that answers "am I the only one behind?", which is the
+// question the club actually asks.
+//
+// Balances and statuses only. Whose money settled whose game, and anybody's
+// payment history, stay where they were: behind the player's own id, or
+// behind admin.
+r.get('/standing', wrap((req) => shareRepo.club({
+  weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)),
+})));
+
 // ---- shareable snapshots (the images that get sent to WhatsApp) ----
 // Read-only, and assembled from the repos that already own each figure — see
 // server/repos/share.js for why that matters.

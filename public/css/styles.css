@@ -1148,6 +1148,16 @@ body.role-admin .role-player-only { display: none !important; }
 td.rep-in { background: color-mix(in srgb, var(--success) 12%, transparent); }
 td.rep-refill { background: color-mix(in srgb, var(--warning) 14%, transparent); }
 td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* The reader's own row, on the club standing a player can now open. Forty
+   names is a list you scan for yourself first, and a tinted row finds it
+   faster than reading down the column. Marked on the row rather than by
+   colouring the name, because the useful thing is the whole line. */
+.rep-me > td { background: color-mix(in srgb, var(--sport) 10%, transparent); }
+.rep-me > td:first-child { box-shadow: inset 3px 0 0 var(--sport); }
+.rep-you { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 0.05rem 0.35rem; border-radius: 4px; vertical-align: middle;
+  background: color-mix(in srgb, var(--sport) 22%, transparent); color: var(--sport-on-soft); }
 /* Captaincy share, shaded by how much of it there is. */
 .rep-capt.is-low { background: color-mix(in srgb, var(--sport) 8%, transparent); }
 .rep-capt.is-mid { background: color-mix(in srgb, var(--sport) 18%, transparent); }

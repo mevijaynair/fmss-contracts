@@ -85,6 +85,12 @@ const PLAYER_MAY = [
   'GET /players/:id/transactions', 'GET /players/:id/record',
   'GET /players/:id/timeline', 'GET /players/:id/stats',
   'GET /share/player/:id',
+  // Where the whole club stands. Opened to members deliberately: the same
+  // figures are sent to the group every week as a picture, and a player who
+  // can only see their own balance cannot tell whether being 40 short is
+  // normal. Balances and statuses only — there is a test below that holds
+  // the line on what it must not carry.
+  'GET /standing',
   'POST /my/pin', 'GET /my/audit',
   'GET /transfers', 'POST /transfers', 'GET /my/transfers',
   'GET /kitty', 'GET /movements', 'GET /contributions',
@@ -244,6 +250,41 @@ test('a bulk action is per person, so one refusal does not lose the rest', async
   // The preview said exactly what the real run did.
   assert.deepEqual(preview.done.map(d => d.id), out.done.map(d => d.id));
   assert.deepEqual(preview.refused.map(r => r.id), out.refused.map(r => r.id));
+});
+
+test('a player can see where everyone stands, and no more than that', async () => {
+  // Opening this up was a deliberate decision — the same figures go to the
+  // whole group as a picture every week. What makes it safe is that it is
+  // the PICTURE's data and nothing else, so this pins down both halves: the
+  // balances are there, and the things a member has no business reading are
+  // not.
+  const res = await fetch(`${BASE}/api/standing`,
+    { headers: { Authorization: `Bearer ${playerToken}` } });
+  assert.equal(res.status, 200, 'a member can read it');
+  const body = await res.text();
+  const d = JSON.parse(body);
+
+  assert.ok(Array.isArray(d.contracts) && d.contracts.length, 'it covers the contracts');
+  assert.ok(d.contracts.every(c => Array.isArray(c.squad)), 'each with its squad');
+  assert.ok(d.still_to_pay && Array.isArray(d.still_to_pay.top_up),
+    'and who still has to pay, across both');
+
+  // A squad row is a name, a balance and a status. Anything more is a
+  // widening nobody decided on — a phone number, a PIN, an account id that
+  // another endpoint would then accept.
+  const fields = [...new Set(d.contracts.flatMap(c => c.squad.flatMap(r => Object.keys(r))))];
+  assert.deepEqual(fields.sort(), ['balance', 'games_left', 'name', 'played', 'status'],
+    `a squad row is no longer just a name, a balance and a status: ${fields.join(', ')}`);
+
+  // Nothing about signing in, however the shape changes underneath.
+  for (const needle of ['pin', 'password', 'hash', 'token', 'email', 'ip_address']) {
+    assert.ok(!body.toLowerCase().includes(`"${needle}`),
+      `the standing carries a "${needle}" field`);
+  }
+
+  // And it is still behind the door.
+  assert.equal((await fetch(`${BASE}/api/standing`)).status, 401,
+    'a stranger can read the club\'s balances');
 });
 
 test('a report is filed under whoever is signed in, never whoever is named', async () => {
