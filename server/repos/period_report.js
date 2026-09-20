@@ -98,6 +98,9 @@ export const periodReportRepo = {
         player_id: l.player_id,
         name: l.player_name,
         player_type: l.player_type || 'regular',
+        // Carried on the row because the collect list has to know: the cashier
+        // is in the red by design and must never be listed as owing anything.
+        special_role: l.special_role || null,
         hidden: !!hiddenIds.has(l.player_id),
         cash_owed: round2(l.cash_owed || 0),
         present_balance: round2(l.present_balance),
@@ -156,10 +159,37 @@ export const periodReportRepo = {
                             && !r.last_contribution_date).length;
     const hiddenMembers = members.filter(r => r.hidden);
 
+    // Who to go and ask, and for how much — the one thing this sheet is
+    // actually used to do. Two kinds of debt that must not be added together:
+    // a member whose prepaid balance has run out owes a top-up, and a guest
+    // owes cash for games they played. Both are read from the gameweeks in
+    // this period, so the list is about what has actually been tracked rather
+    // than about a standing figure.
+    //
+    // The cashier is never on it. They fund the pitch up front and their
+    // balance sits in the red by design; asking them to chase themselves, for
+    // the largest figure on the page, is how that used to read.
+    const collect = [
+      ...members
+        .filter(r => r.present_balance < 0 && !r.hidden
+          && r.special_role !== 'cashier')
+        .map(r => ({
+          player_id: r.player_id, name: r.name, kind: 'topup',
+          amount: round2(-r.present_balance), games: r.played,
+          last_game: null,
+        })),
+      ...ledgersRepo.cashOutstanding(contractId).map(r => ({
+        player_id: r.player_id, name: r.player_name || 'Guest', kind: 'cash',
+        amount: round2(r.owed), games: r.games, last_game: r.last_game_date,
+      })),
+    ].sort((a, b) => b.amount - a.amount);
+
     return {
       contract_id: contractId,
       contract_name: c.name,
       period_start: from,
+      to_collect: collect,
+      to_collect_total: round2(collect.reduce((s, r) => s + r.amount, 0)),
       dormant_hidden: dormant,
       flag_hidden: hiddenMembers.length,
       // What those people are still holding, so hiding somebody can never make

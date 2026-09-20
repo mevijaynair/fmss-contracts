@@ -29,6 +29,7 @@ import { initPlayers, loadPlayers } from './modules/players.js';
 import { initContributions, loadContributions } from './modules/contributions.js';
 import { initGameweeks, loadGameweeks } from './modules/gameweeks.js';
 import { initKitty, loadKitty } from './modules/kitty.js';
+import { initFinance, loadFinance } from './modules/finance.js';
 import { initSettings, loadSettings } from './modules/settings.js';
 import { initLogins, loadLogins } from './modules/logins.js';
 import { initExternalEvents, loadExternalEvents } from './modules/external_events.js';
@@ -43,6 +44,7 @@ const LOADERS = {
   contributions: loadContributions,
   gameweeks: loadGameweeks,
   kitty: loadKitty,
+  finance: loadFinance,
   events: loadExternalEvents,
   transfers: loadTransfers,
   logins: loadLogins,
@@ -74,7 +76,9 @@ async function start() {
   store.user = user;
 
   initResults(); initGameday(); initPlayers(); initContributions(); initGameweeks(); initKitty(); initSettings();
-  if (user?.role === 'admin') { initLogins(); initExternalEvents(); initOpeningBalances(); }
+  if (user?.role === 'admin') {
+    initLogins(); initExternalEvents(); initOpeningBalances(); initFinance();
+  }
   initTransfers();
 
   window.addEventListener('fmss:view', (e) => {

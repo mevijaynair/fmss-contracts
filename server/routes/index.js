@@ -24,6 +24,7 @@ import { playerRelationshipsRepo } from '../repos/player_relationships.js';
 import { outsidePlayersRepo } from '../repos/outside_players.js';
 import { kittyOpeningBalanceRepo } from '../repos/kitty_opening_balance.js';
 import { movementsRepo } from '../repos/movements.js';
+import { financeRepo } from '../repos/finance.js';
 import { parseTeams } from '../parser.js';
 import { parseResultsSheet, normaliseScore, winningTeam, isTournament } from '../results_import.js';
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
@@ -683,6 +684,55 @@ r.get('/admin/contracts/:contractId/kitty-activity', wrap((req) => {
 r.get('/admin/kitty-summary', wrap((req) => {
   requireAdmin(req);
   return kittyOpeningBalanceRepo.getAllBalances();
+}));
+
+// ---- the cashier's side: venue bookings, cash position, profit and loss ----
+//
+// Read-only except for the venue tables. Nothing here writes a kitty row: the
+// pitch is already charged to the pot once per game, and booking the payment as
+// an expense as well would charge the club twice for one booking. See the
+// header of server/repos/finance.js.
+r.get('/admin/finance/cashier', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.cashier();
+}));
+
+r.get('/admin/finance/pnl', wrap((req) => {
+  requireAdmin(req);
+  const { from = null, to = null } = req.query;
+  const ids = req.query.contract
+    ? [req.query.contract] : contractsRepo.all().map(c => c.id);
+  return { contracts: ids.map(id => financeRepo.pnl(id, { from, to })) };
+}));
+
+r.get('/admin/venue-contracts', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.venueContracts(req.query.contract || null);
+}));
+
+r.post('/admin/venue-contracts', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.createVenueContract(req.body || {});
+}));
+
+r.put('/admin/venue-contracts/:venueId', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.updateVenueContract(req.params.venueId, req.body || {});
+}));
+
+r.delete('/admin/venue-contracts/:venueId', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.removeVenueContract(req.params.venueId);
+}));
+
+r.post('/admin/venue-contracts/:venueId/payments', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.addPayment(req.params.venueId, req.body || {});
+}));
+
+r.delete('/admin/venue-payments/:paymentId', wrap((req) => {
+  requireAdmin(req);
+  return financeRepo.removePayment(req.params.paymentId);
 }));
 
 // ---- results: match history with full context ----

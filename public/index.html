@@ -413,6 +413,51 @@
           </div>
         </section>
 
+        <!-- CASHIER — the money from the cashier's side: what is actually in
+             hand, what the venues are owed, and whether each contract is
+             paying for itself. The Kitty screen next door is the accrual
+             picture; this one is cash. -->
+        <section class="view" data-view="finance" hidden>
+          <div class="kpi-strip" id="finKpi"></div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Profit &amp; loss</h3>
+              <span class="card-sub">What each contract earned against what it cost</span></div>
+            <div class="sams-grid" id="finPnl"></div>
+          </div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Venue bookings</h3>
+              <span class="card-sub">What you signed for, and what you have paid</span></div>
+            <div id="finVenues"></div>
+            <form id="finVenueForm" class="kitty-form">
+              <div class="form-group"><label for="vf_contract">Games</label>
+                <select id="vf_contract"></select></div>
+              <div class="form-group"><label for="vf_vendor">Venue</label>
+                <input type="text" id="vf_vendor" placeholder="O365"></div>
+              <div class="form-group"><label for="vf_start">From</label>
+                <input type="date" id="vf_start"></div>
+              <div class="form-group"><label for="vf_end">To (optional)</label>
+                <input type="date" id="vf_end"></div>
+              <div class="form-group"><label for="vf_sessions">Nights paid for</label>
+                <input type="number" id="vf_sessions" step="1" min="0" placeholder="20"></div>
+              <div class="form-group"><label for="vf_free">Free nights</label>
+                <input type="number" id="vf_free" step="1" min="0" placeholder="3" value="0"></div>
+              <div class="form-group"><label for="vf_amount">Total (AED)</label>
+                <input type="number" id="vf_amount" step="0.01" placeholder="5000"></div>
+              <button type="submit" class="btn">Add booking</button>
+            </form>
+            <p class="hint">Leave the end date and nights blank for a booking that is still
+              running loose — the Saturday deal until it is renewed. Free nights are priced in:
+              20 paid and 3 free is 23 nights, and what a night costs is the total over 23.
+              A booking never touches the kitty: the pitch is already charged to the pot once
+              a game.</p>
+          </div>
+          <div class="sams-card">
+            <div class="card-header"><h3 class="card-title">Your cash</h3>
+              <span class="card-sub">What came in, what went out, and who has a claim on it</span></div>
+            <div id="finStatement"></div>
+          </div>
+        </section>
+
         <!-- SETTINGS -->
         <section class="view" data-view="settings" hidden>
           <div class="sams-card">

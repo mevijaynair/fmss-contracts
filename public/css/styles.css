@@ -1334,3 +1334,83 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .empty-state .es-title { font-weight: 700; font-size: 0.98rem; color: var(--text-muted);
   margin-bottom: 0.35rem; }
 .empty-state .es-sub { font-size: 0.83rem; margin-bottom: 1rem; color: var(--text-muted); }
+
+/* --- Cashier: the cash side of the books ---------------------------------
+   Statement lines rather than a table. A statement is read down a column —
+   label on the left, figure on the right, a rule before each total — and a
+   table's header row buys nothing when every row has the same two things in
+   it. */
+.fin-line { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 1rem; padding: 0.32rem 0; font-size: 0.86rem; }
+.fin-line .fin-k { color: var(--text-muted); min-width: 0; }
+.fin-line .fin-k em { font-style: normal; display: block; font-size: 0.76rem;
+  color: var(--text-faint); }
+.fin-line .fin-v { font-weight: 600; color: var(--text-main); white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.fin-line .fin-v.good { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
+.fin-line .fin-v.bad { color: color-mix(in srgb, var(--danger) 72%, var(--text-main)); }
+.fin-line.is-total { border-top: 1px solid var(--border-color); margin-top: 0.35rem;
+  padding-top: 0.55rem; }
+.fin-line.is-total .fin-k { color: var(--text-main); font-weight: 600; }
+.fin-line.is-total .fin-v { font-size: 1rem; font-weight: 800; }
+
+.fin-cols { display: grid; gap: 1.2rem; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .fin-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fin-col { padding: 1rem 1.1rem; border-radius: var(--radius); background: var(--bg-inset);
+  border: 1px solid var(--border-color); }
+.fin-col-title { font-weight: 700; font-size: 0.9rem; color: var(--text-main);
+  margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color); }
+
+.fin-note { margin: 0.7rem 0 0; line-height: 1.5; }
+.fin-drift { margin: 0.7rem 0 0; line-height: 1.5;
+  color: color-mix(in srgb, var(--warning) 72%, var(--text-main)); }
+
+/* The profit figure is the point of the card, so it is the size of one. The
+   band underneath says whether it clears the 15 a game the club prices for —
+   the number alone does not tell you that, and that is the question. */
+.fin-pnl .fin-hero { padding: 0.9rem 1rem; border-radius: var(--radius);
+  background: var(--bg-inset); border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-strong); margin-bottom: 0.9rem; }
+.fin-pnl .fin-hero.is-on { border-left-color: var(--success); }
+.fin-pnl .fin-hero.is-thin { border-left-color: var(--warning); }
+.fin-pnl .fin-hero.is-loss { border-left-color: var(--danger); }
+.fin-hero-v { font-size: 1.9rem; font-weight: 800; color: var(--text-main);
+  font-variant-numeric: tabular-nums; line-height: 1.1; }
+.fin-hero-l { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+.fin-venue { padding: 1rem 0; border-bottom: 1px solid var(--border-color); }
+.fin-venue:first-child { padding-top: 0; }
+.fin-venue:last-of-type { border-bottom: none; }
+.fin-venue-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap;
+  margin-bottom: 0.7rem; }
+.fin-venue-head .row-actions { margin-left: auto; display: flex; gap: 0.5rem;
+  align-items: center; }
+.fin-venue-grid { display: grid; gap: 0.5rem 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
+.fin-venue-grid > div { display: flex; flex-direction: column; gap: 0.1rem; }
+.fin-venue-grid .k { font-size: 0.74rem; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.03em; }
+.fin-venue-grid .v { font-size: 0.95rem; font-weight: 700; color: var(--text-main);
+  font-variant-numeric: tabular-nums; }
+.fin-venue-grid .v.good { color: color-mix(in srgb, var(--success) 72%, var(--text-main)); }
+.fin-venue-grid .v.bad { color: color-mix(in srgb, var(--danger) 72%, var(--text-main)); }
+.fin-pay { margin-top: 0.8rem; }
+
+/* --- Standing sheet: who still owes -------------------------------------
+   Replaces the period totals that used to sit under the summary. A season's
+   charged-and-collected figures are true and unactionable; the names are what
+   the sheet is opened for. */
+.rep-collect { margin: 0 0 1rem; padding: 0.85rem 1rem; border-radius: var(--radius);
+  background: var(--bg-inset); border: 1px solid var(--border-color);
+  border-left: 3px solid var(--warning); }
+.rep-collect-head { font-weight: 700; font-size: 0.88rem; color: var(--text-main);
+  margin-bottom: 0.5rem; }
+.rep-collect-row { display: flex; gap: 0.7rem; align-items: baseline; flex-wrap: wrap;
+  padding: 0.25rem 0; }
+.rep-collect-k { font-size: 0.76rem; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: 0.03em; flex: 0 0 11rem; }
+.rep-collect-v { display: flex; gap: 0.4rem 1rem; flex-wrap: wrap; min-width: 0; }
+.rep-owe { font-size: 0.84rem; color: var(--text-muted); white-space: nowrap; }
+.rep-owe strong { color: var(--text-main); }
+.rep-clear { margin: 0 0 1rem; }
+@media (max-width: 620px) { .rep-collect-k { flex-basis: 100%; } }

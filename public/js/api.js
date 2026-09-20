@@ -86,6 +86,17 @@ export const api = {
   createKitty: (k) => req('POST', '/kitty', k),
   deleteKitty: (id) => req('DELETE', `/kitty/${id}`),
 
+  // ---- the cashier's side: cash position, P&L, venue bookings ----
+  cashierStatement: () => req('GET', '/admin/finance/cashier'),
+  pnl: (contract) => req('GET', `/admin/finance/pnl${contract ? `?contract=${contract}` : ''}`),
+  venueContracts: (contract) =>
+    req('GET', `/admin/venue-contracts${contract ? `?contract=${contract}` : ''}`),
+  createVenueContract: (v) => req('POST', '/admin/venue-contracts', v),
+  updateVenueContract: (id, v) => req('PUT', `/admin/venue-contracts/${id}`, v),
+  deleteVenueContract: (id) => req('DELETE', `/admin/venue-contracts/${id}`),
+  addVenuePayment: (id, p) => req('POST', `/admin/venue-contracts/${id}/payments`, p),
+  deleteVenuePayment: (id) => req('DELETE', `/admin/venue-payments/${id}`),
+
   // New endpoints (Phase 1 backend)
   results: (contract) => req('GET', `/results${contract ? `?contract=${contract}` : ''}`),
   playerStats: (playerId, contractId) => req('GET', `/players/${playerId}/stats?contract_id=${contractId}`),

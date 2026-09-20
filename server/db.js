@@ -863,6 +863,78 @@ export function initSchema() {
       }
     },
 
+    // venue_contracts / venue_payments — what the club actually buys, and what
+    // the cashier actually paid for it.
+    //
+    // The books already carry the pitch as an ACCRUAL: every gameweek deducts
+    // cost_per_gw from the pot, so the kitty is profit and loss on a per-game
+    // basis. What was nowhere was the CASH: the cashier signs a block booking
+    // with O365 or Koora, pays it up front out of their own pocket, and is
+    // repaid over the following weeks as players top up. Those two never met, so
+    // "am I up or down, and by how much" had no answer, and "is this contract
+    // actually making the 15 a game we price it at" had no answer either.
+    //
+    // THESE TABLES MUST NEVER WRITE TO THE KITTY. The pitch is already charged
+    // to the pot once, per game. Booking the payment as a kitty expense as well
+    // would charge the club twice for one booking — once as it is played, once
+    // as it is paid — which is the single easiest way to destroy the P&L this
+    // exists to produce. A payment here is cash leaving the cashier's hands
+    // against a cost the books have already taken.
+    //
+    // sessions_total and end_date are both nullable, because a contract can be
+    // open-ended: the Saturday booking runs loose until it is renewed, and a
+    // renewal entered later should not require inventing a session count now.
+    () => {
+      try {
+        db.prepare('SELECT id FROM venue_contracts LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE venue_contracts (
+          id             TEXT PRIMARY KEY,
+          contract_id    TEXT NOT NULL REFERENCES contracts(id),
+          vendor         TEXT NOT NULL,
+          start_date     TEXT NOT NULL,
+          end_date       TEXT,
+          sessions_total INTEGER,
+          amount_total   REAL NOT NULL DEFAULT 0,
+          notes          TEXT NOT NULL DEFAULT '',
+          created_at     TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_vc_contract ON venue_contracts(contract_id, start_date)');
+      }
+    },
+    // venue_contracts: sessions thrown in free.
+    //
+    // O365 sells a bundle of "20 + 3hrs free": twenty-three nights for the price
+    // of twenty. What a night actually costs is therefore the total over
+    // TWENTY-THREE, not over twenty — 217.39 rather than 250 — and using the
+    // paid count would overstate the pitch by 15% and turn a contract that is
+    // making money into one that looks like it is losing it. Koora sells twenty
+    // with nothing free, so this is 0 there and the two are priced by the same
+    // rule rather than by two different ones.
+    () => {
+      const cols = db.prepare('PRAGMA table_info(venue_contracts)').all().map(c => c.name);
+      if (!cols.includes('free_sessions')) {
+        db.exec('ALTER TABLE venue_contracts ADD COLUMN free_sessions INTEGER NOT NULL DEFAULT 0');
+      }
+    },
+    () => {
+      try {
+        db.prepare('SELECT id FROM venue_payments LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE venue_payments (
+          id                TEXT PRIMARY KEY,
+          venue_contract_id TEXT NOT NULL REFERENCES venue_contracts(id) ON DELETE CASCADE,
+          amount            REAL NOT NULL,
+          date              TEXT NOT NULL,
+          paid_by           TEXT REFERENCES players(id),
+          method            TEXT NOT NULL DEFAULT 'bank',
+          note              TEXT NOT NULL DEFAULT '',
+          created_at        TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_vp_contract ON venue_payments(venue_contract_id, date)');
+      }
+    },
+
     // event_attendees: one row per head, member or guest. A guest may hang off a
     // host member (a wife, kids) or stand alone if they settle directly, so
     // player_id and host_player_id are both nullable but never both absent

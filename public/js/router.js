@@ -24,6 +24,7 @@ const ADMIN_NAV = [
   { view: 'players',       label: 'Players',       title: 'Player ledger' },
   { view: 'contributions', label: 'Contributions', title: 'Money in, and money moved' },
   { view: 'kitty',         label: 'Kitty',         title: 'Club kitty' },
+  { view: 'finance',       label: 'Cashier',       title: 'Cashier — profit, loss and what you are holding' },
   { view: 'events',        label: 'Programmes',    title: 'Programmes — events, tours and dinners' },
 
   { group: 'Running it' },
@@ -55,6 +56,7 @@ const ICONS = {
   contributions: I('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
   gameweeks:     I('<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),
   kitty:         I('<rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>'),
+  finance:       I('<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="13" y="8" width="3" height="10"/><path d="M19 5v13"/>'),
   report:        I('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/>'),
   events:        I('<path d="M3 12h18M3 6h18M5 12v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6M12 3v3"/><circle cx="12" cy="9" r="1"/>'),
   'opening-balances': I('<path d="M12 2v20m-7-7h14"/><rect x="2" y="7" width="20" height="10" rx="1" ry="1"/>'),
