@@ -272,6 +272,113 @@ function wireBulk() {
  * buys fewer Saturdays than Mondays, and one averaged number would be true of
  * neither night.
  */
+/**
+ * Correct how one person's games settle, all of them in one place.
+ *
+ * Settlement could only be changed from inside a game, one night at a time.
+ * But the thing that is usually wrong is a PERSON: Ashik is a walk-up who
+ * pays cash, and two of his three games were billed to a balance he has
+ * never paid into — which is the whole of his −54. Fixing that meant finding
+ * each game, opening it and changing one row, five modals deep. Nobody does
+ * that, so the ledger stays wrong and somebody gets chased for money they
+ * never owed.
+ *
+ * The three questions are the three the settlement model actually has: how
+ * does it settle, whose money, and is it on the right rate. Re-pricing is
+ * offered rather than assumed, because a night that has been played and
+ * settled is not something to move by accident — but it is what makes "he is
+ * a guest paying cash" produce the guest rate instead of leaving the contract
+ * rate on a cash charge.
+ */
+async function fixMoneyModal(playerId) {
+  let charges;
+  try { charges = await api.get(`/admin/players/${playerId}/charges`); }
+  catch (e) { toast(e.message, true); return; }
+  const who = store.players.find(p => p.id === playerId);
+  const live = charges.filter(c => !c.historical);
+  if (!live.length) { toast(`${who?.name || 'They'} have no games to correct`, true); return; }
+
+  const SETTLES = { balance: 'off a balance', cash: 'cash on the day', kitty: 'the kitty carries it' };
+  openModal(`${who?.name || 'Player'} — how their games settle`, `
+    <p class="hint">Tick the games to change, then say how. Nothing happens to the ones you
+      leave alone, and imported games are not listed — they sit behind the closed baseline.</p>
+    <div class="split-list mt">${live.map(c => `
+      <label class="split-row">
+        <input type="checkbox" data-fix="${esc(c.id)}" checked>
+        <span><strong>${esc(fmtDate(c.date))}</strong>
+          <span class="hint">${esc(c.contract_name || c.contract_id)} ·
+            ${esc(SETTLES[c.settles])}${c.settles === 'cash' ? (c.paid ? ', paid' : ', owed') : ''}
+            ${c.charged_to !== c.player_id ? ` · ${esc(c.settler_name)} pays` : ''}
+            ${c.is_captain ? ' · captain' : ''} · ${esc(c.rate_type)}</span></span>
+        <span class="num">${money(c.amount)}</span>
+      </label>`).join('')}</div>
+
+    <div class="form-row mt">
+      <div class="form-group"><label for="fx_mode">How they settle</label>
+        <select id="fx_mode">
+          <option value="">— leave as they are —</option>
+          <option value="cash">Cash on the day</option>
+          <option value="balance">Off a balance</option>
+          <option value="kitty">The kitty carries it</option>
+        </select></div>
+      <div class="form-group"><label for="fx_payer">Whose money</label>
+        <select id="fx_payer">
+          <option value="">— leave as it is —</option>
+          <option value="${esc(playerId)}">Themselves</option>
+          ${rosterOptions(store.players.filter(p => p.id !== playerId))}
+        </select></div>
+    </div>
+    <label class="login-shared mt"><input type="checkbox" id="fx_reprice">
+      <span>Put them on the right rate for that. A guest paying cash pays the guest rate; a
+        contract player off a balance pays the contract rate, with the captain discount where
+        it applies. This moves money on games already played, and every change goes on the
+        audit trail.</span></label>
+    <label class="login-shared"><input type="checkbox" id="fx_paid">
+      <span>And mark the cash as already collected.</span></label>
+    <button class="btn full-w mt" id="fx_go">Apply</button>`, { wide: true });
+
+  $('fx_go').addEventListener('click', async () => {
+    const ids = [...document.querySelectorAll('[data-fix]:checked')].map(el => el.dataset.fix);
+    if (!ids.length) { toast('Tick the games to change', true); return; }
+    const mode = $('fx_mode').value || undefined;
+    const payerRaw = $('fx_payer').value;
+    const reprice = $('fx_reprice').checked;
+    const paid = $('fx_paid').checked;
+    if (!mode && !payerRaw && !reprice && !paid) { toast('Nothing to change', true); return; }
+    try {
+      const out = await api.post(`/admin/players/${playerId}/settlement`, {
+        charge_ids: ids,
+        ...(mode ? { mode } : {}),
+        ...(payerRaw ? { charged_to: payerRaw } : {}),
+        ...(paid ? { paid: true } : {}),
+        reprice,
+      });
+      closeModal();
+      // What moved, by name. "Saved" over a figure that changed is how money
+      // moves without anybody noticing.
+      const lines = out.moved.map(m =>
+        `${m.player} on ${nameOfContract(m.contract)}: ${money(m.was)} → ${money(m.now)}`);
+      if (out.kitty.was !== out.kitty.now) {
+        lines.push(`the kitty: ${money(out.kitty.was)} → ${money(out.kitty.now)}`);
+      }
+      toast(`${out.done} game(s) corrected${out.refused.length
+        ? `, ${out.refused.length} refused` : ''}`);
+      if (lines.length || out.refused.length) {
+        openModal('What that moved', `
+          ${lines.length ? `<div class="split-list">${lines.map(l =>
+    `<div class="split-row"><span></span><span>${esc(l)}</span><span></span></div>`).join('')}</div>`
+    : '<p class="hint">No balance and no kitty entry changed.</p>'}
+          ${out.refused.length ? `<p class="hint mt">Not changed: ${out.refused
+    .map(r => `${esc(fmtDate(r.date || ''))} ${esc(r.why)}`).join('; ')}</p>` : ''}
+          <button class="btn full-w mt" id="fx_done">Done</button>`, { wide: true });
+        $('fx_done').addEventListener('click', closeModal);
+      }
+      store.players = await api.players();
+      render();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 /** A contract's name, for a sentence rather than an id. */
 const nameOfContract = (id) =>
   (store.contracts || []).find(c => c.id === id)?.name || id;
@@ -738,6 +845,9 @@ async function render() {
           title="Takes them off the Standing sheet and out of the rankings until they are back. They keep their balance, their history and their place on this screen — it moves no money at all. For somebody who has stopped turning up, whether for a season or for good."
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
   hiddenIds.has(l.player_id) ? '▶ Playing again' : '⏸ Not playing now'}</button>
+        <button class="btn btn-sm" data-fixmoney="${l.player_id}"
+          title="How this person's games settle — off a balance, cash on the day, or carried by the kitty — and whose money pays. All of them in one place, instead of one game at a time."
+          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">⚖ Fix money</button>
         <button class="btn btn-sm" data-kind="${l.player_id}" data-to="outside"
           title="Move them to the guest list: somebody who turns up now and then and pays cash, rather than a member on a contract. They leave the ledger and the standing sheet. Refused if any of their games were settled off a balance, because that would turn football they have paid for into cash they owe."
           style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">→ Guest list</button>
@@ -777,6 +887,8 @@ async function render() {
   });
 
   wireBulk();
+  $('playersTable').querySelectorAll('[data-fixmoney]').forEach(btn =>
+    btn.addEventListener('click', () => fixMoneyModal(btn.dataset.fixmoney)));
   $('playersTable').querySelectorAll('[data-kind]').forEach(btn =>
     btn.addEventListener('click', async () => {
       const name = store.players.find(p => p.id === btn.dataset.kind)?.name || 'them';

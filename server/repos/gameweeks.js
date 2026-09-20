@@ -559,6 +559,54 @@ export const gameweeksRepo = {
     };
   },
 
+  /**
+   * Every charge one person is involved in, however it settles.
+   *
+   * Settlement could only be corrected from inside a game, one night at a
+   * time. But the thing that is usually wrong is a PERSON — Ashik is a
+   * walk-up who pays cash, and two of his three games were billed to a
+   * balance he has never paid into, which is where his -54 came from. Fixing
+   * that meant finding each game, opening it, and changing one row. Nobody
+   * does that, so the ledger stays wrong.
+   */
+  chargesForPlayer(playerId) {
+    return db.prepare(`
+      SELECT ch.id, ch.gameweek_id, ch.amount, ch.rate_type, ch.is_captain, ch.team,
+             ch.settles_cash, ch.settled_from_kitty, ch.paid, ch.settle_contract_id,
+             COALESCE(ch.charged_to, ch.player_id) AS charged_to,
+             st.name AS settler_name,
+             COALESCE(st.player_type, 'regular') AS settler_type,
+             ch.player_id, pl.name AS player_name,
+             g.date, g.contract_id, g.historical, c.name AS contract_name
+      FROM charges ch
+      JOIN gameweeks g ON g.id = ch.gameweek_id
+      LEFT JOIN contracts c ON c.id = g.contract_id
+      LEFT JOIN players st ON st.id = COALESCE(ch.charged_to, ch.player_id)
+      LEFT JOIN players pl ON pl.id = ch.player_id
+      WHERE ch.player_id = ? OR ch.charged_to = ?
+      ORDER BY g.date DESC`).all(playerId, playerId)
+      .map(r => ({
+        ...r,
+        settles: r.settled_from_kitty ? 'kitty'
+          : (r.settles_cash || r.settler_type === 'outside') ? 'cash' : 'balance',
+      }));
+  },
+
+  /**
+   * The card rate a charge SHOULD carry, given how it ends up settled.
+   *
+   * Same rule Game Day uses on the night: cash or a guest pays the
+   * non-contract rate, a captain on a balance gets the captain rate, everyone
+   * else the contract rate. Kept here so a correction lands on the same
+   * figure the night would have produced, rather than a second opinion.
+   */
+  cardRateFor(gameweekId, { isCaptain, settles, settlerType, fromOtherContract }) {
+    if (settles === 'cash' || settlerType === 'outside' || fromOtherContract) {
+      return this.rateForCharge({ gameweekId, isCaptain, fromOtherContract: true });
+    }
+    return this.rateForCharge({ gameweekId, isCaptain, fromOtherContract: false });
+  },
+
   setChargeSettlement(gameweekId, chargeId,
     { mode, settles_cash, charged_to, settle_contract_id, reprice } = {}) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')

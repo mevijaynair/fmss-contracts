@@ -651,6 +651,105 @@ r.post('/admin/players/bulk', wrap((req) => {
   return { done, refused };
 }));
 
+// Everything one person is charged for, so their settlement can be corrected
+// in one place instead of game by game — see chargesForPlayer.
+r.get('/admin/players/:playerId/charges', wrap((req) => {
+  requireAdmin(req);
+  if (!playersRepo.get(req.params.playerId)) throw new Error('No such player');
+  return gameweeksRepo.chargesForPlayer(req.params.playerId);
+}));
+
+/**
+ * Correct how a person's games settle, several at once.
+ *
+ * The thing that is usually wrong is a PERSON, not a night: a walk-up billed
+ * to a balance they have never paid into, or somebody else's games that
+ * should be on their friend's tab. Doing that game by game means opening five
+ * modals, so nobody does it and the ledger stays wrong.
+ *
+ * Per charge, reusing the same setChargeSettlement every other screen uses —
+ * there is one place that decides what a settlement means and this is not a
+ * second one. `reprice` then puts the amount on the card rate that settlement
+ * implies, which is what makes "he is a guest paying cash" produce the guest
+ * rate rather than leaving the contract rate on a cash charge.
+ *
+ * The whole thing reports the balance before and after so the caller can show
+ * what it did, rather than saying "saved" over a figure that moved.
+ */
+r.post('/admin/players/:playerId/settlement', wrap((req) => {
+  requireAdmin(req);
+  const playerId = req.params.playerId;
+  const p = playersRepo.get(playerId);
+  if (!p) throw new Error('No such player');
+  const { charge_ids: ids, mode, charged_to: payer, paid, reprice } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) throw new Error('Nothing selected');
+
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const totals = () => Object.fromEntries(ledgersRepo.all()
+    .map(l => [`${l.player_id}|${l.contract_id}`, l.present_balance]));
+  const before = totals();
+  const kittyBefore = r2(kittyRepo.balance().balance);
+
+  const rows = gameweeksRepo.chargesForPlayer(playerId);
+  const done = [];
+  const refused = [];
+  for (const id of ids) {
+    const row = rows.find(r => r.id === id);
+    if (!row) { refused.push({ id, why: 'not one of theirs' }); continue; }
+    if (row.historical) {
+      refused.push({ id, date: row.date, why: 'an imported game, already inside the baseline' });
+      continue;
+    }
+    try {
+      gameweeksRepo.setChargeSettlement(row.gameweek_id, id, {
+        ...(mode === undefined ? {} : { mode }),
+        ...(payer === undefined ? {} : { charged_to: payer || null }),
+      });
+      if (paid !== undefined && (mode === 'cash' || row.settles === 'cash')) {
+        gameweeksRepo.setChargePaid(row.gameweek_id, id,
+          { paid: !!paid, method: paid ? 'cash' : null });
+      }
+      if (reprice) {
+        const after = gameweeksRepo.chargesForPlayer(playerId).find(r => r.id === id);
+        const card = gameweeksRepo.cardRateFor(row.gameweek_id, {
+          isCaptain: !!row.is_captain,
+          settles: after.settles,
+          settlerType: after.settler_type,
+          fromOtherContract: !!after.settle_contract_id
+            && after.settle_contract_id !== row.contract_id,
+        });
+        if (card.amount !== after.amount) {
+          gameweeksRepo.applyChargeEdits(row.gameweek_id,
+            [{ chargeId: id, newAmount: card.amount }],
+            { reason: `Re-priced for ${after.settles} settlement`, changedBy: 'web-ui' });
+          db.prepare('UPDATE charges SET rate_type = ? WHERE id = ?').run(card.rate_type, id);
+        }
+      }
+      done.push(id);
+    } catch (e) {
+      refused.push({ id, date: row.date, why: e.message });
+    }
+  }
+
+  const after = totals();
+  const moved = [];
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const was = r2(before[k] ?? 0);
+    const now = r2(after[k] ?? 0);
+    if (was !== now) {
+      const [who, contract] = k.split('|');
+      moved.push({ player: playersRepo.get(who)?.name || who, contract, was, now });
+    }
+  }
+  return {
+    done: done.length,
+    refused,
+    moved,
+    kitty: { was: kittyBefore, now: r2(kittyRepo.balance().balance) },
+    charges: gameweeksRepo.chargesForPlayer(playerId),
+  };
+}));
+
 r.get('/admin/name-collisions', wrap((req) => {
   requireAdmin(req);
   return playersRepo.nameCollisions();

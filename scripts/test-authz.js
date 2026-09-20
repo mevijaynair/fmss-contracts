@@ -154,6 +154,46 @@ test('a player dashboard carries only their own money', async () => {
   }
 });
 
+test('a walk-up billed to a balance can be put right in one go', async () => {
+  // Ashik's -54: a man who pays cash on the day, with two of his three games
+  // billed to a balance he has never paid into. Correcting it meant opening
+  // each game and changing one row, which is why it sat there.
+  const now = new Date().toISOString();
+  db.prepare("INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort) VALUES ('fc','Fix','{\"contracted_12\":27,\"noncontract\":35}',0,8)").run();
+  db.prepare("INSERT OR IGNORE INTO players (id,name,aliases,created_at) VALUES ('ash','Ashiklike','[]',?)").run(now);
+  db.prepare("INSERT OR IGNORE INTO ledgers (player_id,contract_id,opening_balance,status) VALUES ('ash','fc',0,'')").run();
+  for (const [g, ch] of [['fg1', 'fch1'], ['fg2', 'fch2']]) {
+    db.prepare("INSERT OR IGNORE INTO gameweeks (id,contract_id,date,cost_per_gw,num_players,teams_raw,captains_raw,score,comments,historical,created_at) VALUES (?,'fc','2026-03-0' || substr(?,4,1),0,0,'','','','',0,?)").run(g, g, now);
+    db.prepare("INSERT OR IGNORE INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid) VALUES (?,?,'ash','',0,'contracted_12',27,'ash',0)").run(ch, g);
+  }
+  const bal = () => db.prepare(`SELECT ROUND(l.opening_balance
+      - COALESCE((SELECT SUM(ch.amount) FROM charges ch JOIN gameweeks g ON g.id = ch.gameweek_id
+         LEFT JOIN players sp ON sp.id = COALESCE(ch.charged_to, ch.player_id)
+         WHERE COALESCE(ch.charged_to,ch.player_id)='ash' AND g.contract_id='fc'
+           AND g.historical=0 AND ch.settled_from_kitty=0
+           AND NOT (ch.settles_cash=1 OR COALESCE(sp.player_type,'regular')='outside')),0), 2) b
+    FROM ledgers l WHERE l.player_id='ash' AND l.contract_id='fc'`).get().b;
+  assert.equal(bal(), -54, 'two contract-rate games off a balance he never paid into');
+
+  const res = await fetch(`${BASE}/api/admin/players/ash/settlement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ charge_ids: ['fch1', 'fch2'], mode: 'cash', reprice: true, paid: true }),
+  });
+  assert.equal(res.status, 200);
+  const out = await res.json();
+  assert.equal(out.done, 2);
+  assert.equal(bal(), 0, 'his balance is his own again');
+  const after = db.prepare("SELECT amount, rate_type, settles_cash, paid FROM charges WHERE id = 'fch1'").get();
+  assert.equal(after.amount, 35, 'and at the rate a walk-up actually pays');
+  assert.equal(after.rate_type, 'noncontract');
+  assert.equal(after.settles_cash, 1);
+  assert.equal(after.paid, 1);
+  // What moved is reported, by name — "saved" over a figure that changed is
+  // how money moves without anybody noticing.
+  assert.ok(out.moved.some(m => m.was === -54 && m.now === 0), JSON.stringify(out.moved));
+});
+
 test('a bulk action is per person, so one refusal does not lose the rest', async () => {
   // These are independent decisions made in one go. All-or-nothing would mean
   // one member with games settled off a balance stops the walk-ups beside
