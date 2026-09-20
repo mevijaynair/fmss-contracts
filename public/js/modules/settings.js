@@ -1,7 +1,7 @@
 // settings.js — edit each contract's venue, cost per game, and rate card.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc } from '../util.js';
+import { $, esc, viewEl } from '../util.js';
 
 const RATE_FIELDS = [
   ['contracted_10', 'Contract rate (10-player)'],
@@ -61,7 +61,7 @@ export async function loadSettings() {
 
 // Player "Account" view: read-only profile (rate cards are not theirs to edit).
 function loadAccount() {
-  const view = document.querySelector('[data-view="settings"]');
+  const view = viewEl('settings');
   const title = view.querySelector('.card-title');
   const sub = view.querySelector('.card-sub');
   if (title) title.textContent = 'My Account';

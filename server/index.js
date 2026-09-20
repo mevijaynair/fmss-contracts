@@ -34,6 +34,7 @@ import express from 'express';
 import { initSchema, seed, applyRoles, db } from './db.js';
 import { auth, authMiddleware } from './auth.js';
 import { authUsersRepo } from './repos/auth_users.js';
+import { checkLoginAllowed, recordLoginFailure, clearLoginFailures } from './rate-limit.js';
 import api from './routes/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,15 @@ seed();                       // loads data/seed.json on a fresh DB
 applyRoles();                 // idempotent business rules (Vijay = cashier)
 
 const app = express();
+
+// Caddy terminates TLS and proxies to localhost, so without this every request
+// arrives as 127.0.0.1 and a per-IP limit would throttle the whole club as one
+// caller — the first attacker would lock everybody out. 'loopback' trusts the
+// X-Forwarded-For set by a proxy on this machine and nothing else, so a header
+// sent by a remote client cannot forge an address.
+app.set('trust proxy', 'loopback');
+app.disable('x-powered-by');
+
 app.use(express.json({ limit: '1mb' }));
 
 // Public endpoints (no auth required)
@@ -60,23 +70,51 @@ app.get('/api/login/players', (_req, res) => {
 });
 
 app.post('/api/login', (req, res) => {
-  try {
-    const { player_id, pin, password } = req.body;
+  const { player_id, pin, password } = req.body || {};
+  // One key per thing being guessed at. 'admin' is a real account here even
+  // though it has no row of its own on this path — it is the master key, and
+  // it had no limit of any kind before.
+  const accountKey = player_id ? `player:${player_id}` : 'admin';
 
+  // Asked before the secret is looked at, so a locked-out caller cannot tell
+  // a wrong PIN from a right one, or a real name from an invented one.
+  const blocked = checkLoginAllowed(req, accountKey);
+  if (blocked) {
+    res.set('Retry-After', String(blocked.retryAfter));
+    return res.status(429).json({
+      error: `Too many attempts. Try again in ${Math.ceil(blocked.retryAfter / 60)} minute(s).`,
+    });
+  }
+
+  try {
     let result;
     if (player_id) {
-      // Player login: name (player_id) + PIN (now with rate-limiting + PIN change enforcement)
       if (!pin) return res.status(400).json({ error: 'PIN is required' });
       result = auth.loginPlayer(db, authUsersRepo, player_id, pin);
     } else {
-      // Admin login: password only
       if (!password) return res.status(400).json({ error: 'password is required' });
       result = auth.loginAdmin(db, password);
     }
 
-    res.json(result);
+    clearLoginFailures(req, accountKey);
+    // Deliberately only what the browser needs to continue. The role is NOT
+    // returned: the cashier signing in as themselves gets the admin side, and
+    // announcing that in the login response would tell anyone probing the form
+    // which single name is worth attacking. The client reads its role from
+    // /me, which needs the token it has just been given.
+    res.json({
+      token: result.token,
+      expiresIn: result.expiresIn,
+      requiresPinChange: result.requiresPinChange === true,
+    });
   } catch (e) {
-    res.status(401).json({ error: e.message });
+    recordLoginFailure(req, accountKey);
+    // A rate-limit refusal is a 429 wherever it came from, so the two limiters
+    // are indistinguishable from outside. Everything else is a plain 401 with
+    // the same wording for a wrong name and a wrong PIN.
+    const status = Number(e?.status) || 401;
+    if (status === 429) res.set('Retry-After', '900');
+    res.status(status).json({ error: e.message });
   }
 });
 
@@ -89,6 +127,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+// Exported so a test can shut it down; without a handle on it the process
+// stays alive after the assertions finish and the run has to be killed.
+export const server = app.listen(PORT, () => {
   console.log(`FMSS running → http://localhost:${PORT}`);
 });

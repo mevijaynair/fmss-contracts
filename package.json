@@ -15,11 +15,12 @@
     "test:scores": "node scripts/test-scores.js",
     "test:backup": "node scripts/test-backup.js",
     "fuzz": "node scripts/fuzz-ledger.js",
-    "test": "npm run check:ui && npm run test:deps && npm run test:scores && npm run test:auth && npm run test:ledger && npm run test:backup && npm run fuzz",
+    "test": "npm run check:ui && npm run test:deps && npm run test:scores && npm run test:auth && npm run test:authz && npm run test:ledger && npm run test:backup && npm run fuzz",
     "audit": "node scripts/audit.js",
     "verify": "node scripts/verify-balances.js",
     "verify:lock": "node scripts/verify-balances.js --lock",
-    "test:auth": "node scripts/test-auth.js"
+    "test:auth": "node scripts/test-auth.js",
+    "test:authz": "node scripts/test-authz.js"
   },
   "engines": {
     "node": ">=22.5.0"

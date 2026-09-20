@@ -24,9 +24,19 @@ export const auth = {
       throw new Error('Wrong name or PIN');
     }
 
-    // Rate-limit: too many failed attempts?
+    // The per-account counter kept in the database. It backs up the in-memory
+    // limiter in front of this route by surviving a restart, which that one
+    // cannot.
+    //
+    // Carries a status so it answers 429 like the other limiter rather than
+    // 401, and says the same thing however it was reached. It used to say
+    // "Too many failed login attempts" only for accounts that EXIST — a name
+    // that does not exist fails instantly with "Wrong name or PIN" — so the
+    // two messages together told an attacker which of the published names were
+    // real before they had guessed a single PIN.
     if (authUsersRepo.isRateLimited(db, user.id)) {
-      throw new Error('Too many failed login attempts. Try again in 15 minutes.');
+      throw Object.assign(new Error('Too many attempts. Try again in 15 minute(s).'),
+        { status: 429 });
     }
 
     // Verify PIN (hashed comparison)
@@ -67,6 +77,12 @@ export const auth = {
       requiresPinChange: requires_change === true,
     };
     const token = jwt.sign(payload, getSecret(), { expiresIn: TOKEN_EXPIRY });
+    // `role` is for callers inside the server — the tests, and anything that
+    // needs to reason about what just happened. It must NOT be put in the HTTP
+    // response: announcing that one particular name signs in as an admin tells
+    // anyone probing the login form exactly which of the sixty published names
+    // is worth attacking. /api/login returns three fields by hand for that
+    // reason; do not spread this object into it.
     return {
       token, expiresIn: TOKEN_EXPIRY,
       requiresPinChange: requires_change === true,

@@ -29,15 +29,34 @@ import { parseResultsSheet, normaliseScore, winningTeam, isTournament } from '..
 import { exportAll, inspect as inspectBackup, restore as restoreBackup, BACKUP_FORMAT } from '../backup.js';
 
 const r = Router();
+
+/**
+ * Run a handler, and turn whatever it throws into an answer.
+ *
+ * An error carrying `status` says what it is; anything else is a bad request.
+ * Everything used to come back 400 with a full stack trace in the log —
+ * including "Admin only", which is not a bad request, it is a refusal. The
+ * caller could not tell the two apart, and on a public app the log filled with
+ * stack traces every time somebody's token lacked a permission, which is both
+ * noise that buries real faults and something an attacker can generate at will
+ * by walking the routes.
+ *
+ * Only unexpected errors are logged now. A refusal is the system working.
+ */
 const wrap = (fn) => (req, res) => {
   try { const out = fn(req, res); if (out !== undefined) res.json(out); }
-  catch (e) { console.error(e); res.status(400).json({ error: e.message }); }
+  catch (e) {
+    const status = Number(e?.status) || 400;
+    if (status >= 500 || status === 400) console.error(e);
+    res.status(status).json({ error: e.message });
+  }
 };
 
-// Throw if the caller is not an admin. Used to gate all mutating endpoints so a
-// player token can never create/edit/delete club-wide data.
+/** Throw if the caller is not an admin. Gates every mutating endpoint. */
 function requireAdmin(req) {
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') {
+    throw Object.assign(new Error('Admin only'), { status: 403 });
+  }
 }
 
 // ---- authentication ----
@@ -63,29 +82,29 @@ r.get('/players', wrap((req) => {
 }));
 r.post('/players', wrap((req) => {
   // Admin only
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   return playersRepo.create(req.body);
 }));
 r.put('/players/:id', wrap((req) => {
   // Admin only
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   return playersRepo.update(req.params.id, req.body);
 }));
 r.delete('/admin/players/:id', wrap((req) => {
   // Admin: completely delete a player + all ledger/contribution entries
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   playersRepo.delete(req.params.id);
   return { success: true, message: `Player ${req.params.id} deleted` };
 }));
 r.post('/admin/players/:id/reset', wrap((req) => {
   // Admin: reset a player's balance to 0, clear contributions, keep player
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   playersRepo.reset(req.params.id);
   return { success: true, message: `Player ${req.params.id} reset` };
 }));
 r.post('/admin/bulk-import/kitty-entries', wrap((req) => {
   // Admin: bulk import Kitty entries
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   const { data } = req.body;
   if (!data) throw new Error('data required');
 
@@ -121,7 +140,7 @@ r.post('/admin/bulk-import/kitty-entries', wrap((req) => {
 }));
 r.post('/admin/bulk-import/players-and-balances', wrap((req) => {
   // Admin: bulk create players and set opening balances for a contract
-  if (req.user.role !== 'admin') throw new Error('Admin only');
+  if (req.user.role !== 'admin') throw Object.assign(new Error('Admin only'), { status: 403 });
   const { contract_id, data } = req.body;
   if (!contract_id || !data) throw new Error('contract_id and data required');
 

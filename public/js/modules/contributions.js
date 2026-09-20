@@ -3,7 +3,7 @@
 //  • Player: self-service "Submit Contribution" (→ pending) + their own history.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, balCell, fmtDate, today, rosterOptions } from '../util.js';
+import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl } from '../util.js';
 
 function contractName(id) {
   return store.contracts.find(c => c.id === id)?.name.split(' ')[0] || (id || '—');
@@ -80,7 +80,7 @@ async function renderPendingApprovals() {
     card = document.createElement('div');
     card.className = 'sams-card';
     card.id = 'pendingApprovalsCard';
-    const view = document.querySelector('[data-view="contributions"]');
+    const view = viewEl('contributions');
     view.insertBefore(card, view.children[1]);  // after the Add form, before the log
   }
 
@@ -304,7 +304,7 @@ function updateSplitTotal() {
 let playerInited = false;
 
 function rebuildPlayerUI() {
-  const view = document.querySelector('[data-view="contributions"]');
+  const view = viewEl('contributions');
   view.innerHTML = `
     <div class="sams-card">
       <div class="card-header"><h3 class="card-title">Submit a contribution</h3>

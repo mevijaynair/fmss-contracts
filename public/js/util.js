@@ -32,6 +32,17 @@ export function fmtDate(d) {
 
 // Build a segmented contract switcher into `host`; calls onPick(contractId).
 /**
+ * The screen with this name — the SECTION, never the nav button.
+ *
+ * Both carry data-view, and the button is earlier in the document, so a bare
+ * `querySelector('[data-view="x"]')` returns the button. Writing a screen's
+ * markup into it put the whole of the player's Contributions page inside a
+ * sidebar button: it rendered, it worked, and it never went away when you
+ * navigated elsewhere, because the sidebar is always on screen.
+ */
+export const viewEl = (name) => document.querySelector(`section.view[data-view="${name}"]`);
+
+/**
  * The contract picker.
  *
  * `allLabel` adds a leading button meaning "every contract at once", which
