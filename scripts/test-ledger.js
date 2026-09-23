@@ -945,6 +945,236 @@ test('collecting a top-up credits the balance and leaves the kitty alone', () =>
   assert.equal(kittyTotal(), before, 'money passing through to a balance is not profit');
 });
 
+/* ===== Where a payment should go =====
+   The cashier takes money in a car park and has to decide, there and then,
+   which balance it belongs on. The suggestion is only worth having if it is
+   right about the two things that cost real money to get wrong: what is owed,
+   and where they actually play. */
+
+// A second contract to be split against, with games on it.
+const OTHER = 'testc_split';
+db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+            VALUES (?,'Saturdays','{"contracted_12":40,"noncontract":45}',0,9)`).run(OTHER);
+
+/**
+ * Games on a given contract, dated relative to TODAY.
+ *
+ * The suggestion weighs the last eight weeks, so a fixed date in the test
+ * calendar would age out and silently turn every weight to zero — the tests
+ * would still pass, against the fallback, and stop testing the rule they were
+ * written for.
+ */
+function playsOn(contract, playerId, games, amount = 40, daysAgo = 7) {
+  for (let i = 0; i < games; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo - i);
+    const gid = `sg${++seq}`;
+    db.prepare(`INSERT INTO gameweeks (id,contract_id,gw_number,contract_number,date,cost_per_gw,
+      num_players,teams_raw,captains_raw,score,comments,historical,created_at)
+      VALUES (?,?,?,0,?,0,0,'','','','',0,?)`)
+      .run(gid, contract, ++seq, d.toISOString().slice(0, 10), new Date().toISOString());
+    db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount)
+      VALUES (?,?,?,'',0,'contracted_12',?)`).run(`sc${++seq}`, gid, playerId, amount);
+  }
+}
+
+/** Put a player on the other contract with an opening balance and some games. */
+function alsoOn(playerId, opening, games = 0, amount = 40, daysAgo = 7) {
+  db.prepare(`INSERT OR REPLACE INTO ledgers (player_id,contract_id,opening_balance,status)
+              VALUES (?,?,?,'')`).run(playerId, OTHER, opening);
+  playsOn(OTHER, playerId, games, amount, daysAgo);
+}
+
+test('a payment is suggested against what is owed before anything else', () => {
+  const p = player('Short on Saturdays', 200);       // 200 up on the main contract
+  alsoOn(p, -150, 0);                                // 150 down on the other
+  const s = contributionsRepo.suggestSplit(p, 150);
+  const sat = s.lines.find(l => l.contract_id === OTHER);
+  assert.equal(sat.suggested, 150, 'the whole payment clears the shortfall');
+  assert.equal(s.lines.find(l => l.contract_id === CONTRACT).suggested, 0,
+    'nothing goes where nothing is needed');
+  assert.equal(sat.balance_after, 0);
+});
+
+test('what is left over is weighted by how fast each night is consumed', () => {
+  // Nothing owed on either side, so this is purely the second rule. Their
+  // games have to be paid for out of the opening balances or the debt rule
+  // fires first and the test stops testing what it says it does.
+  //
+  // Level on both, so filling them to the same level splits the money by how
+  // fast each is spent: three games at 30 against one at 40, i.e. 90 to 40.
+  const p = player('Plays mostly Mondays', 90);
+  playsOn(CONTRACT, p, 3, 30);                       // three on the main contract
+  alsoOn(p, 40, 1);                                  // one on the other
+  const s = contributionsRepo.suggestSplit(p, 200);
+  const main = s.lines.find(l => l.contract_id === CONTRACT).suggested;
+  const other = s.lines.find(l => l.contract_id === OTHER).suggested;
+  assert.equal(s.owed_total, 0, 'nothing is owed, so this is the burn rate alone');
+  assert.equal(main + other, 200, 'all of it is allocated');
+  assert.equal(main, 138, '90 parts in 130');
+  assert.equal(other, 62, '40 parts in 130');
+});
+
+test('the night that runs out first gets the money', () => {
+  // The case that made the rule: Toby held 487 on Mon/Thu — twenty-two games
+  // of cover — and nothing on Saturdays. Sharing his 200 by how often he plays
+  // sent most of it to the night he could not run out of, and left the empty
+  // one nearly as empty.
+  const p = player('Flush on one night', 490);
+  playsOn(CONTRACT, p, 3, 30);                       // 400 left, covers many
+  alsoOn(p, 0, 2, 40);                               // plays here too, holds nothing
+  // Their Saturday games are unpaid, so clear that first, then the rest.
+  const s = contributionsRepo.suggestSplit(p, 200);
+  const main = s.lines.find(l => l.contract_id === CONTRACT);
+  const other = s.lines.find(l => l.contract_id === OTHER);
+  assert.equal(main.suggested, 0,
+    `nothing should go to a night with ${main.games_after} games of cover already`);
+  assert.equal(other.suggested, 200, 'it all goes where the cover has run out');
+  assert.equal(main.balance_after, main.balance, 'the covered night is left exactly as it was');
+  assert.ok(other.games_after >= 1,
+    'and the empty one can field a game again, which it could not before');
+});
+
+test('a contract they have not played in eight weeks is not funded', () => {
+  // Square on both nights, so nothing is owed and the only question left is
+  // where the money is any use.
+  const p = player('Stopped going Saturdays', 30);
+  playsOn(CONTRACT, p, 1, 30);
+  alsoOn(p, 80, 2, 40, 200);                         // last played there 200 days ago
+  const s = contributionsRepo.suggestSplit(p, 120);
+  assert.equal(s.owed_total, 0);
+  assert.equal(s.lines.find(l => l.contract_id === OTHER).suggested, 0,
+    'money should not be stranded on a night they have stopped turning up to');
+  assert.equal(s.lines.find(l => l.contract_id === CONTRACT).suggested, 120);
+});
+
+test('when the payment cannot clear both, neither night is left behind', () => {
+  const p = player('Short on both', -100);
+  alsoOn(p, -300, 0);
+  const s = contributionsRepo.suggestSplit(p, 200);  // owed 400, paying 200
+  const main = s.lines.find(l => l.contract_id === CONTRACT).suggested;
+  const other = s.lines.find(l => l.contract_id === OTHER).suggested;
+  assert.equal(main + other, 200);
+  assert.ok(main > 0 && other > 0, 'both get something');
+  // In proportion: a quarter of the debt is here, three quarters there.
+  assert.ok(Math.abs(main - 50) <= 1 && Math.abs(other - 150) <= 1,
+    `expected roughly 50/150, got ${main}/${other}`);
+});
+
+test('the suggested parts always add up to the payment, exactly', () => {
+  // The form refuses to submit unless they do, so a rounding slip here is not
+  // a cosmetic problem — it is a payment that cannot be recorded at all. Odd
+  // amounts against three-way weights are where thirds go wrong.
+  const p = player('Rounding', 0);
+  playsOn(CONTRACT, p, 2, 30);
+  alsoOn(p, -33, 1);
+
+  // And the case that actually breaks naive rounding: the same balance and the
+  // same burn on both nights, so an odd payment splits into two shares exactly
+  // half a dirham over. Rounding the two independently hands out a dirham that
+  // nobody paid, and the form then refuses a payment it should have taken.
+  const even = player('Mirrored on both', 60);
+  playsOn(CONTRACT, even, 1, 30);
+  alsoOn(even, 60, 1, 30);
+
+  // Thirds are where rounding really breaks: 100 three ways is 33.33 each, and
+  // rounding them independently pays out 99. The club has two contracts today
+  // and this code does not know that, so the third one is worth having here.
+  const THIRD = 'testc_split3';
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES (?,'Fridays','{"contracted_12":30}',0,10)`).run(THIRD);
+  const three = player('On three nights', 60);
+  playsOn(CONTRACT, three, 1, 30);
+  alsoOn(three, 60, 1, 30);
+  db.prepare(`INSERT OR REPLACE INTO ledgers (player_id,contract_id,opening_balance,status)
+              VALUES (?,?,60,'')`).run(three, THIRD);
+  playsOn(THIRD, three, 1, 30);
+
+  for (const who of [p, even, three]) {
+    for (const amount of [1, 3, 7, 33, 99, 100, 101, 137, 299, 300, 1001]) {
+      const s = contributionsRepo.suggestSplit(who, amount);
+      const sum = s.lines.reduce((t, l) => t + l.suggested, 0);
+      assert.equal(sum, amount, `${amount} split to ${s.lines.map(l => l.suggested).join('+')}`);
+      assert.ok(s.lines.every(l => Number.isInteger(l.suggested)), 'in whole dirhams');
+      assert.ok(s.lines.every(l => l.suggested >= 0), 'and never negative');
+    }
+  }
+});
+
+test('one contract means no split to make', () => {
+  const p = player('Mondays only', 0);
+  playsOn(CONTRACT, p, 1, 30);
+  const s = contributionsRepo.suggestSplit(p, 300);
+  assert.equal(s.lines.length, 1);
+  assert.equal(s.lines[0].suggested, 300);
+  assert.ok(s.single, 'the form can skip the panel entirely');
+  assert.match(s.headline, /only plays/);
+});
+
+test('the suggestion quotes what their games actually cost, not the card rate', () => {
+  // The card says 40 a game on the other contract; twelve turned out and they
+  // were charged 25. Telling them 300 covers 7 games when it covers 12 is the
+  // kind of wrong that gets noticed at the next game.
+  const p = player('Charged less than the card', 0);
+  alsoOn(p, 0, 2, 25);
+  const s = contributionsRepo.suggestSplit(p, 300);
+  const line = s.lines.find(l => l.contract_id === OTHER);
+  assert.equal(line.cost_per_game, 25, 'from what they have been charged');
+});
+
+test('the cashier is refused a suggestion, not given a bad one', () => {
+  const c = player('Another cashier', 0);
+  db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(c);
+  const s = contributionsRepo.suggestSplit(c, 500);
+  assert.equal(s.lines.length, 0);
+  assert.match(s.refused, /cashier/i);
+});
+
+test('paying into a contract they have no ledger row on still lands somewhere', () => {
+  // Balances are read from the ledger table. Without a row the payment was
+  // logged, no balance moved, and nothing said why.
+  const p = player('New to Saturdays', 0);
+  assert.equal(ledgersRepo.get(p, OTHER), undefined, 'no row to begin with');
+  contributionsRepo.create({ player_id: p, contract_id: OTHER, amount: 90, date: '2026-09-22' });
+  assert.equal(ledgersRepo.get(p, OTHER)?.present_balance, 90,
+    'the row is created and the money shows on it');
+});
+
+test('a move between someone\'s own contracts goes either way', () => {
+  // The engine only ever ran one direction — covering a shortfall out of the
+  // other night's credit. Somebody who has stopped playing Saturdays wants the
+  // opposite, and it must be the same reconciled two-legged write.
+  const p = player('Moving it back', 0);
+  alsoOn(p, 250, 0);
+  const before = ledgersRepo.forPlayer(p).reduce((s, l) => s + l.present_balance, 0);
+
+  const out = ledgersRepo.coverFromOtherContract(p, { from: OTHER, to: CONTRACT, amount: 250,
+    kind: 'move' });
+  assert.equal(ledgersRepo.get(p, OTHER).present_balance, 0);
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 250);
+  assert.equal(ledgersRepo.forPlayer(p).reduce((s, l) => s + l.present_balance, 0), before,
+    'what they hold altogether cannot change');
+
+  const legs = db.prepare('SELECT description FROM transactions WHERE id LIKE ?')
+    .all(`t_${out.id}%`).map(r => r.description);
+  assert.ok(legs.every(d => /Moved from/.test(d)),
+    `a move should not read as a cover: ${legs.join(' | ')}`);
+
+  // And back again, which the old wording could not have described at all.
+  ledgersRepo.coverFromOtherContract(p, { from: CONTRACT, to: OTHER, amount: 100, kind: 'move' });
+  assert.equal(ledgersRepo.get(p, CONTRACT).present_balance, 150);
+  assert.equal(ledgersRepo.get(p, OTHER).present_balance, 100);
+});
+
+test('a move is refused when the source cannot afford it', () => {
+  const p = player('Not enough there', 0);
+  alsoOn(p, 40, 0);
+  assert.throws(() => ledgersRepo.coverFromOtherContract(p,
+    { from: OTHER, to: CONTRACT, amount: 100, kind: 'move' }),
+  /only has 40/, 'moving money out of a balance must not put it in the red');
+  assert.equal(ledgersRepo.get(p, OTHER).present_balance, 40, 'and nothing moved');
+});
+
 test('the cashier is never listed as owing the club', () => {
   const cashier = player('The cashier', -400);
   db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(cashier);

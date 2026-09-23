@@ -83,6 +83,8 @@ export const api = {
     return req('GET', `/contributions${p ? `?${p}` : ''}`);
   },
   createContribution: (c) => req('POST', '/contributions', c),
+  suggestSplit: (playerId, amount) => req('GET',
+    `/contributions/suggest?player_id=${encodeURIComponent(playerId)}&amount=${amount}`),
   splitSiblings: (groupId) => req('GET', `/contributions/split/${groupId}`),
   deleteContribution: (id) => req('DELETE', `/contributions/${id}`),
 

@@ -344,6 +344,10 @@
             <div class="card-header">
               <h3 class="card-title" id="playerDetailName"></h3>
               <div style="display:flex; gap:0.6rem; align-items:center;">
+                <!-- Moving money is the cashier's. A player opening their own
+                     detail would otherwise see a button that 403s. -->
+                <button class="btn btn-secondary btn-sm role-admin-only" id="plMoveBetween"
+                  title="Move this player's own money from one contract to the other, either way">⇄ Move between contracts</button>
                 <button class="btn btn-secondary btn-sm" id="plSharePlayer"
                   title="One picture of this player across BOTH contracts, sized to send to them directly">📤 Send to player</button>
                 <button class="btn btn-secondary btn-sm" id="playerDetailClose">Close</button>

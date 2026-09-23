@@ -358,7 +358,7 @@ export const ledgersRepo = {
    * between two of somebody's own pockets and must not alter what is in them
    * altogether.
    */
-  coverFromOtherContract(playerId, { from, to, amount, by = 'admin' } = {}) {
+  coverFromOtherContract(playerId, { from, to, amount, by = 'admin', kind = 'cover' } = {}) {
     const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
     const amt = r2(amount);
     if (!(amt > 0)) throw new Error('Nothing to cover');
@@ -381,7 +381,14 @@ export const ledgersRepo = {
     const now = new Date().toISOString();
     const fromName = db.prepare('SELECT name FROM contracts WHERE id = ?').get(from).name;
     const toName = db.prepare('SELECT name FROM contracts WHERE id = ?').get(to).name;
-    const label = `Covered from ${fromName} credit`;
+    // Two reasons to move money between somebody's own two balances, and the
+    // ledger should say which. A COVER is the app's own suggestion, taken:
+    // they were short on one night and holding enough on the other. A MOVE is
+    // the cashier deciding — often because the player asked, having stopped
+    // playing one night. Reading back "Covered from Saturdays credit" on a
+    // move somebody requested is a small lie that costs an argument later.
+    const label = kind === 'move'
+      ? `Moved from ${fromName}` : `Covered from ${fromName} credit`;
 
     db.exec('BEGIN IMMEDIATE');
     try {

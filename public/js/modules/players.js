@@ -464,6 +464,99 @@ function coverPlan(l) {
   return { player_id: l.player_id, name: l.player_name, from: source[0], to: short[0], amount: need };
 }
 
+/**
+ * Move one person's own money from one contract to the other, either way.
+ *
+ * The engine for this already existed as "cover a shortfall out of the credit
+ * they hold on the other night", which only ever ran in that direction and
+ * only when the app proposed it. The other direction is just as real: somebody
+ * who has stopped playing Saturdays wants their balance where they do play,
+ * and the answer should not be inventing a contribution on one side and an
+ * adjustment on the other.
+ *
+ * Same two-legged, reconciled write either way: what they hold across both
+ * contracts before and after must be identical, or nothing is written.
+ */
+async function moveBetweenContractsModal(playerId) {
+  const who = store.players.find(p => p.id === playerId);
+  let ledgers = [];
+  try { ledgers = await api.get(`/players/${playerId}/ledgers`) || []; }
+  catch (e) { toast(e.message, true); return; }
+
+  const onContracts = ledgers.filter(l => nameOfContract(l.contract_id));
+  if (onContracts.length < 2) {
+    toast(`${who?.name || 'They'} are only on one contract — there is nowhere to move it to`, true);
+    return;
+  }
+
+  const opt = (l) => `<option value="${esc(l.contract_id)}" data-balance="${l.present_balance}">`
+    + `${esc(nameOfContract(l.contract_id))} — holding ${money(l.present_balance)}</option>`;
+  // Default to the move the numbers are asking for: out of the biggest credit,
+  // into the deepest shortfall. Both pickers stay free.
+  const richest = [...onContracts].sort((a, b) => b.present_balance - a.present_balance)[0];
+  const poorest = [...onContracts].sort((a, b) => a.present_balance - b.present_balance)[0];
+  const suggested = poorest.present_balance < 0
+    ? Math.min(Math.round(-poorest.present_balance), Math.max(0, Math.round(richest.present_balance)))
+    : 0;
+
+  openModal(`${who?.name || 'Player'} — move between contracts`, `
+    <p class="hint">Their own money, moved from one balance to the other. The club is neither
+      owed nor owes anything different afterwards: what they hold across both contracts is
+      identical, and the move is refused if it would not be.</p>
+    <div class="form-row mt">
+      <div class="form-group"><label for="mb_from">Out of</label>
+        <select id="mb_from">${onContracts.map(l =>
+    opt(l).replace('<option', l.contract_id === richest.contract_id ? '<option selected' : '<option'))
+    .join('')}</select></div>
+      <div class="form-group"><label for="mb_to">Into</label>
+        <select id="mb_to">${onContracts.map(l =>
+    opt(l).replace('<option', l.contract_id === poorest.contract_id ? '<option selected' : '<option'))
+    .join('')}</select></div>
+    </div>
+    <div class="form-group mt"><label for="mb_amount">Amount (AED)</label>
+      <input type="number" id="mb_amount" step="1" min="1" value="${suggested || ''}"
+        placeholder="0"></div>
+    <p class="hint mt" id="mb_after"></p>
+    <button class="btn full-w mt" id="mb_go">Move it</button>`);
+
+  const balanceOf = (id) => onContracts.find(l => l.contract_id === id)?.present_balance ?? 0;
+  const preview = () => {
+    const from = $('mb_from').value;
+    const to = $('mb_to').value;
+    const amt = Math.round(Number($('mb_amount').value) || 0);
+    const el = $('mb_after');
+    if (from === to) { el.textContent = 'Pick two different contracts.'; return; }
+    if (!(amt > 0)) { el.textContent = 'How much?'; return; }
+    if (amt > balanceOf(from)) {
+      el.textContent = `They only hold ${money(balanceOf(from))} on `
+        + `${nameOfContract(from)} — a move cannot put that one in the red.`;
+      return;
+    }
+    el.textContent = `After: ${nameOfContract(from)} ${money(balanceOf(from) - amt)}`
+      + ` · ${nameOfContract(to)} ${money(balanceOf(to) + amt)}`
+      + ` — still ${money(onContracts.reduce((s, l) => s + l.present_balance, 0))} in total.`;
+  };
+  ['mb_from', 'mb_to', 'mb_amount'].forEach(id => $(id).addEventListener('input', preview));
+  preview();
+
+  $('mb_go').addEventListener('click', async () => {
+    const from = $('mb_from').value;
+    const to = $('mb_to').value;
+    const amount = Math.round(Number($('mb_amount').value) || 0);
+    if (from === to) { toast('Pick two different contracts', true); return; }
+    if (!(amount > 0)) { toast('Put an amount in', true); return; }
+    try {
+      const out = await api.post('/admin/ledgers/cover',
+        { moves: [{ player_id: playerId, from, to, amount, kind: 'move' }] });
+      if (out.refused?.length) { toast(out.refused[0].why, true); return; }
+      toast(`${money(amount)} moved from ${nameOfContract(from)} to ${nameOfContract(to)} ✓`);
+      closeModal();
+      await render();
+      if (currentDetailPlayerId === playerId) window.showPlayerDetail(playerId);
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 async function renderCombined(host) {
   host.innerHTML = '<p class="hint">Loading…</p>';
   let rows = [];
@@ -1660,6 +1753,10 @@ export function initPlayers() {
 
   // Both snapshots cover every contract at once, so neither is tied to the
   // contract currently on screen.
+  $('plMoveBetween').addEventListener('click', () => {
+    if (currentDetailPlayerId) moveBetweenContractsModal(currentDetailPlayerId);
+  });
+
   $('plShare').addEventListener('click', () => shareClubSnapshot());
   $('plSharePlayer').addEventListener('click', () => {
     if (currentDetailPlayerId) sharePlayerSnapshot(currentDetailPlayerId);

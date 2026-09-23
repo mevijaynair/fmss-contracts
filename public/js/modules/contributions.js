@@ -132,41 +132,25 @@ function refreshAdmin() { renderPendingApprovals(); renderLog(); }
 function initAdmin() {
   $('cf_date').value = today();
 
-  // Add split allocation UI
-  const splitBtn = document.createElement('button');
-  splitBtn.type = 'button';
-  splitBtn.className = 'btn btn-secondary btn-sm';
-  splitBtn.textContent = '🔀 Split across contracts';
-  splitBtn.style.marginTop = '1rem';
-
+  // The split panel builds itself once a player and an amount are both known.
   const contribForm = $('contribForm');
-  contribForm.appendChild(splitBtn);
+  const panel = document.createElement('div');
+  panel.id = 'splitAllocationDiv';
+  panel.className = 'alloc-panel';
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="alloc-head">
+      <strong>Where this goes</strong>
+      <button type="button" class="link-btn" id="splitReset">Reset to suggestion</button>
+    </div>
+    <p class="hint" id="splitWhy"></p>
+    <div id="splitRows"></div>
+    <p class="hint" id="splitSum"></p>`;
+  contribForm.insertBefore(panel, contribForm.querySelector('button[type="submit"]'));
 
-  let showingSplit = false;
-  splitBtn.addEventListener('click', () => {
-    showingSplit = !showingSplit;
-    let splitDiv = document.getElementById('splitAllocationDiv');
-    if (showingSplit && !splitDiv) {
-      splitDiv = document.createElement('div');
-      splitDiv.id = 'splitAllocationDiv';
-      splitDiv.innerHTML = `
-        <div style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-subtle); border-radius: 8px; border-left: 4px solid var(--accent);">
-          <div style="font-weight: 600; margin-bottom: 1rem; color: var(--accent);">Split this payment across contracts</div>
-          <div id="splitRows" style="display: grid; gap: 0.8rem;"></div>
-          <button type="button" class="btn btn-secondary btn-sm" id="addSplitBtn" style="margin-top: 0.8rem;">+ Add contract</button>
-          <div style="margin-top: 1rem; padding: 0.8rem; background: var(--bg-inset); border-radius: 6px; font-size: 0.9rem;">
-            <div>Total amount: <strong id="splitTotal">0</strong> AED</div>
-            <div>Form amount: <strong id="splitFormAmount">0</strong> AED</div>
-            <div id="splitMatch" style="color: var(--danger); display: none;">⚠️ Split totals must equal form amount</div>
-          </div>
-        </div>`;
-      contribForm.appendChild(splitDiv);
-      renderSplitRows();
-    } else if (splitDiv) {
-      splitDiv.style.display = showingSplit ? 'block' : 'none';
-    }
-    splitBtn.textContent = showingSplit ? '✕ Close split' : '🔀 Split across contracts';
-  });
+  $('splitReset').addEventListener('click', () => drawSplit(lastSuggestion, true));
+  $('cf_player').addEventListener('change', askForSuggestion);
+  $('cf_amount').addEventListener('input', askForSuggestion);
 
   $('contribForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -177,7 +161,7 @@ function initAdmin() {
 
     // Check if split is active
     const splitDiv = document.getElementById('splitAllocationDiv');
-    const usingSplit = splitDiv && splitDiv.style.display !== 'none';
+    const usingSplit = splitDiv && !splitDiv.hidden;
 
     if (usingSplit) {
       try {
@@ -206,7 +190,12 @@ function initAdmin() {
         // One id shared by every leg, so the rows stay provably the same bank
         // payment. The relationship is data now, not a phrase in a comment that
         // an edit could lose — and the comment stays the user's own words.
-        const group = `sp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+        //
+        // A "split" of one leg is not a split: the panel proposes both nights
+        // and the cashier is free to zero one of them, and calling the result
+        // "1 of 300 split 1 way" everywhere it is read would be noise.
+        const group = splits.length > 1
+          ? `sp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}` : null;
         for (const split of splits) {
           await api.createContribution({
             player_id: playerId,
@@ -215,8 +204,11 @@ function initAdmin() {
             date, comments, split_group: group,
           });
         }
-        toast(`${money(totalAmount)} split across ${splits.length} contracts ✓`);
+        toast(splits.length > 1
+          ? `${money(totalAmount)} split across ${splits.length} contracts ✓`
+          : 'Contribution added ✓');
         $('cf_amount').value = ''; $('cf_comments').value = '';
+        askForSuggestion();
         renderLog();
       } catch (err) { toast(err.message, true); }
     } else {
@@ -236,68 +228,131 @@ function initAdmin() {
   $('contribFilter').addEventListener('change', renderLog);
 }
 
-function renderSplitRows() {
+// ---- where a payment should go ------------------------------------------
+//
+// Somebody hands over 300 in a car park. Working out where it is needed meant
+// opening two ledgers, and the split form that existed offered two blank boxes
+// and no opinion — so in practice everything went on one contract and the
+// other night stayed in the red.
+//
+// The server proposes (see contributions.suggestSplit: what is owed first,
+// then in proportion to how often they actually play each night) and this
+// draws it with every figure editable. It is a suggestion in the real sense —
+// the person paying sometimes says what the money is for, and that beats any
+// rule.
+
+let lastSuggestion = null;
+let suggestKey = '';
+let suggestTimer = null;
+
+/** Ask the server where this payment should go, once the inputs settle. */
+function askForSuggestion() {
+  const playerId = $('cf_player').value;
+  const amount = Math.round(Number($('cf_amount').value) || 0);
+  const key = `${playerId}|${amount}`;
+  if (key === suggestKey) return;
+  suggestKey = key;
+
+  clearTimeout(suggestTimer);
+  if (!playerId || amount <= 0) { drawSplit(null); return; }
+  // Typing "300" fires three times; only the number they stopped on matters.
+  suggestTimer = setTimeout(async () => {
+    try {
+      const s = await api.suggestSplit(playerId, amount);
+      if (suggestKey !== key) return;          // they carried on typing
+      lastSuggestion = s;
+      drawSplit(s, true);
+    } catch (e) { toast(e.message, true); }
+  }, 250);
+}
+
+/**
+ * Draw the panel. `fresh` fills the boxes from the suggestion; without it the
+ * numbers already typed are left alone and only the workings are redrawn.
+ */
+function drawSplit(s, fresh = false) {
+  const panel = document.getElementById('splitAllocationDiv');
   const rows = document.getElementById('splitRows');
-  const addBtn = document.getElementById('addSplitBtn');
-  if (!rows || !addBtn) return;
+  if (!panel || !rows) return;
 
-  const currentSplits = Array.from(document.querySelectorAll('[data-split-contract]')).length;
-  if (currentSplits === 0) {
-    store.contracts.forEach(c => {
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '0.5rem';
-      row.style.alignItems = 'flex-end';
-      row.innerHTML = `
-        <select data-split-contract style="flex: 2; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-          ${store.contracts.map(x => `<option value="${x.id}" ${x.id === c.id ? 'selected' : ''}>${x.name}</option>`).join('')}
-        </select>
-        <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-        <button type="button" class="btn btn-secondary btn-sm" data-split-remove style="padding: 0.5rem 0.8rem;">✕</button>`;
-      rows.appendChild(row);
-
-      row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
-      row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
-      row.querySelector('[data-split-remove]').addEventListener('click', () => {
-        row.remove(); updateSplitTotal();
-      });
-    });
+  if (!s || s.refused || !s.lines.length) {
+    panel.hidden = true;
+    $('cf_contract').disabled = false;
+    if (s && s.refused) toast(s.refused, true);
+    return;
   }
 
-  addBtn.onclick = () => {
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '0.5rem';
-    row.style.alignItems = 'flex-end';
-    row.innerHTML = `
-      <select data-split-contract style="flex: 2; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-        ${store.contracts.map(x => `<option value="${x.id}">${x.name}</option>`).join('')}
-      </select>
-      <input type="number" data-split-amount step="1" placeholder="0" style="flex: 1; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
-      <button type="button" class="btn btn-secondary btn-sm" data-split-remove style="padding: 0.5rem 0.8rem;">✕</button>`;
-    rows.appendChild(row);
+  // One contract in play: no panel at all, just point the contract picker at
+  // it. A split form offering one row is a question with one answer.
+  if (s.lines.length === 1) {
+    panel.hidden = true;
+    $('cf_contract').value = s.lines[0].contract_id;
+    $('cf_contract').disabled = false;
+    return;
+  }
 
-    row.querySelector('[data-split-amount]').addEventListener('input', updateSplitTotal);
-    row.querySelector('[data-split-contract]').addEventListener('change', updateSplitTotal);
-    row.querySelector('[data-split-remove]').addEventListener('click', () => {
-      row.remove(); updateSplitTotal();
-    });
-  };
+  panel.hidden = false;
+  // Two answers to "which contract" on one form is one too many: while the
+  // split is open, the picker above it decides nothing.
+  $('cf_contract').disabled = true;
+  document.getElementById('splitWhy').textContent = s.headline;
+
+  if (fresh) {
+    rows.innerHTML = s.lines.map(l => `
+      <div class="alloc-row" data-balance="${l.balance}" data-cost="${l.cost_per_game}">
+        <input type="hidden" data-split-contract value="${esc(l.contract_id)}">
+        <div class="alloc-name">
+          <strong>${esc(l.contract_name)}</strong>
+          <span class="hint" data-split-why>${esc(l.why)}</span>
+        </div>
+        <div class="alloc-now">
+          <span class="hint">now</span> ${balCell(l.balance)}
+        </div>
+        <input type="number" data-split-amount step="1" class="alloc-amt"
+          value="${l.suggested}" aria-label="Amount for ${esc(l.contract_name)}">
+      </div>`).join('');
+    rows.querySelectorAll('[data-split-amount]').forEach(el =>
+      el.addEventListener('input', updateSplitTotal));
+  }
+  updateSplitTotal();
 }
 
+/**
+ * Keep the workings honest while the cashier edits.
+ *
+ * The consequence of a number is what makes it checkable — "covers 4 more
+ * games" is the thing being decided, not the 108. Recomputed here rather than
+ * re-asked of the server so it keeps up with typing.
+ */
 function updateSplitTotal() {
-  const splits = Array.from(document.querySelectorAll('[data-split-amount]')).map(x => Number(x.value) || 0);
-  const splitTotal = splits.reduce((s, x) => s + x, 0);
-  const formAmount = Number($('cf_amount').value) || 0;
+  const formAmount = Math.round(Number($('cf_amount').value) || 0);
+  let total = 0;
 
-  const totalEl = document.getElementById('splitTotal');
-  const formEl = document.getElementById('splitFormAmount');
-  const matchEl = document.getElementById('splitMatch');
+  document.querySelectorAll('#splitRows .alloc-row').forEach((row) => {
+    const put = Math.round(Number(row.querySelector('[data-split-amount]').value) || 0);
+    total += put;
+    const balance = Number(row.dataset.balance) || 0;
+    const cost = Number(row.dataset.cost) || 0;
+    const after = balance + put;
+    const why = row.querySelector('[data-split-why]');
+    if (!why) return;
+    const games = cost > 0 ? Math.floor(after / cost) : null;
+    why.textContent = after < 0
+      ? `still ${money(-after)} short`
+      : games === null ? `leaves ${money(after)}`
+        : `leaves ${money(after)} — covers ${games} more game${games === 1 ? '' : 's'}`;
+  });
 
-  if (totalEl) totalEl.textContent = splitTotal.toFixed(2);
-  if (formEl) formEl.textContent = formAmount.toFixed(2);
-  if (matchEl) matchEl.style.display = Math.abs(splitTotal - formAmount) > 0.01 ? 'block' : 'none';
+  const sum = document.getElementById('splitSum');
+  if (!sum) return;
+  const gap = formAmount - total;
+  sum.textContent = gap === 0
+    ? `${money(total)} of ${money(formAmount)} allocated.`
+    : gap > 0 ? `${money(gap)} not allocated yet — the total must match ${money(formAmount)}.`
+      : `${money(-gap)} over — the total must match ${money(formAmount)}.`;
+  sum.classList.toggle('rep-out', gap !== 0);
 }
+
 
 // --------------------------------------------------------------- PLAYER view
 

@@ -320,6 +320,9 @@ r.post('/admin/ledgers/cover', wrap((req) => {
     try {
       done.push(ledgersRepo.coverFromOtherContract(m.player_id, {
         from: m.from, to: m.to, amount: m.amount, by: req.user.id || 'admin',
+        // Only the WORD comes from the request, never the wording: the repo
+        // builds the description from the contracts' own names.
+        kind: m.kind === 'move' ? 'move' : 'cover',
       }));
     } catch (e) {
       refused.push({
@@ -939,6 +942,13 @@ r.get('/contributions', wrap((req) => {
   return contributionsRepo.all({ playerId: req.query.player_id, contractId: req.query.contract });
 }));
 r.post('/contributions', wrap((req) => { requireAdmin(req); return contributionsRepo.create(req.body); }));
+
+// Where a payment should go, before it is recorded. Proposes; writes nothing.
+r.get('/contributions/suggest', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.suggestSplit(req.query.player_id,
+    Math.max(0, Number(req.query.amount) || 0));
+}));
 // The other legs of a split payment, for reconciling one bank line.
 r.get('/contributions/split/:groupId', wrap((req) => {
   requireAdmin(req);
