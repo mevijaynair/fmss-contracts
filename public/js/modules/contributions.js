@@ -4,6 +4,7 @@
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl } from '../util.js';
+import { allocRowsHtml, refreshAllocs, readAllocs, splitGroupFor } from './split_panel.js';
 
 function contractName(id) {
   return store.contracts.find(c => c.id === id)?.name.split(' ')[0] || (id || '—');
@@ -170,12 +171,7 @@ function initAdmin() {
         // *inside* each one, which is never there — so .value threw on a null,
         // outside the try, and the submit died without saving anything or
         // saying why. A split payment simply appeared to do nothing.
-        const splits = Array.from(document.querySelectorAll('#splitRows > div'))
-          .map(row => ({
-            contract_id: row.querySelector('[data-split-contract]')?.value || '',
-            amount: Number(row.querySelector('[data-split-amount]')?.value) || 0,
-          }))
-          .filter(s => s.contract_id && s.amount > 0);
+        const splits = readAllocs(document.getElementById('splitRows'));
 
         if (!splits.length) {
           toast('Put an amount against at least one contract', true);
@@ -194,8 +190,7 @@ function initAdmin() {
         // A "split" of one leg is not a split: the panel proposes both nights
         // and the cashier is free to zero one of them, and calling the result
         // "1 of 300 split 1 way" everywhere it is read would be noise.
-        const group = splits.length > 1
-          ? `sp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}` : null;
+        const group = splitGroupFor(splits);
         for (const split of splits) {
           await api.createContribution({
             player_id: playerId,
@@ -298,19 +293,7 @@ function drawSplit(s, fresh = false) {
   document.getElementById('splitWhy').textContent = s.headline;
 
   if (fresh) {
-    rows.innerHTML = s.lines.map(l => `
-      <div class="alloc-row" data-balance="${l.balance}" data-cost="${l.cost_per_game}">
-        <input type="hidden" data-split-contract value="${esc(l.contract_id)}">
-        <div class="alloc-name">
-          <strong>${esc(l.contract_name)}</strong>
-          <span class="hint" data-split-why>${esc(l.why)}</span>
-        </div>
-        <div class="alloc-now">
-          <span class="hint">now</span> ${balCell(l.balance)}
-        </div>
-        <input type="number" data-split-amount step="1" class="alloc-amt"
-          value="${l.suggested}" aria-label="Amount for ${esc(l.contract_name)}">
-      </div>`).join('');
+    rows.innerHTML = allocRowsHtml(s.lines);
     rows.querySelectorAll('[data-split-amount]').forEach(el =>
       el.addEventListener('input', updateSplitTotal));
   }
@@ -318,41 +301,15 @@ function drawSplit(s, fresh = false) {
 }
 
 /**
- * Keep the workings honest while the cashier edits.
- *
- * The consequence of a number is what makes it checkable — "covers 4 more
- * games" is the thing being decided, not the 108. Recomputed here rather than
- * re-asked of the server so it keeps up with typing.
+ * Keep the workings honest while the cashier edits. The arithmetic is shared
+ * with the + Pay modal on the Players screen — see split_panel.js.
  */
 function updateSplitTotal() {
-  const formAmount = Math.round(Number($('cf_amount').value) || 0);
-  let total = 0;
-
-  document.querySelectorAll('#splitRows .alloc-row').forEach((row) => {
-    const put = Math.round(Number(row.querySelector('[data-split-amount]').value) || 0);
-    total += put;
-    const balance = Number(row.dataset.balance) || 0;
-    const cost = Number(row.dataset.cost) || 0;
-    const after = balance + put;
-    const why = row.querySelector('[data-split-why]');
-    if (!why) return;
-    const games = cost > 0 ? Math.floor(after / cost) : null;
-    why.textContent = after < 0
-      ? `still ${money(-after)} short`
-      : games === null ? `leaves ${money(after)}`
-        : `leaves ${money(after)} — covers ${games} more game${games === 1 ? '' : 's'}`;
-  });
-
-  const sum = document.getElementById('splitSum');
-  if (!sum) return;
-  const gap = formAmount - total;
-  sum.textContent = gap === 0
-    ? `${money(total)} of ${money(formAmount)} allocated.`
-    : gap > 0 ? `${money(gap)} not allocated yet — the total must match ${money(formAmount)}.`
-      : `${money(-gap)} over — the total must match ${money(formAmount)}.`;
-  sum.classList.toggle('rep-out', gap !== 0);
+  const host = document.getElementById('splitRows');
+  if (!host) return;
+  refreshAllocs(host, Math.round(Number($('cf_amount').value) || 0),
+    document.getElementById('splitSum'));
 }
-
 
 // --------------------------------------------------------------- PLAYER view
 
@@ -500,6 +457,17 @@ function describeMove() {
     if (field) field.disabled = true;
     return;
   }
+  // The same person on both ends is not a movement between two parties — it is
+  // one person's money moving between their own two balances, which is a
+  // different shape (one party, two contracts) and lives on the Players
+  // screen. Saying where, rather than failing with "from and to must differ".
+  if (from && from === to && !isKitty(from)) {
+    note.textContent = 'Same person on both ends. To move their own money between their two '
+      + 'contracts, use ⇄ on the Players screen — the ⋮ menu on their row, or the Both view.';
+    if (field) field.disabled = true;
+    return;
+  }
+
   if (field) field.disabled = false;
   note.textContent = !isKitty(from) && !isKitty(to)
     ? 'Required — a balance belongs to a contract.'

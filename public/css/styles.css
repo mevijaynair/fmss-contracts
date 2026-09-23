@@ -1149,6 +1149,22 @@ td.rep-in { background: color-mix(in srgb, var(--success) 12%, transparent); }
 td.rep-refill { background: color-mix(in srgb, var(--warning) 14%, transparent); }
 td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
+/* --- What you can do to one player ---
+   A list of actions that each say what they do, in place of the row of
+   unlabelled buttons that used to slide out of the side of the table. */
+.btn-more { font-size: 1rem; padding: 0.3rem 0.45rem; min-width: auto; line-height: 1; }
+.action-list { display: grid; gap: 0.5rem; margin-top: 0.4rem; }
+.action-item { display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 0.7rem 0.9rem; border-radius: 8px; background: var(--bg-subtle);
+  border: 1px solid var(--border-color); color: var(--text-main); font: inherit; }
+.action-item:hover { border-color: var(--sport); background: var(--bg-inset); }
+.action-label { display: block; font-weight: 600; font-size: 0.95rem; }
+.action-why { display: block; margin-top: 0.15rem; font-size: 0.82rem; line-height: 1.35;
+  color: var(--text-muted); }
+.action-item.is-danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--border-color)); }
+.action-item.is-danger .action-label { color: var(--danger); }
+.action-item.is-danger:hover { border-color: var(--danger); }
+
 /* --- Where a payment goes: the suggested split on the contributions form ---
    Named alloc-*, not split-*: .split-row is already the row of the
    settlement modal's list further down this file, and the later rule wins —

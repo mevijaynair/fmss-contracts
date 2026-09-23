@@ -6,6 +6,7 @@ import { balanceLine, dividedBar, pairedBars, wireCharts } from '../charts.js';
 import { initOpeningBalances, loadOpeningBalances } from './opening_balances.js';
 import { splitNote, wireSplitNotes } from './contributions.js';
 import { showView } from '../router.js';
+import { allocRowsHtml, refreshAllocs, readAllocs, splitGroupFor } from './split_panel.js';
 import { renderStandingSheet } from './report.js';
 import { renderClubStanding } from './standing.js';
 import { shareClubSnapshot, sharePlayerSnapshot } from './share.js';
@@ -610,7 +611,7 @@ async function renderCombined(host) {
                  immediately to the left, which says it without saying it.
                  Each cell carries the full names and rates on hover. -->
             <th class="num" title="More games the whole balance buys on each contract, in the same order as the columns to the left">Covers</th>
-            <th class="num">Games</th><th class="num">Paid in</th></tr></thead>
+            <th class="num">Games</th><th class="num">Paid in</th><th></th></tr></thead>
           <tbody>${members.map(l => `
             <tr>
               <td><strong>${esc(l.player_name)}</strong>${l.special_role === 'cashier'
@@ -630,7 +631,12 @@ async function renderCombined(host) {
     : (l.covers || []).map(c => `${Math.max(0, c.games_left ?? 0)}`).join(' / ')}</td>
               <td class="num">${l.games || 0}</td>
               <td class="num">${money(l.contributed)}</td>
-            </tr>`).join('') || `<tr><td colspan="${cs.length + 5}" class="hint">Nobody yet.</td></tr>`}
+              <!-- This is the screen where both balances are on one line, so
+                   it is where somebody decides to shift money between them. -->
+              <td class="row-actions"><button class="btn btn-sm btn-more"
+                data-move="${esc(l.player_id)}"
+                title="Move ${esc(l.player_name)}'s own money between their contracts">⇄</button></td>
+            </tr>`).join('') || `<tr><td colspan="${cs.length + 6}" class="hint">Nobody yet.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -639,6 +645,9 @@ async function renderCombined(host) {
         dearer night, so it is given per contract rather than averaged into a figure that is
         true of neither.</p>
     </div>`;
+
+  host.querySelectorAll('[data-move]').forEach(btn =>
+    btn.addEventListener('click', () => moveBetweenContractsModal(btn.dataset.move)));
 
   // Covering a shortfall out of the same person's other balance. Per person
   // on the server, so one of them having moved since this was drawn does not
@@ -742,6 +751,12 @@ async function renderGuests(host) {
         <div class="es-title">Nothing to collect</div>
         <div class="es-sub">Every guest who has played has settled up.</div></div>`}
     </div>`;
+
+  // This view draws into the sheet host, not the ledger table — and the only
+  // place [data-kind] was ever wired searched the table. So "→ Squad" here has
+  // been a button that does nothing since the guest list was added.
+  host.querySelectorAll('[data-kind]').forEach(btn =>
+    btn.addEventListener('click', () => changeKind(btn.dataset.kind, btn.dataset.to)));
 }
 
 /**
@@ -992,24 +1007,8 @@ async function render() {
       <td class="row-actions">
         ${isCashier ? '<span class="hint">no contributions</span>'
           : `<button class="btn btn-secondary btn-sm" data-pay="${l.player_id}">+ Pay</button>`}
-        <button class="btn btn-sm" data-menu="${l.player_id}" title="More options" style="font-size: 1rem; padding: 0.3rem 0.4rem; min-width: auto;">⋮</button>
-      </td>
-      <td style="display: none;" data-actions="${l.player_id}">
-        <button class="btn btn-sm" data-sheet="${l.player_id}" data-hidden="${hiddenIds.has(l.player_id) ? 1 : 0}"
-          title="Takes them off the Standing sheet and out of the rankings until they are back. They keep their balance, their history and their place on this screen — it moves no money at all. For somebody who has stopped turning up, whether for a season or for good."
-          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">${
-  hiddenIds.has(l.player_id) ? '▶ Playing again' : '⏸ Not playing now'}</button>
-        <button class="btn btn-sm" data-fixmoney="${l.player_id}"
-          title="How this person's games settle — off a balance, cash on the day, or carried by the kitty — and whose money pays. All of them in one place, instead of one game at a time."
-          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">⚖ Fix money</button>
-        <button class="btn btn-sm" data-kind="${l.player_id}" data-to="outside"
-          title="Move them to the guest list: somebody who turns up now and then and pays cash, rather than a member on a contract. They leave the ledger and the standing sheet. Refused if any of their games were settled off a balance, because that would turn football they have paid for into cash they owe."
-          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">→ Guest list</button>
-        <button class="btn btn-sm" data-split="${l.player_id}"
-          title="One record, two people with the same name — pull the second one out, taking their games with them"
-          style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">⑂ Two people</button>
-        <button class="btn btn-sm" data-reset="${l.player_id}" title="Clear contributions, keep charges" style="opacity: 0.6; font-size: 0.8rem; padding: 0.3rem 0.5rem; margin-right: 0.25rem;">↺ Reset</button>
-        <button class="btn btn-sm" data-delete="${l.player_id}" title="Permanently remove player" style="opacity: 0.5; font-size: 0.8rem; padding: 0.3rem 0.5rem; color: var(--danger);">✕ Delete</button>
+        <button class="btn btn-sm btn-more" data-menu="${l.player_id}"
+          title="Everything else you can do with ${esc(l.player_name)}">⋮</button>
       </td>
     </tr>`
   // Counted from the header rather than typed, so a column added later cannot
@@ -1022,67 +1021,133 @@ async function render() {
   $('playersTable').querySelectorAll('[data-pay]').forEach(btn =>
     btn.addEventListener('click', () => payModal(btn.dataset.pay)));
 
-  // Menu button (⋮) toggles Reset/Delete visibility
-  $('playersTable').querySelectorAll('[data-menu]').forEach(btn => {
+  $('playersTable').querySelectorAll('[data-menu]').forEach(btn =>
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const playerId = btn.dataset.menu;
-      const actionsCell = $('playersTable').querySelector(`[data-actions="${playerId}"]`);
-      const isVisible = actionsCell.style.display !== 'none';
-      actionsCell.style.display = isVisible ? 'none' : 'table-cell';
-    });
-  });
-
-  // Close menu when clicking elsewhere
-  document.addEventListener('click', () => {
-    $('playersTable').querySelectorAll('[data-actions]').forEach(cell => {
-      cell.style.display = 'none';
-    });
-  });
+      playerActionsModal(btn.dataset.menu);
+    }));
 
   wireBulk();
-  $('playersTable').querySelectorAll('[data-fixmoney]').forEach(btn =>
-    btn.addEventListener('click', () => fixMoneyModal(btn.dataset.fixmoney)));
   $('playersTable').querySelectorAll('[data-kind]').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.kind;
-      const name = store.players.find(p => p.id === id)?.name || 'them';
-      // One player and twelve go through the same preview, so the warning
-      // about the other contract cannot depend on how many you picked.
-      if (btn.dataset.to === 'outside') {
-        if (!await confirmToGuests([id])) return;
-      } else if (!confirm(`Move ${name} to the squad?\n\n`
-        + 'They keep a balance and appear on the ledger and the standing sheet.')) return;
-      try {
-        await api.put(`/admin/players/${id}/kind`, { kind: btn.dataset.to });
-        store.players = await api.players();
-        toast(`${name} is on the ${btn.dataset.to === 'outside' ? 'guest list' : 'squad'} now`);
-        render();
-      } catch (e) { toast(e.message, true); }
-    }));
-  $('playersTable').querySelectorAll('[data-split]').forEach(btn =>
-    btn.addEventListener('click', () => splitPlayerModal(btn.dataset.split)));
-  $('playersTable').querySelectorAll('[data-reset]').forEach(btn =>
-    btn.addEventListener('click', () => resetPlayerModal(btn.dataset.reset)));
-  $('playersTable').querySelectorAll('[data-delete]').forEach(btn =>
-    btn.addEventListener('click', () => deletePlayerModal(btn.dataset.delete)));
-
-  // Visibility only. No confirmation, because nothing about it is destructive —
-  // it moves no money and is one click to undo.
-  $('playersTable').querySelectorAll('[data-sheet]').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      const hide = btn.dataset.hidden !== '1';
-      try {
-        await api.updatePlayer(btn.dataset.sheet, { hide_from_sheet: hide });
-        store.players = await api.players();
-        toast(hide
-          ? 'Set aside — off the Standing sheet and the rankings, balance untouched'
-          : 'Back on the Standing sheet and the rankings');
-        render();
-      } catch (e) { toast(e.message, true); }
-    }));
+    btn.addEventListener('click', () => changeKind(btn.dataset.kind, btn.dataset.to)));
 
   drawScreenControls();
+}
+
+// ---- the things you can do to one person ---------------------------------
+
+/** Move somebody between the squad and the guest list, with the right warning. */
+async function changeKind(id, to) {
+  const name = store.players.find(p => p.id === id)?.name || 'them';
+  // One player and twelve go through the same preview, so the warning about
+  // the other contract cannot depend on how many you picked.
+  if (to === 'outside') {
+    if (!await confirmToGuests([id])) return;
+  } else if (!confirm(`Move ${name} to the squad?\n\n`
+    + 'They keep a balance and appear on the ledger and the standing sheet.')) return;
+  try {
+    await api.put(`/admin/players/${id}/kind`, { kind: to });
+    store.players = await api.players();
+    toast(`${name} is on the ${to === 'outside' ? 'guest list' : 'squad'} now`);
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+/**
+ * Take somebody off the Standing sheet, or put them back.
+ *
+ * No confirmation: nothing about it is destructive. It moves no money and is
+ * one click to undo.
+ */
+async function setAside(id, hide) {
+  try {
+    await api.updatePlayer(id, { hide_from_sheet: hide });
+    store.players = await api.players();
+    toast(hide
+      ? 'Set aside — off the Standing sheet and the rankings, balance untouched'
+      : 'Back on the Standing sheet and the rankings');
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+/**
+ * Everything you can do to one person, in words, in one place.
+ *
+ * This was six buttons in a hidden table cell that slid out past the right
+ * edge of the table, each explaining itself only in a `title` — which is no
+ * explanation at all on a phone and one nobody hovers for on a desktop. So
+ * "Fix money", "Two people" and "Reset" sat there as three unexplained verbs,
+ * with Delete the same size and weight beside them.
+ *
+ * Now each one says what it does underneath its own name, and the two that
+ * destroy something are below a line, marked, and last.
+ */
+function playerActionsModal(playerId) {
+  const p = store.players.find(x => x.id === playerId);
+  const name = p?.name || 'this player';
+  const guest = (p?.player_type || 'regular') === 'outside';
+  const aside = !!p?.hide_from_sheet;
+
+  const act = (key, label, why, danger = false) => `
+    <button class="action-item${danger ? ' is-danger' : ''}" data-act="${key}">
+      <span class="action-label">${label}</span>
+      <span class="action-why">${why}</span>
+    </button>`;
+
+  openModal(`${esc(name)} — what would you like to do?`, `
+    <div class="action-list">
+      ${act('move', '⇄ Move money between their contracts',
+    'Their own balance, from one night to the other and back. What they hold '
+    + 'altogether does not change, and the club is owed no more and no less.')}
+      ${act('pay', '+ Record a payment',
+    'Money they have handed over. The split across their contracts is worked '
+    + 'out for you, and you can change it.')}
+      ${act('fix', '⚖ Correct how their games settle',
+    'Whether each game came off a balance, was cash on the day, or was carried '
+    + 'by the pot — and whose money paid. All their games in one place.')}
+      ${act('aside', aside ? '▶ They are playing again' : '⏸ They have stopped playing',
+    aside ? 'Puts them back on the Standing sheet and in the rankings.'
+      : 'Takes them off the Standing sheet and out of the rankings until they '
+        + 'are back. Balance, history and this screen are untouched — it moves no money.')}
+      ${act(guest ? 'squad' : 'guest',
+    guest ? '→ Move them to the squad' : '→ Move them to the guest list',
+    guest ? 'A member on a contract: they keep a balance and appear on the sheet.'
+      : 'Somebody who turns up now and then and pays cash for the night, rather '
+        + 'than a member on a contract. They leave the ledger and the sheet.')}
+      ${act('split', '⑂ This is two different people',
+    'One record that two people with the same name have been sharing. Pulls the '
+    + 'second one out as their own player, taking their games and money with them.')}
+    </div>
+    <p class="hint mt"><strong>Careful with these two.</strong> Neither can be undone from
+      the app.</p>
+    <div class="action-list">
+      ${act('reset', '↺ Wipe every payment they have made',
+    'Clears their contributions and puts the balance back to zero. Their games '
+    + 'stay on record, so they will read as owing for all of them.', true)}
+      ${act('delete', '✕ Delete them completely',
+    'Removes the player and everything of theirs. Refused while anything of '
+    + 'theirs is still referenced.', true)}
+    </div>`, { wide: true });
+
+  const run = {
+    move: () => moveBetweenContractsModal(playerId),
+    pay: () => payModal(playerId),
+    fix: () => fixMoneyModal(playerId),
+    aside: () => setAside(playerId, !aside),
+    guest: () => changeKind(playerId, 'outside'),
+    squad: () => changeKind(playerId, 'regular'),
+    split: () => splitPlayerModal(playerId),
+    reset: () => resetPlayerModal(playerId),
+    delete: () => deletePlayerModal(playerId),
+  };
+  document.querySelectorAll('[data-act]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const go = run[btn.dataset.act];
+      // Each of these opens a modal of its own, so this one has to be out of
+      // the way first — they share the single #modal element.
+      closeModal();
+      if (go) go();
+    }));
 }
 
 // Player "My Ledger": their own balances across all contracts (read-only), and
@@ -1575,21 +1640,104 @@ function closePlayerDetail() {
   currentDetailPlayerId = null;
 }
 
+/**
+ * Record a payment, with the same suggested split as the Contributions form.
+ *
+ * It used to put the whole amount on whichever contract the screen happened to
+ * be showing. That is right about half the time and silently wrong the rest:
+ * the money lands on the night you were looking at rather than the one that
+ * needed it, and nothing on screen mentions the other balance at all.
+ */
 function payModal(playerId) {
   const p = store.players.find(x => x.id === playerId);
+  const here = (store.contracts.find(c => c.id === contractId) || {}).name || '';
   openModal(`Add contribution — ${p?.name || ''}`, `
-    <div class="form-group"><label>Amount (AED)</label><input type="number" id="pm_amount" step="1" placeholder="300"></div>
-    <div class="form-group mt"><label>Date</label><input type="date" id="pm_date" value="${today()}"></div>
-    <div class="form-group mt"><label>Comments</label><input type="text" id="pm_comments" placeholder="cash / transfer"></div>
-    <button class="btn full-w mt" id="pm_save">Add to ${esc((store.contracts.find(c=>c.id===contractId)||{}).name||'')}</button>`);
+    <div class="form-group"><label for="pm_amount">Amount (AED)</label>
+      <input type="number" id="pm_amount" step="1" placeholder="300"></div>
+    <div class="form-group mt"><label for="pm_date">Date</label>
+      <input type="date" id="pm_date" value="${today()}"></div>
+    <div class="form-group mt"><label for="pm_comments">Comments</label>
+      <input type="text" id="pm_comments" placeholder="cash / transfer"></div>
+    <div class="alloc-panel mt" id="pm_panel" hidden>
+      <div class="alloc-head"><strong>Where this goes</strong>
+        <button type="button" class="link-btn" id="pm_reset">Reset to suggestion</button></div>
+      <p class="hint" id="pm_why"></p>
+      <div id="pm_rows"></div>
+      <p class="hint" id="pm_sum"></p>
+    </div>
+    <button class="btn full-w mt" id="pm_save">Add to ${esc(here)}</button>`);
+
+  let suggestion = null;
+  let asked = '';
+  let timer = null;
+  const panel = $('pm_panel');
+  const rows = $('pm_rows');
+  const amountNow = () => Math.round(Number($('pm_amount').value) || 0);
+
+  const draw = (s, fresh) => {
+    if (!s || s.refused || s.lines.length < 2) {
+      panel.hidden = true;
+      $('pm_save').textContent = `Add to ${here}`;
+      if (s && s.refused) toast(s.refused, true);
+      return;
+    }
+    panel.hidden = false;
+    $('pm_why').textContent = s.headline;
+    if (fresh) {
+      rows.innerHTML = allocRowsHtml(s.lines);
+      rows.querySelectorAll('[data-split-amount]').forEach(el =>
+        el.addEventListener('input', () => refreshAllocs(rows, amountNow(), $('pm_sum'))));
+    }
+    refreshAllocs(rows, amountNow(), $('pm_sum'));
+    $('pm_save').textContent = 'Add it';
+  };
+
+  const ask = () => {
+    const amount = amountNow();
+    const key = `${playerId}|${amount}`;
+    if (key === asked) return;
+    asked = key;
+    clearTimeout(timer);
+    if (amount <= 0) { draw(null); return; }
+    timer = setTimeout(async () => {
+      try {
+        const s = await api.suggestSplit(playerId, amount);
+        if (asked !== key) return;
+        suggestion = s;
+        draw(s, true);
+      } catch (e) { toast(e.message, true); }
+    }, 250);
+  };
+  $('pm_amount').addEventListener('input', ask);
+  $('pm_reset').addEventListener('click', () => draw(suggestion, true));
+
   $('pm_save').addEventListener('click', async () => {
+    const amount = amountNow();
+    const date = $('pm_date').value;
+    const comments = $('pm_comments').value;
+    // Split when the panel is open, one contract when it is not — the same
+    // rule as the Contributions form, so the two cannot behave differently.
+    const parts = panel.hidden
+      ? [{ contract_id: contractId, amount }]
+      : readAllocs(rows);
+    if (!parts.length || !(amount > 0)) { toast('Put an amount in', true); return; }
+    const put = parts.reduce((s, x) => s + x.amount, 0);
+    if (put !== amount) {
+      toast(`That adds up to ${money(put)}, but the payment is ${money(amount)}`, true);
+      return;
+    }
     try {
-      await api.createContribution({
-        player_id: playerId, contract_id: contractId,
-        amount: Number($('pm_amount').value) || 0,
-        date: $('pm_date').value, comments: $('pm_comments').value,
-      });
-      closeModal(); toast('Contribution added ✓'); render();
+      const group = splitGroupFor(parts);
+      for (const part of parts) {
+        await api.createContribution({
+          player_id: playerId, contract_id: part.contract_id,
+          amount: part.amount, date, comments, split_group: group,
+        });
+      }
+      closeModal();
+      toast(parts.length > 1
+        ? `${money(amount)} split across ${parts.length} contracts ✓` : 'Contribution added ✓');
+      render();
     } catch (e) { toast(e.message, true); }
   });
 }
