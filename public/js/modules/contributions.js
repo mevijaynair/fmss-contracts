@@ -3,7 +3,8 @@
 //  • Player: self-service "Submit Contribution" (→ pending) + their own history.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl } from '../util.js';
+import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl,
+  openModal, closeModal } from '../util.js';
 import { allocRowsHtml, refreshAllocs, readAllocs, splitGroupFor } from './split_panel.js';
 
 function contractName(id) {
@@ -62,7 +63,9 @@ async function renderLog() {
       <td class="num">${balCell(c.amount)}</td>
       <td>${esc(c.comments || '')}${splitNote(c)}</td>
       <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);" title="Came in with the opening balances — already counted there, so it cannot be edited or removed">📋 Imported</span>'
-        : `<button class="link-btn" data-del="${c.id}">✕</button>`}</td>
+        : `<button class="link-btn" data-edit="${c.id}"
+             title="Change the note or the date. The amount is not editable here — see the note in the box.">✎</button>
+           <button class="link-btn" data-del="${c.id}">✕</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
 
   wireSplitNotes($('contribTable'));
@@ -72,6 +75,52 @@ async function renderLog() {
       try { await api.deleteContribution(b.dataset.del); toast('Removed'); renderLog(); }
       catch (e) { toast(e.message, true); }
     }));
+
+  $('contribTable').querySelectorAll('[data-edit]').forEach(b =>
+    b.addEventListener('click', () => editContributionModal(
+      rows.find(r => r.id === b.dataset.edit))));
+}
+
+/**
+ * Change what a payment says, not what it is worth.
+ *
+ * A payment can be right to the fil and still need correcting: a date typed
+ * wrong, or — as with the 96 that had sat unexplained since May — no note
+ * saying why it is there at all, which leaves anyone checking to guess at it
+ * and eventually to guess wrong.
+ *
+ * The amount, the player and the contract are shown and not editable. Those
+ * are the money; changing one of them here would move a balance with nothing
+ * in the log to say so, and the honest way to fix them is the delete button
+ * next door followed by a fresh entry.
+ */
+function editContributionModal(c) {
+  if (!c) { toast('That payment is no longer on the list', true); return; }
+  openModal('Correct this payment', `
+    <div class="kv"><span class="k">Player</span>
+      <span class="v">${esc(c.player_name || c.name_raw || '—')}</span></div>
+    <div class="kv"><span class="k">Contract</span>
+      <span class="v">${esc(contractName(c.contract_id))}</span></div>
+    <div class="kv"><span class="k">Amount</span><span class="v">${money(c.amount)}</span></div>
+    <p class="hint mt">Those three are the money itself and are not changed here. If one of
+      them is wrong, remove this payment and enter it again — that way the correction shows
+      up in the log instead of happening quietly.</p>
+    <div class="form-group mt"><label for="ec_date">Date paid</label>
+      <input type="date" id="ec_date" value="${esc(c.date || '')}"></div>
+    <div class="form-group mt"><label for="ec_note">Note</label>
+      <input type="text" id="ec_note" maxlength="500" value="${esc(c.comments || '')}"
+        placeholder="e.g. cash, or why this is dated before the opening balance"></div>
+    <button class="btn full-w mt" id="ec_save">Save</button>`);
+
+  $('ec_save').addEventListener('click', async () => {
+    try {
+      await api.editContribution(c.id,
+        { comments: $('ec_note').value, date: $('ec_date').value });
+      closeModal();
+      toast('Saved ✓');
+      renderLog();
+    } catch (e) { toast(e.message, true); }
+  });
 }
 
 // Pending approvals queue (admin only). Injected above the log card.

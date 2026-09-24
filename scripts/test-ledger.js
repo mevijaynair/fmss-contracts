@@ -1175,6 +1175,68 @@ test('a move is refused when the source cannot afford it', () => {
   assert.equal(ledgersRepo.get(p, OTHER).present_balance, 40, 'and nothing moved');
 });
 
+/* ===== Correcting what a payment says =====
+   A payment can be right to the fil and still need fixing: a mistyped date,
+   or no note saying why it is there. Praveen's 96 was a May payment the
+   August opening balance had missed, entered months later with nothing on it,
+   and it read as a double count to everyone who looked. */
+
+test('a note and a date can be corrected; the money cannot', () => {
+  const p = player('Needs a note', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 96, date: '2026-05-07', comments: '' });
+  const before = balanceOf(p);
+
+  const out = contributionsRepo.edit(c.id,
+    { comments: 'Missed from the opening balance', date: '2026-05-08' });
+  assert.equal(out.comments, 'Missed from the opening balance');
+  assert.equal(out.date, '2026-05-08');
+  assert.equal(out.amount, 96, 'the amount is untouched');
+  assert.equal(balanceOf(p), before, 'and no balance moved');
+
+  // Anything the caller sends beyond those two is ignored rather than obeyed:
+  // the amount IS the money, and rewriting it here would move a balance with
+  // nothing in the log to say so.
+  contributionsRepo.edit(c.id, { comments: 'x', amount: 5000, player_id: 'someone_else' });
+  const row = db.prepare('SELECT * FROM contributions WHERE id = ?').get(c.id);
+  assert.equal(row.amount, 96);
+  assert.equal(row.player_id, p);
+  assert.equal(balanceOf(p), before);
+});
+
+test('leaving a field out leaves it alone', () => {
+  const p = player('Half an edit', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 40, date: '2026-09-01', comments: 'cash' });
+  contributionsRepo.edit(c.id, { comments: 'cash, from the tin' });
+  const row = db.prepare('SELECT * FROM contributions WHERE id = ?').get(c.id);
+  assert.equal(row.date, '2026-09-01', 'the date was not sent, so it did not change');
+  assert.equal(row.comments, 'cash, from the tin');
+});
+
+test('an imported payment cannot be edited', () => {
+  // It came in with the opening balances, is already counted there, and sits
+  // behind the closed baseline.
+  const p = player('Imported money', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 200, date: '2026-01-01', comments: '' });
+  db.prepare('UPDATE contributions SET historical = 1 WHERE id = ?').run(c.id);
+  assert.throws(() => contributionsRepo.edit(c.id, { comments: 'no' }),
+    /opening balances/);
+  assert.equal(db.prepare('SELECT comments FROM contributions WHERE id = ?').get(c.id).comments,
+    '', 'and nothing was written');
+});
+
+test('a date that is not a date is refused, and changes nothing', () => {
+  const p = player('Bad date', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 60, date: '2026-09-01', comments: 'keep me' });
+  assert.throws(() => contributionsRepo.edit(c.id, { date: 'last tuesday' }), /Not a date/);
+  const row = db.prepare('SELECT * FROM contributions WHERE id = ?').get(c.id);
+  assert.equal(row.date, '2026-09-01');
+  assert.equal(row.comments, 'keep me', 'the note survived the refusal too');
+});
+
 test('the cashier is never listed as owing the club', () => {
   const cashier = player('The cashier', -400);
   db.prepare("UPDATE players SET special_role = 'cashier' WHERE id = ?").run(cashier);

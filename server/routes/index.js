@@ -954,6 +954,14 @@ r.get('/contributions/split/:groupId', wrap((req) => {
   requireAdmin(req);
   return contributionsRepo.splitSiblings(req.params.groupId);
 }));
+// The note and the date only — see contributionsRepo.edit for why the amount
+// is not on that list.
+r.put('/contributions/:id', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.edit(req.params.id, {
+    comments: req.body?.comments, date: req.body?.date,
+  });
+}));
 r.delete('/contributions/:id', wrap((req) => { requireAdmin(req); contributionsRepo.remove(req.params.id); return { ok: true }; }));
 
 // ---- player self-service: submit contribution for approval ----

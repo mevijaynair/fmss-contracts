@@ -86,6 +86,7 @@ export const api = {
   suggestSplit: (playerId, amount) => req('GET',
     `/contributions/suggest?player_id=${encodeURIComponent(playerId)}&amount=${amount}`),
   splitSiblings: (groupId) => req('GET', `/contributions/split/${groupId}`),
+  editContribution: (id, patch) => req('PUT', `/contributions/${id}`, patch),
   deleteContribution: (id) => req('DELETE', `/contributions/${id}`),
 
   kitty: () => req('GET', '/kitty'),

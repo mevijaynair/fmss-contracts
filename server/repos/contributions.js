@@ -296,6 +296,63 @@ export const contributionsRepo = {
       new Date().toISOString(), split_group || null);
     return db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
   },
+  /**
+   * Correct what a payment SAYS, never what it is worth.
+   *
+   * Praveen's 96 was a May payment that the 1 August opening balance had
+   * missed. Entered four months after its own date and with no note, it reads
+   * to anyone checking — including whoever reads the Excel — as the same money
+   * counted twice, and there was no way to say otherwise from inside the app.
+   *
+   * The note and the date are the two things that can be wrong without the
+   * money being wrong, so they are the two things this changes. The amount,
+   * the player and the contract are deliberately not editable: those ARE the
+   * money, and quietly rewriting them would move a balance with nothing in the
+   * log to say so. Getting one of those wrong is a delete and a re-entry,
+   * which leaves the correction visible.
+   *
+   * An imported row is refused outright — it came in with the opening
+   * balances, is already counted there, and is behind the closed baseline.
+   */
+  edit(id, { comments, date } = {}) {
+    const row = db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
+    if (!row) throw new Error('No such payment');
+    if (row.historical) {
+      throw new Error('That one came in with the opening balances and cannot be edited');
+    }
+
+    const nextComments = comments === undefined || comments === null
+      ? row.comments : String(comments).slice(0, 500);
+    const nextDate = date === undefined || date === null || date === ''
+      ? row.date : String(date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      throw new Error(`Not a date: ${nextDate}`);
+    }
+
+    // The promise this makes is that no balance moves. Checked rather than
+    // asserted, inside the transaction, the same way every other write here
+    // proves itself — a date is not money, but a rule nobody verifies is a
+    // rule until the day somebody edits the wrong column.
+    const before = row.player_id
+      ? ledgersRepo.forPlayer(row.player_id).reduce((s, l) => s + l.present_balance, 0) : 0;
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE contributions SET comments = ?, date = ? WHERE id = ?')
+        .run(nextComments, nextDate, id);
+      const after = row.player_id
+        ? ledgersRepo.forPlayer(row.player_id).reduce((s, l) => s + l.present_balance, 0) : 0;
+      if (round2(after) !== round2(before)) {
+        throw new Error(`Refusing: the balance would move from ${round2(before)} to ${round2(after)}`);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
+  },
+
   remove(id) {
     db.prepare('DELETE FROM contributions WHERE id = ?').run(id);
   },
