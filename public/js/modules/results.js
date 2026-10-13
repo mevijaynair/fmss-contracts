@@ -636,14 +636,116 @@ const OUTCOME_DOT = {
   loss: '<span class="form-dot is-l" title="Lost">L</span>',
 };
 
+// Which games the list is showing, and which way round. Kept between openings
+// on purpose: "which ones did he lose" is nearly always asked of two or three
+// people in a row, and re-picking it each time is the sort of friction that
+// stops the question being asked at all. The active chip is always on screen,
+// so a filtered list never looks like an empty one.
+let logFilter = 'all';     // all | win | draw | loss | none | tournament
+let logOrder = 'desc';     // newest or oldest first
+
+function logCounts(games) {
+  const c = { all: 0, win: 0, draw: 0, loss: 0, none: 0, tournament: 0 };
+  for (const g of games) {
+    c.all++;
+    if (g.tournament) c.tournament++;
+    else if (!g.outcome) c.none++;
+    else c[g.outcome]++;
+  }
+  return c;
+}
+
+function keptGames(games) {
+  const kept = games.filter((g) => {
+    if (logFilter === 'all') return true;
+    if (logFilter === 'tournament') return !!g.tournament;
+    // A tournament has no outcome, so without this it would answer to "no
+    // result recorded" — which is a different thing and already has its own
+    // chip. There IS a result; it is just not a win or a loss.
+    if (g.tournament) return false;
+    if (logFilter === 'none') return !g.outcome;
+    return g.outcome === logFilter;
+  });
+  return kept.sort((a, b) => (logOrder === 'desc'
+    ? String(b.date).localeCompare(String(a.date))
+    : String(a.date).localeCompare(String(b.date))));
+}
+
+const FILTER_LABEL = {
+  all: 'All', win: 'Won', draw: 'Drawn', loss: 'Lost',
+  // "No result" and not "no score": a game can have a winner and no goals
+  // written down, and that one is decided. This chip is the games nobody
+  // recorded an outcome for at all.
+  none: 'No result', tournament: '🏆',
+};
+const EMPTY_FOR = {
+  win: 'No wins', draw: 'No draws', loss: 'No defeats',
+  none: 'Every game here has a result',
+  tournament: 'No tournaments',
+};
+
+function gamesControls(games) {
+  const c = logCounts(games);
+  // A chip for an outcome that never happened is a dead end — it can only ever
+  // show an empty table — so it is left off rather than disabled. The one that
+  // is ON stays whatever its count, or narrowing the period to a quarter they
+  // never lost in would take away the Lost chip while Lost was still filtering,
+  // leaving an empty list and nothing on screen saying why.
+  const chips = ['all', 'win', 'draw', 'loss', 'none', 'tournament']
+    .filter(k => k === 'all' || c[k] > 0 || k === logFilter)
+    .map(k => `<button data-log-filter="${k}" class="${logFilter === k ? 'active' : ''}"
+        >${FILTER_LABEL[k]} <span class="res-g-n">${c[k]}</span></button>`).join('');
+
+  return `
+    <div class="res-g-bar">
+      <span class="seg" data-log-filters>${chips}</span>
+      <span class="seg" data-log-order>
+        <button data-log-order-dir="desc" class="${logOrder === 'desc' ? 'active' : ''}"
+          title="Most recent game at the top">Newest</button>
+        <button data-log-order-dir="asc" class="${logOrder === 'asc' ? 'active' : ''}"
+          title="First game at the top">Oldest</button>
+      </span>
+    </div>`;
+}
+
+/**
+ * What the list is showing, said in the words of the filter that is on.
+ *
+ * "5 matches" under the Lost chip is true and useless — they are five
+ * defeats, and a caption that does not change with the filter reads like the
+ * filter did not take.
+ */
+function caption(matches, tourneys) {
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const what = {
+    win: plural(matches, 'win', 'wins'),
+    draw: plural(matches, 'draw', 'draws'),
+    loss: plural(matches, 'defeat', 'defeats'),
+    none: `${plural(matches, 'game', 'games')} with no result recorded`,
+    tournament: plural(tourneys, 'tournament', 'tournaments'),
+  }[logFilter] ?? plural(matches, 'match', 'matches')
+      + (tourneys ? ` and ${plural(tourneys, 'tournament', 'tournaments')}` : '');
+
+  return `${what}, ${logOrder === 'desc' ? 'newest' : 'oldest'} first${
+    period === 'all' ? '' : ` · ${esc(period)} only, set at the top of the screen`}.${
+    // Only worth saying where a dash can actually appear.
+    logFilter === 'all' ? ' A blank result is a game nobody wrote a score for.' : ''}`;
+}
+
 function gamesTable(p) {
-  const rows = [...(p.log || [])]
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  if (!rows.length) return '<p class="hint">No games in this period.</p>';
+  const all = p.log || [];
+  if (!all.length) return '<p class="hint">No games in this period.</p>';
+  const rows = keptGames(all);
 
   const showNight = !contractId;          // "Both" is the only time it is a question
   const matches = rows.filter(g => !g.tournament).length;
   const tourneys = rows.length - matches;
+
+  if (!rows.length) {
+    return gamesControls(all)
+      + `<p class="hint">${EMPTY_FOR[logFilter] || 'Nothing'}${
+        period === 'all' ? '' : ` in ${esc(period)}`}.</p>`;
+  }
 
   const body = rows.map((g) => {
     const others = Object.entries(g.sides || {})
@@ -674,9 +776,8 @@ function gamesTable(p) {
   }).join('');
 
   return `
-    <p class="hint">${matches} match${matches === 1 ? '' : 'es'}${
-  tourneys ? ` and ${tourneys} tournament${tourneys === 1 ? '' : 's'}` : ''
-}, newest first. A blank result is a game nobody wrote a score for.</p>
+    ${gamesControls(all)}
+    <p class="hint">${caption(matches, tourneys)}</p>
     <div class="res-games">
       <table class="sams-table">
         <thead><tr><th>Date</th><th>Side</th><th class="num">Result</th>
@@ -684,6 +785,21 @@ function gamesTable(p) {
         <tbody>${body}</tbody>
       </table>
     </div>`;
+}
+
+/**
+ * Draw the list into its own slot, so a filter redraws the games and nothing
+ * else. Re-running openModal would rebuild the whole body and throw away
+ * where the reader had scrolled to.
+ */
+function drawGames(p) {
+  const host = $('resGamesHost');
+  if (!host) return;
+  host.innerHTML = gamesTable(p);
+  host.querySelectorAll('[data-log-filter]').forEach(b =>
+    b.addEventListener('click', () => { logFilter = b.dataset.logFilter; drawGames(p); }));
+  host.querySelectorAll('[data-log-order-dir]').forEach(b =>
+    b.addEventListener('click', () => { logOrder = b.dataset.logOrderDir; drawGames(p); }));
 }
 
 function showPlayerDetail(p) {
@@ -700,7 +816,7 @@ function showPlayerDetail(p) {
     ${p.tournaments ? row('🏆 Tournaments', `${p.tournaments} <span class="hint">listed separately — not scored</span>`) : ''}
 
     <h4 class="mini-h mt">Every game</h4>
-    ${gamesTable(p)}
+    <div id="resGamesHost"></div>
 
     <h4 class="mini-h mt">Form &amp; streaks</h4>
     ${row('Last five', formDots(p.form))}
@@ -729,6 +845,8 @@ function showPlayerDetail(p) {
   // The games list is five columns of names; in the narrow modal every row
   // wraps three deep and the thing stops being a list.
   { wide: true });
+
+  drawGames(p);
 }
 
 // Club trend across every quarter played — deliberately ignores the period

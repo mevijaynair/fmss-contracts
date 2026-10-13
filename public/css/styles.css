@@ -1644,3 +1644,11 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
   .res-games th, .res-games td { padding: 0.5rem 0.4rem; }
   .res-g-who { font-size: 0.78rem; }
 }
+
+/* The filter row over a player's games. Chips and the order toggle on one
+   line, wrapping to two on a phone rather than scrolling sideways. */
+.res-g-bar { display: flex; flex-wrap: wrap; gap: 0.5rem;
+  align-items: center; justify-content: space-between; margin: 0 0 0.6rem; }
+.res-g-bar .seg { flex-wrap: wrap; }
+/* The count beside each chip: present, but never louder than the word. */
+.res-g-n { opacity: 0.6; font-variant-numeric: tabular-nums; }
