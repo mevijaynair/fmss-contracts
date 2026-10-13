@@ -932,14 +932,17 @@ r.post('/admin/backup/restore', wrap((req) => {
 // ---- contributions ----
 r.get('/contributions', wrap((req) => {
   // Player: scoped to self (ignores any player query param); Admin: full filter
+  // `log`, not `all`: money moved between two players, or out of the kitty onto
+  // a balance, changes a balance exactly as a payment does and belongs in the
+  // same list. See contributionsRepo.log.
   if (req.user.role === 'player') {
-    return contributionsRepo.all({ playerId: req.user.playerId, contractId: req.query.contract });
+    return contributionsRepo.log({ playerId: req.user.playerId, contractId: req.query.contract });
   }
   // player_id, not player: every other filtered endpoint spells it that way, and
   // this one being different meant the player detail panel — which sent the
   // conventional spelling — silently matched nothing and totalled up EVERY
   // contribution in the club against whoever was on screen.
-  return contributionsRepo.all({ playerId: req.query.player_id, contractId: req.query.contract });
+  return contributionsRepo.log({ playerId: req.query.player_id, contractId: req.query.contract });
 }));
 r.post('/contributions', wrap((req) => { requireAdmin(req); return contributionsRepo.create(req.body); }));
 

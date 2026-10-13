@@ -49,8 +49,23 @@ function readParty(raw) {
   return { kind: 'player', playerId: s };
 }
 
+/**
+ * The same split, for READING a movement that is already written.
+ *
+ * readParty throws on a party that no longer exists, which is right when money
+ * is about to move and wrong when a list is being drawn: one player deleted
+ * years later would take the whole log down with him rather than showing his
+ * name as it was recorded.
+ */
+function looseParty(raw) {
+  const s = String(raw || '');
+  if (s === KITTY) return { kind: KITTY, contractId: null };
+  if (s.startsWith(`${KITTY}:`)) return { kind: KITTY, contractId: s.slice(KITTY.length + 1) };
+  return { kind: 'player', playerId: s };
+}
+
 function partyName(raw) {
-  const p = readParty(raw);
+  const p = looseParty(raw);
   if (p.kind !== KITTY) return nameOf(p.playerId);
   if (!p.contractId) return 'the kitty';
   const c = db.prepare('SELECT name FROM contracts WHERE id = ?').get(p.contractId);
@@ -75,7 +90,74 @@ export const movementsRepo = {
       ...m,
       from_name: partyName(m.from_party),
       to_name: partyName(m.to_party),
+      // The log read "(mon_thu)" — the column, not the contract. Nobody calls
+      // it that anywhere else in the app.
+      contract_name: m.contract_id
+        ? (db.prepare('SELECT name FROM contracts WHERE id = ?').get(m.contract_id)?.name
+           || m.contract_id)
+        : null,
     }));
+  },
+
+  /**
+   * The halves of a movement that actually landed on somebody's BALANCE.
+   *
+   * A movement is recorded in its own list, and that list is the only place it
+   * appeared — so 100 moved from Joe to Rojy changed two balances while the
+   * contributions log, which is where everyone looks to see what has gone onto
+   * a balance, said nothing had happened. A payment and a movement are
+   * different events, but they are the same money arriving, and a log that
+   * shows one and hides the other cannot be reconciled against a ledger.
+   *
+   * Only movements naming a contract are here, because only those touch a
+   * balance: the pot paying the cashier back for the shirts is real money with
+   * no contract behind it and belongs to the kitty statement, not to anybody's
+   * ledger. The ids returned are the ids of the transaction rows the movement
+   * actually wrote, so a row in the log can be matched to the money it moved.
+   */
+  legs({ playerId = null, contractId = null } = {}) {
+    const rows = contractId
+      ? db.prepare(`SELECT * FROM movements WHERE contract_id = ?
+                    ORDER BY date DESC, created_at DESC`).all(contractId)
+      : db.prepare(`SELECT * FROM movements WHERE contract_id IS NOT NULL
+                    ORDER BY date DESC, created_at DESC`).all();
+
+    const out = [];
+    for (const m of rows) {
+      if (!m.contract_id) continue;
+      const src = looseParty(m.from_party);
+      const dst = looseParty(m.to_party);
+      const base = {
+        kind: 'movement',
+        movement_id: m.id,
+        contract_id: m.contract_id,
+        date: m.date,
+        comments: m.note || '',
+        created_at: m.created_at,
+        historical: 0,
+        from_name: partyName(m.from_party),
+        to_name: partyName(m.to_party),
+      };
+      if (src.kind === 'player') {
+        out.push({ ...base,
+          id: `t_${m.id}_out`,
+          player_id: src.playerId,
+          player_name: nameOf(src.playerId),
+          counterparty: partyName(m.to_party),
+          direction: 'out',
+          amount: -round2(m.amount) });
+      }
+      if (dst.kind === 'player') {
+        out.push({ ...base,
+          id: `t_${m.id}_in`,
+          player_id: dst.playerId,
+          player_name: nameOf(dst.playerId),
+          counterparty: partyName(m.from_party),
+          direction: 'in',
+          amount: round2(m.amount) });
+      }
+    }
+    return playerId ? out.filter(l => l.player_id === playerId) : out;
   },
 
   /**

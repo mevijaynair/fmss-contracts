@@ -2,6 +2,7 @@
 import { db } from '../db.js';
 import { ledgersRepo } from './ledgers.js';
 import { contractsRepo } from './contracts.js';
+import { movementsRepo } from './movements.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -120,6 +121,28 @@ export const contributionsRepo = {
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY q.date DESC, q.created_at DESC`;
     return db.prepare(sql).all(...args);
+  },
+
+  /**
+   * Everything that has landed on a balance, payments and movements together.
+   *
+   * `all` is the contributions table and nothing else, which is correct for
+   * what it is and wrong for what the log on screen claims to be. Money moved
+   * from Joe to Rojy changes two balances and used to appear only in the Move
+   * money list, so the log that everyone reads to answer "where did this come
+   * from" was quietly incomplete — and a log you cannot reconcile against a
+   * ledger is worse than no log, because it is believed.
+   *
+   * Sorted as one list: same date, newest entry first. The movement rows carry
+   * `kind: 'movement'` and both names, because a movement always has a second
+   * party and naming only one of them is how it reads as money from nowhere.
+   */
+  log({ playerId, contractId } = {}) {
+    const paid = this.all({ playerId, contractId });
+    const moved = movementsRepo.legs({ playerId, contractId });
+    return [...paid, ...moved].sort((a, b) =>
+      String(b.date).localeCompare(String(a.date))
+      || String(b.created_at || '').localeCompare(String(a.created_at || '')));
   },
 
   /**

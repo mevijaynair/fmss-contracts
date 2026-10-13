@@ -945,6 +945,91 @@ test('collecting a top-up credits the balance and leaves the kitty alone', () =>
   assert.equal(kittyTotal(), before, 'money passing through to a balance is not profit');
 });
 
+/* ===== The log has to show everything that moved a balance =====
+   The contributions log is where anyone looks to answer "where did this come
+   from". It read the contributions table and nothing else, so money moved
+   from one player to another changed two balances and left no trace there —
+   a log that cannot be reconciled against a ledger, and believed anyway. */
+
+const logFor = (pid) => contributionsRepo.log({ playerId: pid });
+
+test('money moved between two players lands in the log on both sides', () => {
+  const a = player('Moved from', 300);
+  const b = player('Moved to', 100);
+  movementsRepo.create({ from: a, to: b, amount: 75, contract_id: CONTRACT,
+    date: '2026-05-04', note: 'Arsenal bet' });
+
+  const out = logFor(a).filter(r => r.kind === 'movement');
+  const inn = logFor(b).filter(r => r.kind === 'movement');
+  assert.equal(out.length, 1, "the payer's side is in their log");
+  assert.equal(inn.length, 1, "and the payee's side is in theirs");
+
+  // Signed from the point of view of whose row it is: this is the number that
+  // has to agree with what their balance did.
+  assert.equal(out[0].amount, -75);
+  assert.equal(inn[0].amount, 75);
+  assert.equal(round2(out[0].amount + inn[0].amount), 0,
+    'the two halves of a movement cancel, the same way the balances do');
+
+  // The second name. One name on a row that moved money reads as money from
+  // nowhere, which is the whole reason it is here.
+  assert.equal(out[0].player_name, 'Moved from');
+  assert.equal(out[0].counterparty, 'Moved to');
+  assert.equal(inn[0].counterparty, 'Moved from');
+  assert.equal(out[0].comments, 'Arsenal bet', 'and what it was for');
+
+  // The ids are the transaction rows the movement actually wrote, so a line in
+  // the log can be matched to the money it moved.
+  assert.ok(db.prepare('SELECT id FROM transactions WHERE id = ?').get(out[0].id),
+    'the out leg names a real transaction');
+  assert.ok(db.prepare('SELECT id FROM transactions WHERE id = ?').get(inn[0].id));
+
+  movementsRepo.remove(out[0].movement_id);
+  assert.equal(logFor(a).filter(r => r.kind === 'movement').length, 0,
+    'undoing it takes it back out of the log as well');
+  assert.equal(logFor(b).filter(r => r.kind === 'movement').length, 0);
+});
+
+test('money that never reached a balance stays out of the log', () => {
+  // The pot paying the cashier back for the shirts is real money with no
+  // contract behind it: no balance moves. Listing it beside the payments would
+  // say the club owes him 90 it does not owe.
+  const p = player('Bought the nets', 500);
+  movementsRepo.create({ from: 'kitty', to: p, amount: 90, date: '2026-05-05',
+    note: 'nets' });
+  assert.equal(balanceOf(p), 500, 'no balance moved — that is the premise');
+  assert.deepEqual(logFor(p).filter(r => r.kind === 'movement'), [],
+    'so nothing about it belongs in a log of what landed on a balance');
+
+  // Name a contract and the same shape of movement does belong there.
+  movementsRepo.create({ from: 'kitty', to: p, amount: 60, contract_id: CONTRACT,
+    date: '2026-05-06', note: 'match fee refund' });
+  const moved = logFor(p).filter(r => r.kind === 'movement');
+  assert.equal(moved.length, 1);
+  assert.equal(moved[0].amount, 60);
+  assert.equal(moved[0].counterparty, 'the kitty');
+});
+
+test('the log is the payments plus the movements, with neither lost', () => {
+  const p = player('Both kinds', 0);
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 200,
+    date: '2026-05-01', comments: 'cash' });
+  movementsRepo.create({ from: 'kitty', to: p, amount: 50, contract_id: CONTRACT,
+    date: '2026-05-09', note: 'refund' });
+
+  const paid = contributionsRepo.all({ playerId: p });
+  const rows = logFor(p);
+  assert.equal(rows.length, paid.length + 1, 'nothing duplicated, nothing dropped');
+  assert.equal(rows[0].date, '2026-05-09', 'newest first, the two kinds interleaved');
+  assert.equal(rows[0].kind, 'movement');
+  assert.equal(rows[1].kind, undefined, 'a payment is still a payment');
+
+  // Somebody else's movement is not theirs.
+  const other = player('Not involved', 0);
+  assert.deepEqual(logFor(other).filter(r => r.kind === 'movement'), [],
+    'the filter is by player, not by everything that happened that day');
+});
+
 /* ===== Where a payment should go =====
    The cashier takes money in a car park and has to decide, there and then,
    which balance it belongs on. The suggestion is only worth having if it is

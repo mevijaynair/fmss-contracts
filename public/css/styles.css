@@ -1596,3 +1596,25 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
   border-radius: 6px; background: var(--bg-subtle); font-size: 0.78rem;
   color: var(--text-muted); white-space: nowrap; }
 .owe-night strong { color: var(--text-main); }
+
+/* --- Move money: what the form is about to do ---------------------------
+   Three dropdowns and a button, with nothing saying which balance goes down.
+   The preview answers that in words, with both numbers before and after, so
+   the move is read rather than guessed at. */
+.mv-preview { padding: 0.8rem 1rem; border-radius: 8px; background: var(--bg-subtle);
+  border: 1px solid var(--border-color); border-left: 3px solid var(--sport);
+  line-height: 1.55; }
+.mv-preview p { margin: 0 0 0.35rem; font-size: 0.88rem; color: var(--text-muted); }
+.mv-preview p:last-child { margin-bottom: 0; }
+.mv-preview strong { color: var(--text-main); }
+/* The pair of numbers is the point of the box; it should survive a skim. */
+.mv-swing { white-space: nowrap; font-weight: 600; color: var(--text-main); }
+.mv-warn { font-weight: 600; color: color-mix(in srgb, var(--warning) 78%, var(--text-main)); }
+
+/* The second name on a movement row in the contributions log. Money that
+   landed on somebody came off somebody; one name is a row that reads as money
+   from nowhere. Recessive, because the row belongs to the first name. */
+.mv-other { color: var(--text-muted); white-space: nowrap; }
+.tag-moved { color: color-mix(in srgb, var(--sport) 72%, var(--text-main));
+  border-color: color-mix(in srgb, var(--sport) 35%, var(--bg-card));
+  background: color-mix(in srgb, var(--sport) 13%, var(--bg-card)); }

@@ -52,21 +52,44 @@ function fillSelects() {
   $('contribFilter').innerHTML = '<option value="">All players</option>' + everyone;
 }
 
+/**
+ * The two names a movement has.
+ *
+ * A payment comes from the person whose name is on the row. A movement does
+ * not: money that landed on Rojy came off Joe, and a row saying only "Rojy
+ * +100" reads as money from nowhere. The row's own player is first, because
+ * that is whose balance the amount belongs to, and the arrow says which way it
+ * went.
+ */
+function movementWho(c) {
+  const arrow = c.direction === 'out' ? '→' : '←';
+  return `${esc(c.player_name || '—')} <span class="mv-other">${arrow} ${
+    esc(c.counterparty || '—')}</span>`;
+}
+
 async function renderLog() {
   const rows = await api.contributions(
     $('contribFilter').value ? { player_id: $('contribFilter').value } : {});
-  $('contribTable').querySelector('tbody').innerHTML = rows.slice(0, 400).map(c => `
+  $('contribTable').querySelector('tbody').innerHTML = rows.slice(0, 400).map(c => {
+    const moved = c.kind === 'movement';
+    return `
     <tr style="${c.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(c.date))}</td>
-      <td>${esc(c.player_name || c.name_raw || '—')}</td>
+      <td>${moved ? movementWho(c) : esc(c.player_name || c.name_raw || '—')}</td>
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
-      <td>${esc(c.comments || '')}${splitNote(c)}</td>
+      <td>${moved
+    ? `<span class="tag tag-moved" title="Not a payment into the club — money moved between two balances, recorded in Move money above">⇄ Moved</span> ${esc(c.comments || '')}`
+    : `${esc(c.comments || '')}${splitNote(c)}`}</td>
       <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);" title="Came in with the opening balances — already counted there, so it cannot be edited or removed">📋 Imported</span>'
-        : `<button class="link-btn" data-edit="${c.id}"
+    : moved
+      ? `<button class="link-btn" data-mv-undo="${esc(c.movement_id)}"
+             title="Undo the whole movement — both sides of it">✕</button>`
+      : `<button class="link-btn" data-edit="${c.id}"
              title="Change the note or the date. The amount is not editable here — see the note in the box.">✎</button>
            <button class="link-btn" data-del="${c.id}">✕</button>`}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="hint">No contributions.</td></tr>';
 
   wireSplitNotes($('contribTable'));
 
@@ -74,6 +97,21 @@ async function renderLog() {
     b.addEventListener('click', async () => {
       try { await api.deleteContribution(b.dataset.del); toast('Removed'); renderLog(); }
       catch (e) { toast(e.message, true); }
+    }));
+
+  // The same undo as the Move money list above. A movement has two halves and
+  // the log shows both, so the confirmation says what the single ✕ does to the
+  // other one.
+  $('contribTable').querySelectorAll('[data-mv-undo]').forEach(b =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Undo this movement? Both balances it touched go back as they were.')) return;
+      try {
+        await api.deleteMovement(b.dataset.mvUndo);
+        toast('Movement undone');
+        ledgerCache.clear();
+        renderLog();
+        renderMovements();
+      } catch (e) { toast(e.message, true); }
     }));
 
   $('contribTable').querySelectorAll('[data-edit]').forEach(b =>
@@ -491,6 +529,111 @@ function fillMoveSelects() {
   describeMove();
 }
 
+// ---- what the move will actually do ----------------------------------------
+//
+// The form asks three questions — from, to, and a contract — and the answer to
+// the one that matters, WHICH BALANCE GOES DOWN AND WHICH GOES UP, was left to
+// be inferred from the fact that there is only one contract field. There is
+// only one because the two balances are two ends of the same contract: money
+// moving between two people moves inside one book. Saying so, with the two
+// numbers before and after, is the difference between a form you can use and
+// one you hope you have understood.
+
+const isKittyParty = (v) => v === KITTY || String(v).startsWith(`${KITTY}:`);
+
+// Balances are fetched per player and reused; the preview redraws on every
+// keystroke in the amount box and must not fetch on every one of them.
+const ledgerCache = new Map();
+
+async function balancesFor(playerId) {
+  if (!playerId || isKittyParty(playerId)) return null;
+  if (!ledgerCache.has(playerId)) {
+    try {
+      const rows = await api.get(`/players/${playerId}/ledgers`) || [];
+      ledgerCache.set(playerId, Object.fromEntries(
+        rows.map(l => [l.contract_id, Number(l.present_balance) || 0])));
+    } catch { ledgerCache.set(playerId, null); }   // say less rather than guess
+  }
+  return ledgerCache.get(playerId);
+}
+
+function partyLabel(v) {
+  if (v === KITTY) return 'the club kitty';
+  if (isKittyParty(v)) {
+    return `the ${contractName(String(v).slice(KITTY.length + 1))} kitty`;
+  }
+  return store.players.find(p => p.id === v)?.name || v || 'nobody';
+}
+
+/** One side of the sentence, with the balance before and after when known. */
+function sideText(party, contractId, delta, balances) {
+  const who = partyLabel(party);
+  if (isKittyParty(party) || !contractId) return who;
+  const before = balances?.[contractId];
+  if (before === undefined || before === null) {
+    return `${who}'s ${contractName(contractId)} balance`;
+  }
+  return `${who}'s ${contractName(contractId)} balance `
+    + `<span class="mv-swing">${money(before)} → ${money(before + delta)}</span>`;
+}
+
+async function drawMovePreview() {
+  const box = $('mv_preview');
+  if (!box) return;
+  const from = $('mv_from')?.value;
+  const to = $('mv_to')?.value;
+  const amount = Math.round(Number($('mv_amount')?.value) || 0);
+  const contractId = $('mv_contract')?.disabled ? '' : $('mv_contract')?.value;
+
+  if (!from || !to || from === to || amount <= 0) { box.hidden = true; return; }
+
+  const [fromBal, toBal] = await Promise.all([balancesFor(from), balancesFor(to)]);
+  // They may have carried on typing while those were in flight.
+  if ($('mv_from').value !== from || $('mv_to').value !== to) return;
+
+  const bothKitty = isKittyParty(from) && isKittyParty(to);
+  const lines = [];
+
+  if (bothKitty) {
+    lines.push(`<strong>${money(amount)}</strong> moves from ${partyLabel(from)} `
+      + `to ${partyLabel(to)}. No player balance changes, and the club still holds `
+      + 'the same money — it is just sitting under the other night.');
+  } else if (!contractId) {
+    if (!isKittyParty(from) && !isKittyParty(to)) {
+      lines.push('<span class="mv-warn">Pick a contract.</span> A balance belongs to one, '
+        + 'so between two people there is nowhere for this to land.');
+    } else {
+      const out = isKittyParty(from);
+      lines.push(`<strong>${money(amount)}</strong> ${out ? 'leaves' : 'goes into'} `
+        + `${partyLabel(out ? from : to)}, as cash `
+        + `${out ? 'paid to' : 'received from'} ${partyLabel(out ? to : from)}.`);
+      lines.push('<span class="mv-warn">No contract named, so no balance moves.</span> '
+        + 'Name one above if this should also change what the club owes them.');
+    }
+  } else {
+    lines.push(`<strong>${money(amount)}</strong> comes off `
+      + `${sideText(from, contractId, -amount, fromBal)} and goes onto `
+      + `${sideText(to, contractId, amount, toBal)}.`);
+    if (!isKittyParty(from) && !isKittyParty(to)) {
+      lines.push(`Both ends move on ${contractName(contractId)} — `
+        + 'one contract, so the club owes exactly what it owed before.');
+    }
+    // Not a block — the club does carry people — but it should never happen by
+    // accident, and "only holds 540" is a different sentence from "is already
+    // at -95" however much the arithmetic agrees.
+    const held = fromBal?.[contractId];
+    if (!isKittyParty(from) && typeof held === 'number' && amount > held) {
+      lines.push(`<span class="mv-warn">${partyLabel(from)} `
+        + (held > 0 ? `only holds ${money(held)} there` : `is already at ${money(held)} there`)
+        + `, so this leaves them at ${money(held - amount)}.</span> `
+        + 'Allowed, but say what it is for below.');
+    }
+  }
+
+  box.innerHTML = lines.map(l => `<p>${l}</p>`).join('');
+  box.hidden = false;
+}
+
 // Say what naming a contract will and will not do, because the two cases look
 // identical on the form and behave completely differently.
 function describeMove() {
@@ -519,7 +662,8 @@ function describeMove() {
 
   if (field) field.disabled = false;
   note.textContent = !isKitty(from) && !isKitty(to)
-    ? 'Required — a balance belongs to a contract.'
+    ? 'Required, and it is the same contract at both ends — the amount comes off '
+      + 'this balance for the first person and goes onto it for the second.'
     : 'Leave blank to move real club money without touching any balance, '
       + "e.g. paying yourself back for something you bought. Name one and the player's balance moves too.";
 }
@@ -530,7 +674,11 @@ async function renderMovements() {
   let rows = [];
   try { rows = await api.movements(); } catch { host.innerHTML = ''; return; }
   if (!rows.length) { host.innerHTML = '<p class="hint">Nothing moved yet.</p>'; return; }
+  // The only table on this screen that was not in a scroller, which on a phone
+  // pushed the whole page sideways — the Contributions log below has had one
+  // all along.
   host.innerHTML = `
+    <div class="table-scroll">
     <table class="sams-table">
       <thead><tr><th>Date</th><th>From</th><th>To</th><th class="num">Amount</th><th>What for</th><th></th></tr></thead>
       <tbody>${rows.map(m => `
@@ -540,12 +688,13 @@ async function renderMovements() {
           <td>${esc(m.to_name)}</td>
           <td class="num"><strong>${money(m.amount)}</strong></td>
           <td>${esc(m.note || '—')}${m.contract_id
-    ? ` <span class="hint">(${esc(m.contract_id)})</span>`
-    : ' <span class="hint">(club money)</span>'}</td>
+    ? ` <span class="hint">(on the ${esc(m.contract_name || contractName(m.contract_id))} balance)</span>`
+    : ' <span class="hint">(club money — no balance moved)</span>'}</td>
           <td class="row-actions"><button class="link-btn" data-mv-del="${esc(m.id)}"
             title="Undo this movement — both sides">✕</button></td>
         </tr>`).join('')}</tbody>
-    </table>`;
+    </table>
+    </div>`;
 
   host.querySelectorAll('[data-mv-del]').forEach(b =>
     b.addEventListener('click', async () => {
@@ -553,7 +702,9 @@ async function renderMovements() {
       try {
         await api.deleteMovement(b.dataset.mvDel);
         toast('Movement undone');
+        ledgerCache.clear();
         renderMovements();
+        renderLog();
       } catch (e) { toast(e.message, true); }
     }));
 }
@@ -561,7 +712,14 @@ async function renderMovements() {
 function initMoveMoney() {
   const form = $('moveForm');
   if (!form) return;
-  ['mv_from', 'mv_to'].forEach(id => $(id)?.addEventListener('change', describeMove));
+  // describeMove decides whether the contract field applies at all, so it runs
+  // first and the preview reads the result.
+  ['mv_from', 'mv_to'].forEach(id => $(id)?.addEventListener('change', () => {
+    describeMove(); drawMovePreview();
+  }));
+  ['mv_amount', 'mv_contract'].forEach(id =>
+    $(id)?.addEventListener('input', drawMovePreview));
+  $('mv_contract')?.addEventListener('change', drawMovePreview);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -575,7 +733,12 @@ function initMoveMoney() {
       });
       toast('Moved ✓');
       $('mv_amount').value = ''; $('mv_note').value = '';
+      // Both balances just changed, so the cached ones would show the move
+      // again from where it started.
+      ledgerCache.clear();
+      $('mv_preview').hidden = true;
       renderMovements();
+      renderLog();          // it lands in the log below as well, now
     } catch (err) { toast(err.message, true); }
   });
 }
