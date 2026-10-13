@@ -1618,3 +1618,29 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
 .tag-moved { color: color-mix(in srgb, var(--sport) 72%, var(--text-main));
   border-color: color-mix(in srgb, var(--sport) 35%, var(--bg-card));
   background: color-mix(in srgb, var(--sport) 13%, var(--bg-card)); }
+
+/* --- The games behind a player's record --------------------------------
+   Forty-nine rows inside a modal: it scrolls on its own so the summary above
+   and the streaks below stay reachable without passing the whole season. */
+.res-games { max-height: 46vh; min-height: 14rem; overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-color); border-radius: 8px; }
+.res-games table { margin: 0; }
+.res-games thead th { position: sticky; top: 0; z-index: 1;
+  background: var(--bg-card); }
+.res-games td { vertical-align: top; }
+.res-g-date { white-space: nowrap; }
+/* Which night, under the date rather than beside it. */
+.res-g-night { display: block; font-weight: 400; font-size: 0.76rem;
+  color: var(--text-muted); }
+.res-g-who { font-size: 0.82rem; line-height: 1.5; }
+/* The armband, beside the side they played for. */
+.res-g-capt { font-size: 0.62rem; font-weight: 800; padding: 0.05rem 0.3rem;
+  border-radius: 4px; vertical-align: middle;
+  background: color-mix(in srgb, var(--sport) 24%, transparent);
+  color: var(--sport-on-soft); }
+/* On a phone the five columns are mostly padding and uppercase headers. */
+@media (max-width: 560px) {
+  .res-games th, .res-games td { padding: 0.5rem 0.4rem; }
+  .res-g-who { font-size: 0.78rem; }
+}

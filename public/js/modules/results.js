@@ -115,13 +115,31 @@ function outcomeFor(gw, charge) {
 /** Matches only — a tournament is a different game and is reported on its own. */
 const isMatch = (gw) => !gw.is_tournament;
 
-/** Per player: an ordered list of their games, oldest first. */
+/** Who lined up on each side of one game. */
+function sidesOf(gw) {
+  const byTeam = {};
+  for (const c of gw.charges || []) {
+    if (c.team) (byTeam[c.team] ??= []).push(c.player_name);
+  }
+  return byTeam;
+}
+
+/**
+ * Per player: an ordered list of their games, oldest first.
+ *
+ * Each entry carries enough to RECOGNISE the game, not just to count it — the
+ * sides as they were picked and the night it was played on. Every number on
+ * this screen is a tally of these, and a tally with no way back to the games
+ * behind it can only be taken on trust. The sides object is shared by everyone
+ * who played that game; nothing writes to it.
+ */
 function timelines(gws) {
   const byPlayer = {};
   const sorted = [...gws].filter(g => inPeriod(g.date) && isMatch(g))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
   for (const gw of sorted) {
+    const sides = sidesOf(gw);
     for (const c of gw.charges || []) {
       (byPlayer[c.player_id] ??= { name: c.player_name, games: [] }).games.push({
         date: gw.date,
@@ -130,6 +148,8 @@ function timelines(gws) {
         outcome: outcomeFor(gw, c),
         gwId: gw.id,
         result: gw.result || {},
+        contractId: gw.contract_id,
+        sides,
       });
     }
   }
@@ -248,6 +268,10 @@ function buildStats(gws) {
       ? Math.round((s.captainWins / s.captainDecided) * 100) : null;
     Object.assign(s, streaks(games));
     s.form = form(games);
+    // The games themselves, kept so the record can be opened and read rather
+    // than only totalled. Same array the numbers above were counted from, so
+    // the list and the tally cannot drift apart.
+    s.log = games;
     out[id] = s;
   }
 
@@ -256,8 +280,18 @@ function buildStats(gws) {
   // has no match record to sit on these tables and appears only in that card.
   for (const gw of gws) {
     if (isMatch(gw) || !inPeriod(gw.date)) continue;
+    const sides = sidesOf(gw);
     for (const c of gw.charges || []) {
-      if (out[c.player_id]) out[c.player_id].tournaments++;
+      if (!out[c.player_id]) continue;
+      out[c.player_id].tournaments++;
+      // In the list, out of every metric — the same rule the rest of the
+      // screen follows. Somebody looking at their games should still see the
+      // day they turned up for one.
+      out[c.player_id].log.push({
+        date: gw.date, team: c.team, captain: !!c.is_captain, outcome: null,
+        gwId: gw.id, result: gw.result || {}, contractId: gw.contract_id,
+        sides, tournament: true, champion: gw.result?.winner_team || null,
+      });
     }
   }
   return out;
@@ -569,6 +603,89 @@ function showTable(stats) {
     }));
 }
 
+// ---- the games behind the numbers -----------------------------------------
+//
+// Every figure on this screen is a count of games, and until now the count was
+// all there was: 22 played and 11 won, with no way to ask WHICH eleven. A
+// record you cannot open is a record you can only believe.
+
+const nightName = (id) =>
+  (store.contracts || []).find(c => c.id === id)?.name || id || '';
+
+/**
+ * The scoreline from this player's side.
+ *
+ * The stored text is "13-14" in team order, which does not say whether they
+ * were the 13. Putting their own goals first makes a row readable on its own;
+ * a game with a winner but no goals written down — "Reds win" — has no
+ * scoreline to show, and says so rather than inventing one.
+ */
+function scoreFor(g) {
+  const r = g.result || {};
+  if (!r.goalsKnown) return '<span class="hint">—</span>';
+  const hi = Number(r.goalsWin) || 0;
+  const lo = Number(r.goalsLose) || 0;
+  if (g.outcome === 'win') return `<strong>${hi}</strong>–${lo}`;
+  if (g.outcome === 'loss') return `${lo}–<strong>${hi}</strong>`;
+  return `${hi}–${hi}`;
+}
+
+const OUTCOME_DOT = {
+  win: '<span class="form-dot is-w" title="Won">W</span>',
+  draw: '<span class="form-dot is-d" title="Drawn">D</span>',
+  loss: '<span class="form-dot is-l" title="Lost">L</span>',
+};
+
+function gamesTable(p) {
+  const rows = [...(p.log || [])]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!rows.length) return '<p class="hint">No games in this period.</p>';
+
+  const showNight = !contractId;          // "Both" is the only time it is a question
+  const matches = rows.filter(g => !g.tournament).length;
+  const tourneys = rows.length - matches;
+
+  const body = rows.map((g) => {
+    const others = Object.entries(g.sides || {})
+      .filter(([team]) => team !== g.team)
+      .map(([team, names]) => `${esc(team)}: ${names.map(esc).join(', ')}`)
+      .join(' &nbsp;·&nbsp; ');
+    const mine = (g.sides?.[g.team] || []).filter(n => n !== p.name);
+    return `
+      <tr>
+        <td class="res-g-date">${esc(fmtDate(g.date))}${
+  // On its own line: beside the date it made this the widest column on the
+  // table and pushed the names off a phone screen.
+  showNight ? `<span class="res-g-night">${esc(nightName(g.contractId))}</span>` : ''}</td>
+        <td>${g.team ? esc(g.team) : '<span class="hint">side not recorded</span>'}${
+  g.captain ? ' <span class="res-g-capt" title="Captained">C</span>' : ''}</td>
+        <td class="num">${g.tournament
+    ? `<span class="tag" title="Three sides or more — kept out of every win rate">🏆${
+      g.champion && g.champion === g.team ? ' won' : ''}</span>`
+    : (OUTCOME_DOT[g.outcome] || '<span class="hint" title="No result recorded">—</span>')}</td>
+        <td class="num">${g.tournament ? '<span class="hint">—</span>' : scoreFor(g)}</td>
+        <td class="res-g-who">${[
+    mine.length ? `<span class="hint">with</span> ${mine.map(esc).join(', ')}` : '',
+    others ? `<span class="hint">v</span> ${others}` : '',
+    // Joined rather than concatenated: with nobody alongside them — the only
+    // name on their side — a hard <br> left the row starting on a blank line.
+  ].filter(Boolean).join('<br>')}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <p class="hint">${matches} match${matches === 1 ? '' : 'es'}${
+  tourneys ? ` and ${tourneys} tournament${tourneys === 1 ? '' : 's'}` : ''
+}, newest first. A blank result is a game nobody wrote a score for.</p>
+    <div class="res-games">
+      <table class="sams-table">
+        <thead><tr><th>Date</th><th>Side</th><th class="num">Result</th>
+          <th class="num">Score</th><th>Who else played</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+}
+
 function showPlayerDetail(p) {
   const row = (k, v, cls = '') =>
     `<div class="res-q-row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
@@ -581,6 +698,10 @@ function showPlayerDetail(p) {
     ${row('❌ Lost', p.losses)}
     ${p.unknown ? row('❔ No result recorded', p.unknown) : ''}
     ${p.tournaments ? row('🏆 Tournaments', `${p.tournaments} <span class="hint">listed separately — not scored</span>`) : ''}
+
+    <h4 class="mini-h mt">Every game</h4>
+    ${gamesTable(p)}
+
     <h4 class="mini-h mt">Form &amp; streaks</h4>
     ${row('Last five', formDots(p.form))}
     ${row('Current win streak', p.currentWin || '—', 'is-win')}
@@ -604,7 +725,10 @@ function showPlayerDetail(p) {
   pct(p.captainWinRate)} · games with a score</span>`, 'is-win')}
     <h4 class="mini-h mt">Span</h4>
     ${row('First game', p.first ? fmtDate(p.first) : '—')}
-    ${row('Latest game', p.last ? fmtDate(p.last) : '—')}`);
+    ${row('Latest game', p.last ? fmtDate(p.last) : '—')}`,
+  // The games list is five columns of names; in the narrow modal every row
+  // wraps three deep and the thing stops being a list.
+  { wide: true });
 }
 
 // Club trend across every quarter played — deliberately ignores the period
