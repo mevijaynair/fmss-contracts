@@ -570,7 +570,7 @@ function showLeaderboards(stats) {
     const { v, meta } = typeof out === 'object' && out !== null ? out : { v: out, meta: '' };
     return `
           <div class="res-row${meta ? ' has-meta' : ''}" data-player="${esc(p.id)}">
-            <span class="res-name">${i + 1}. ${esc(p.name)}</span>
+            <span class="res-name">${i + 1}. <span class="res-open">${esc(p.name)}</span></span>
             <span class="res-val ${tone}">${v}</span>
             ${meta ? `<span class="res-meta">${meta}</span>` : ''}
           </div>`;
@@ -623,7 +623,11 @@ let sortDir = -1;
 function showTable(stats) {
   const rows = ranked(stats);
   const cols = [
-    ['name', 'Player', p => esc(p.name), 'left'],
+    // The name is the handle for the whole row. It is drawn as something you
+    // can open because it IS something you can open, and the only thing the
+    // header used to say about clicking was that it sorts columns — so a
+    // player's games sat behind a click nobody had any reason to try.
+    ['name', 'Player', p => `<span class="res-open">${esc(p.name)}</span>`, 'left'],
     ['games', 'P', p => p.games],
     ['wins', 'W', p => p.wins],
     ['draws', 'D', p => p.draws],
@@ -638,16 +642,24 @@ function showTable(stats) {
     ['captainWinRate', 'Capt %', p => pct(p.captainWinRate)],
     ['unknown', 'No result', p => p.unknown || '—'],
   ];
+  // sortDir is +1 for ascending and -1 for descending, which is what the ▴/▾
+  // in the header says it is. The number and form comparators used to subtract
+  // the other way round, so a negative sortDir produced an ASCENDING column:
+  // the table opened on "most games ▾" and listed the fewest first, with the
+  // regulars pushed to the bottom under a row of people who turned up twice.
+  // Only the string comparator was ever the right way round, which is why
+  // sorting by name looked fine and nothing else did.
   rows.sort((a, b) => {
     const va = a[sortKey], vb = b[sortKey];
     if (typeof va === 'string') return sortDir * String(va).localeCompare(String(vb));
-    if (Array.isArray(va)) return sortDir * (vb.length - va.length);
-    return sortDir * (((vb ?? -1)) - ((va ?? -1)));
+    if (Array.isArray(va)) return sortDir * (va.length - vb.length);
+    return sortDir * (((va ?? -1)) - ((vb ?? -1)));
   });
 
   slot('results-table').innerHTML = `<div class="sams-card">
     <div class="card-header"><h3 class="card-title">📋 Player standings</h3>
-      <span class="card-sub">Click a column to sort &middot; ${rows.length} player(s)</span></div>
+      <span class="card-sub">Click a name for every game they played
+        &middot; a column to sort &middot; ${rows.length} player(s)</span></div>
     <div style="overflow-x:auto">
       <table class="sams-table">
         <thead><tr>${cols.map(([k, label, , align]) =>

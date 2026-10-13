@@ -1656,3 +1656,13 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
    and must not stretch to fill the row the way a bare select does. */
 .res-g-who-pick { width: auto; max-width: 15rem; flex: 0 1 auto;
   font-size: 0.85rem; padding: 0.4rem 0.6rem; }
+
+/* A name that opens that player's games. The whole row is the hit target —
+   this is only the sign that there is something behind it. Without it the
+   feature was reachable and invisible: the only thing the table said about
+   clicking was that a column header sorts. */
+.res-open { text-decoration: underline; text-decoration-style: dotted;
+  text-underline-offset: 3px; text-decoration-color: var(--text-faint); }
+tr:hover > td .res-open, .res-row:hover .res-open {
+  text-decoration-style: solid; text-decoration-color: var(--sport);
+  color: var(--sport-on-soft); }
