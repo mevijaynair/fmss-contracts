@@ -66,6 +66,7 @@ async function render() {
     showLeaderboards(stats);
     showTable(stats);
     showPartnerships(all);
+    showHeadToHead(all);
     showTournaments(all);
     showTrends(all);
   } catch (e) { toast(`Error: ${e.message}`, true); }
@@ -343,6 +344,77 @@ function partnerships(gws, { minGames = 4 } = {}) {
     .sort((x, y) => y.winRate - x.winRate || y.games - x.games);
 }
 
+/**
+ * Who beats whom. For every pair who have stood on OPPOSITE sides, how those
+ * meetings went.
+ *
+ * The partnership table answers "who wins together" and has no opposite: two
+ * people can share a side for a season and the screen never says which of
+ * them comes out on top when they are split up. That is the thing the squad
+ * actually argues about.
+ *
+ * One row per pair, not two: a 14–7 and a 7–14 are the same fact written
+ * twice, and a board full of mirror images is unreadable. The player with
+ * more wins is named first.
+ *
+ * Draws are meetings and are counted as such, but they are nobody's win, so
+ * they are kept out of the rate — otherwise an evenly matched pair who draw
+ * often looks like a pair who cannot beat each other.
+ */
+function headToHead(gws, { minMeetings = 4 } = {}) {
+  // Exactly the people the rest of the screen is about — see partnerships.
+  const excluded = new Set();
+  if (!showGuests) for (const id of guestIds()) excluded.add(id);
+  if (!showLeft) for (const id of departedIds()) excluded.add(id);
+
+  const duel = {};
+  for (const gw of gws) {
+    if (!inPeriod(gw.date) || !isMatch(gw)) continue;
+    const res = gw.result || {};
+    if (!res.known || !(res.is_draw || res.winner_team)) continue;
+
+    const byTeam = {};
+    for (const c of gw.charges || []) {
+      if (!c.team || excluded.has(c.player_id)) continue;
+      (byTeam[c.team] ??= []).push(c);
+    }
+    const teams = Object.keys(byTeam);
+    // Two sides, or there is no "against" to speak of. isMatch already keeps
+    // tournaments out; this catches a game where one side is all guests.
+    if (teams.length !== 2) continue;
+    const [tA, tB] = teams;
+
+    for (const a of byTeam[tA]) {
+      for (const b of byTeam[tB]) {
+        const first = a.player_id.localeCompare(b.player_id) <= 0;
+        const [x, y] = first ? [a, b] : [b, a];
+        const key = `${x.player_id}|${y.player_id}`;
+        const d = (duel[key] ??= { x: x.player_name, y: y.player_name,
+          xWins: 0, yWins: 0, draws: 0, met: 0 });
+        d.met++;
+        if (res.is_draw) d.draws++;
+        else if (res.winner_team === (x === a ? tA : tB)) d.xWins++;
+        else d.yWins++;
+      }
+    }
+  }
+
+  return Object.values(duel)
+    .filter(d => d.met >= minMeetings)
+    .map((d) => {
+      const lead = d.xWins >= d.yWins;
+      const wins = lead ? d.xWins : d.yWins;
+      const lost = lead ? d.yWins : d.xWins;
+      return {
+        winner: lead ? d.x : d.y,
+        loser: lead ? d.y : d.x,
+        wins, lost, draws: d.draws, met: d.met,
+        duels: wins + lost,
+        rate: wins + lost ? Math.round((wins / (wins + lost)) * 100) : null,
+      };
+    });
+}
+
 // ---- Club-level trend series ---------------------------------------------
 
 /**
@@ -402,7 +474,7 @@ function showEmpty() {
       <div class="es-sub">Charge a game from Game Day, or bring in past results with Import.</div>
       <button class="btn btn-sm" id="emptyImportBtn">📥 Import Results</button>
     </div>`;
-  ['results-period','results-table','results-pairs','results-tourneys','results-trends']
+  ['results-period','results-table','results-pairs','results-h2h','results-tourneys','results-trends']
     .forEach(k => { slot(k).innerHTML = ''; });
   $('emptyImportBtn')?.addEventListener('click', showImportResultsModal);
 }
@@ -643,6 +715,51 @@ const OUTCOME_DOT = {
 // so a filtered list never looks like an empty one.
 let logFilter = 'all';     // all | win | draw | loss | none | tournament
 let logOrder = 'desc';     // newest or oldest first
+// "with|Toby" or "v|Toby". Reset per player, unlike the two above: a name is
+// only meaningful against the record it was picked from, and "with Toby" on
+// Toby's own record is nonsense.
+let logWho = '';
+
+const whoParts = () => {
+  const i = logWho.indexOf('|');
+  return i < 0 ? ['', ''] : [logWho.slice(0, i), logWho.slice(i + 1)];
+};
+
+/** Their side of a game, and everyone else's, by name. */
+const myLine = (g) => (g.team ? g.sides?.[g.team] || [] : []);
+const theirLines = (g) => Object.entries(g.sides || {})
+  .filter(([team]) => team !== g.team);
+
+/**
+ * Who this player has shared a pitch with, and how often, split by which side
+ * of it they were on. Only these names are offered: a dropdown of the whole
+ * club, most of it leading to an empty table, is a worse answer than a short
+ * list of the people they actually play with.
+ */
+function peopleAround(games, me) {
+  const withs = new Map();
+  const againsts = new Map();
+  const bump = (m, n) => { if (n !== me) m.set(n, (m.get(n) || 0) + 1); };
+  for (const g of games) {
+    if (!g.team) continue;            // side not recorded — cannot say either way
+    for (const n of myLine(g)) bump(withs, n);
+    for (const [, names] of theirLines(g)) for (const n of names) bump(againsts, n);
+  }
+  const sorted = (m) => [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return { withs: sorted(withs), againsts: sorted(againsts) };
+}
+
+/** Games narrowed to the chosen teammate or opponent, before any outcome. */
+function withPerson(games) {
+  const [mode, name] = whoParts();
+  if (!mode || !name) return games;
+  return games.filter((g) => {
+    if (!g.team) return false;
+    return mode === 'with'
+      ? myLine(g).includes(name)
+      : theirLines(g).some(([, names]) => names.includes(name));
+  });
+}
 
 function logCounts(games) {
   const c = { all: 0, win: 0, draw: 0, loss: 0, none: 0, tournament: 0 };
@@ -656,7 +773,7 @@ function logCounts(games) {
 }
 
 function keptGames(games) {
-  const kept = games.filter((g) => {
+  const kept = withPerson(games).filter((g) => {
     if (logFilter === 'all') return true;
     if (logFilter === 'tournament') return !!g.tournament;
     // A tournament has no outcome, so without this it would answer to "no
@@ -684,8 +801,18 @@ const EMPTY_FOR = {
   tournament: 'No tournaments',
 };
 
-function gamesControls(games) {
-  const c = logCounts(games);
+function gamesControls(games, me) {
+  // Counted AFTER the person filter, so picking an opponent turns the chips
+  // into the head-to-head record against them — which is the whole reason to
+  // pick one.
+  const c = logCounts(withPerson(games));
+  const { withs, againsts } = peopleAround(games, me);
+  // The word is on the option, not only on the group: a closed select shows
+  // the option alone, and "Nihas (13)" does not say which side of him.
+  const opts = (label, rows, mode) => (rows.length ? `
+    <optgroup label="${label}">${rows.map(([n, k]) =>
+    `<option value="${esc(mode)}|${esc(n)}"${logWho === `${mode}|${n}` ? ' selected' : ''}
+      >${mode === 'with' ? 'with' : 'v'} ${esc(n)} (${k})</option>`).join('')}</optgroup>` : '');
   // A chip for an outcome that never happened is a dead end — it can only ever
   // show an empty table — so it is left off rather than disabled. The one that
   // is ON stays whatever its count, or narrowing the period to a quarter they
@@ -699,6 +826,12 @@ function gamesControls(games) {
   return `
     <div class="res-g-bar">
       <span class="seg" data-log-filters>${chips}</span>
+      <select class="res-g-who-pick" data-log-who
+        title="Narrow to the games they shared a pitch with one person">
+        <option value="">Anyone else on the pitch</option>
+        ${opts('Alongside', withs, 'with')}
+        ${opts('Up against', againsts, 'v')}
+      </select>
       <span class="seg" data-log-order>
         <button data-log-order-dir="desc" class="${logOrder === 'desc' ? 'active' : ''}"
           title="Most recent game at the top">Newest</button>
@@ -726,7 +859,9 @@ function caption(matches, tourneys) {
   }[logFilter] ?? plural(matches, 'match', 'matches')
       + (tourneys ? ` and ${plural(tourneys, 'tournament', 'tournaments')}` : '');
 
-  return `${what}, ${logOrder === 'desc' ? 'newest' : 'oldest'} first${
+  const [mode, name] = whoParts();
+  return `${what}${name ? ` ${mode === 'with' ? 'alongside' : 'against'} ${esc(name)}` : ''
+  }, ${logOrder === 'desc' ? 'newest' : 'oldest'} first${
     period === 'all' ? '' : ` · ${esc(period)} only, set at the top of the screen`}.${
     // Only worth saying where a dash can actually appear.
     logFilter === 'all' ? ' A blank result is a game nobody wrote a score for.' : ''}`;
@@ -742,8 +877,10 @@ function gamesTable(p) {
   const tourneys = rows.length - matches;
 
   if (!rows.length) {
-    return gamesControls(all)
+    const [mode, name] = whoParts();
+    return gamesControls(all, p.name)
       + `<p class="hint">${EMPTY_FOR[logFilter] || 'Nothing'}${
+        name ? ` ${mode === 'with' ? 'alongside' : 'against'} ${esc(name)}` : ''}${
         period === 'all' ? '' : ` in ${esc(period)}`}.</p>`;
   }
 
@@ -776,7 +913,7 @@ function gamesTable(p) {
   }).join('');
 
   return `
-    ${gamesControls(all)}
+    ${gamesControls(all, p.name)}
     <p class="hint">${caption(matches, tourneys)}</p>
     <div class="res-games">
       <table class="sams-table">
@@ -800,9 +937,15 @@ function drawGames(p) {
     b.addEventListener('click', () => { logFilter = b.dataset.logFilter; drawGames(p); }));
   host.querySelectorAll('[data-log-order-dir]').forEach(b =>
     b.addEventListener('click', () => { logOrder = b.dataset.logOrderDir; drawGames(p); }));
+  host.querySelector('[data-log-who]')?.addEventListener('change', (e) => {
+    logWho = e.target.value; drawGames(p);
+  });
 }
 
 function showPlayerDetail(p) {
+  // A name picked on one person's record means nothing on the next one's —
+  // and "alongside Toby" on Toby's own card is a question with no answer.
+  logWho = '';
   const row = (k, v, cls = '') =>
     `<div class="res-q-row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
   openModal(esc(p.name), `
@@ -964,6 +1107,46 @@ function showPartnerships(gws) {
       </div>
     </div>`;
 }
+// Who comes out on top when the sides are drawn against each other.
+function showHeadToHead(gws) {
+  const duels = headToHead(gws, { minMeetings: 4 });
+  if (!duels.length) { slot('results-h2h').innerHTML = ''; return; }
+
+  const most = [...duels].sort((a, b) => b.wins - a.wins || b.rate - a.rate);
+  // A rate needs more games behind it than a count does: three wins out of
+  // three is 100% and means nothing, and it would top the board forever.
+  const ONE_SIDED = 6;
+  const lopsided = duels.filter(d => d.duels >= ONE_SIDED && d.wins > d.lost)
+    .sort((a, b) => b.rate - a.rate || b.duels - a.duels);
+
+  const list = (rows) => rows.slice(0, 8).map(d => `
+    <div class="res-row has-meta" style="cursor:default">
+      <span class="res-name">${esc(d.winner)} <span class="hint">beat</span> ${esc(d.loser)}</span>
+      <span class="res-val is-win">${d.wins}<span class="hint">–${d.lost}</span></span>
+      <span class="res-meta">${d.met} meeting${d.met === 1 ? '' : 's'}${
+  d.draws ? `, ${d.draws} drawn` : ''}${d.rate === null ? '' : ` · ${d.rate}%`}</span>
+    </div>`).join('');
+
+  slot('results-h2h').innerHTML = `
+    <div class="auto-grid" style="--col-min: 280px;">
+      <div class="sams-card">
+        <div class="card-header"><h3 class="card-title">🥊 Beaten them most</h3>
+          <span class="card-sub">Opposite sides, 4+ meetings</span></div>
+        <div class="res-board">${list(most)}</div>
+      </div>
+      <div class="sams-card">
+        <div class="card-header"><h3 class="card-title">🧱 Most one-sided</h3>
+          <span class="card-sub">By win rate, ${ONE_SIDED}+ decided meetings</span></div>
+        <div class="res-board">${lopsided.length ? list(lopsided)
+    : `<p class="hint">Nobody has met the same opponent ${ONE_SIDED} times with a
+        result in this period.</p>`}</div>
+      </div>
+    </div>
+    <p class="hint">Teams are redrawn every week, so these are the pairs the shuffle
+      has happened to put on opposite sides — not fixtures anybody chose. Draws count
+      as meetings but belong to neither player, so they are left out of the rate.</p>`;
+}
+
 export function initResults() {
   $('importResultsBtn')?.addEventListener('click', showImportResultsModal);
 }

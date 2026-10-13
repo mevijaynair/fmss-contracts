@@ -1652,3 +1652,7 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
 .res-g-bar .seg { flex-wrap: wrap; }
 /* The count beside each chip: present, but never louder than the word. */
 .res-g-n { opacity: 0.6; font-variant-numeric: tabular-nums; }
+/* The teammate/opponent picker sits between the chips and the order toggle,
+   and must not stretch to fill the row the way a bare select does. */
+.res-g-who-pick { width: auto; max-width: 15rem; flex: 0 1 auto;
+  font-size: 0.85rem; padding: 0.4rem 0.6rem; }
