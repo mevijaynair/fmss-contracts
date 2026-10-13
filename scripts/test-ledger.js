@@ -956,6 +956,12 @@ const OTHER = 'testc_split';
 db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
             VALUES (?,'Saturdays','{"contracted_12":40,"noncontract":45}',0,9)`).run(OTHER);
 
+// Dates that later tests name explicitly. Anything generating games near
+// today has to leave these alone, or whichever ran first wins and the other
+// fails on a date clash — a failure that moves around with the calendar.
+const RESERVED_DATES = new Set(['2026-09-01', '2026-09-13', '2026-09-22',
+  '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06']);
+
 /**
  * Games on a given contract, dated relative to TODAY.
  *
@@ -964,10 +970,22 @@ db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
  * would still pass, against the fallback, and stop testing the rule they were
  * written for.
  */
-function playsOn(contract, playerId, games, amount = 40, daysAgo = 7) {
+function playsOn(contract, playerId, games, amount = 40, daysAgo = 14) {
   for (let i = 0; i < games; i++) {
     const d = new Date();
     d.setDate(d.getDate() - daysAgo - i);
+    // One club, one night: a game may not share a date with another. These
+    // games only need to be INSIDE the eight-week window, never on a
+    // particular day, so they give way to everything else — any date already
+    // booked, and the fixed dates later tests will ask for by name. Without
+    // that, this helper quietly took 2026-10-05 and the test that owns it
+    // failed, in a way that depended on what today happened to be.
+    let guard = 0;
+    while ((RESERVED_DATES.has(d.toISOString().slice(0, 10))
+      || db.prepare('SELECT 1 FROM gameweeks WHERE date = ?').get(d.toISOString().slice(0, 10)))
+      && guard++ < 90) {
+      d.setDate(d.getDate() - 1);
+    }
     const gid = `sg${++seq}`;
     db.prepare(`INSERT INTO gameweeks (id,contract_id,gw_number,contract_number,date,cost_per_gw,
       num_players,teams_raw,captains_raw,score,comments,historical,created_at)

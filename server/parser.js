@@ -18,16 +18,38 @@ const EMOJI_TEAMS = [
   [/🚩/u, 'Red'],
 ];
 const WORD_TEAM = /^(reds?|blues?|whites?|blacks?|greens?|yellows?)\b[:\-]?/i;
+// The same colours as a word on its own, for the line that leads with an emoji
+// and then spells the team out as well: "❤️ REDS – Rony (C), ...".
+const COLOUR_WORD = /^(reds?|blues?|whites?|blacks?|greens?|yellows?)$/i;
+/** "REDS" -> "Red", the way the word-led team line already writes it. */
+const teamName = (w) => w[0].toUpperCase() + w.slice(1).toLowerCase().replace(/s$/, '');
+// Punctuation that hangs off a name in a pasted roster: the comma after
+// "Khilji,", the en dash in "REDS – Rony", the full stop ending a line.
+const EDGE_PUNCT = /^[\s\-–—:,.;|]+|[\s\-–—:,.;|]+$/g;
 
 // Tokens that are never player names.
 const STOP = new Set(['vs', 'v/s', 'v', '&', 'and', 'team', 'teams', 'capt', 'captain',
   'no', 'game', 'smf', 'am', 'pm', 'sports', 'indoor', 'city', 'at', 'to']);
 
+/**
+ * A name reduced to what two spellings of it have in common.
+ *
+ * Spaces come out. A roster is split on whitespace, so a player called
+ * "Rohit 2" arrives as the two tokens "Rohit" and "2" and can never be
+ * matched at all — while "Rohit" on its own goes to the other man of that
+ * name. Folding the space away lets the one token anybody actually types,
+ * "Rohit2", find him.
+ */
 function normalize(s) {
   return String(s).toLowerCase()
     .normalize('NFKD').replace(/[̀-ͯ]/g, '')   // strip accents
-    .replace(/[^a-z0-9+ ]/g, '').trim();
+    .replace(/[^a-z0-9+ ]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
 }
+
+/** Just the digits of a name — "rohit2" -> "2", "rohit" -> "". */
+const digitsOf = (s) => s.replace(/\D/g, '');
 
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
@@ -67,8 +89,17 @@ export function matchToken(token, players, index) {
   const n = normalize(token);
   if (!n) return null;
   if (index.has(n)) return index.get(n);
+
+  // A number in a name is how two people who share one are told apart, so it
+  // is never a typo and never a short form. Without this, "Rohit2" is one
+  // character off "Rohit" and the prefix rule below hands the game — and the
+  // charge — to the wrong man, silently. Same in reverse: plain "Rohit" must
+  // not fall through to "Rohit 2".
+  const sameNumber = (key) => digitsOf(key) === digitsOf(n);
+
   // prefix / contains for nicknames ("Tush" ⊂ "Tushar")
   for (const [key, p] of index) {
+    if (!sameNumber(key)) continue;
     if (key.startsWith(n) || n.startsWith(key)) {
       if (Math.abs(key.length - n.length) <= 3) return p;
     }
@@ -83,6 +114,7 @@ export function matchToken(token, players, index) {
   // handled by aliases (Roji, Khalid, Sahir), which are matched exactly above.
   if (n.length >= 4) {
     for (const [key, p] of index) {
+      if (!sameNumber(key)) continue;                     // a different person
       if (key.length === n.length) continue;              // substitution — too risky
       if (Math.abs(key.length - n.length) === 1 && levenshtein(n, key) <= 1) return p;
     }
@@ -112,7 +144,31 @@ function splitTeams(text) {
     // Walk the line; an emoji marker also starts a new team.
     const chars = Array.from(line);
     let buf = '';
-    const flush = () => { if (buf.trim()) current.tokens.push(...buf.trim().split(/\s+/)); buf = ''; };
+    /**
+     * Hand the words collected so far to the current team.
+     *
+     * A colour word at the head of a block names the team rather than a
+     * player. "❤️ REDS – Rony (C), ..." opens a team on the emoji and then
+     * says REDS as well; without this that word becomes a token, fails to
+     * match anybody, and arrives in Game Day as a player to be added — one
+     * per team, charged the guest rate, and counted in the headcount, which
+     * is what decides whether everyone is billed at the 10- or 12-player
+     * rate. Two junk rows can therefore misprice the entire night.
+     */
+    const flush = () => {
+      if (buf.trim()) {
+        for (const tok of buf.trim().split(/\s+/)) {
+          const bare = tok.replace(EDGE_PUNCT, '');
+          const openingWord = current.tokens.every(t => STOP.has(normalize(t)));
+          if (openingWord && COLOUR_WORD.test(bare)) {
+            current.team = teamName(bare);
+            continue;
+          }
+          current.tokens.push(tok);
+        }
+      }
+      buf = '';
+    };
     for (const ch of chars) {
       let hit = null;
       for (const [re, name] of EMOJI_TEAMS) if (re.test(ch)) { hit = name; break; }
@@ -143,19 +199,37 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
     const team = block.team || `Team ${++teamCount}`;
     let pendingCaptainFor = null;     // index of last real token (for trailing "(C)")
     for (let raw of block.tokens) {
+      // The comma comes off FIRST. "Rony (C), Khilji" splits into "Rony" and
+      // "(C)," — and "(C)," is not the standalone marker (the comma), so it
+      // fell through to the inline branch, which stripped the "(C)" and left
+      // a bare comma that was then discarded as empty. The captaincy went
+      // with it, every time a roster was written the way the club writes it,
+      // so nobody has ever been given the captain's rate from a paste.
+      raw = raw.replace(EDGE_PUNCT, '');
+      if (!raw) continue;
+
       // standalone captain marker → applies to the previous player
       if (/^\(?c\)?$/i.test(raw)) { if (pendingCaptainFor != null) rows[pendingCaptainFor].is_captain = true; continue; }
 
       let isCapt = false;
       const cap = raw.match(/\(c\)/i);
-      if (cap) { isCapt = true; raw = raw.replace(/\(c\)/ig, ''); }
-      raw = raw.replace(/^[\-:,.]+|[\-:,.]+$/g, '').trim();
+      if (cap) { isCapt = true; raw = raw.replace(/\(c\)/ig, '').replace(EDGE_PUNCT, ''); }
       if (!raw) continue;
 
       const norm = normalize(raw);
-      if (!norm || STOP.has(norm) || /\d|@/.test(raw)) continue;   // skip junk/times/handles
+      // A handle is never a name, whoever it looks like: normalize strips the
+      // @, so "@sam" would otherwise match the player Sam and charge him for
+      // a game he was only mentioned in.
+      if (!norm || STOP.has(norm) || /@/.test(raw)) continue;
 
       const player = matchToken(raw, players, index);
+
+      // Times and dates are not names — "8pm", "7:30", "20th". They used to be
+      // dropped by the digit alone, which also dropped the one player whose
+      // name has a number in it: "Rohit2" left the roster silently, not even
+      // reported as an unknown name, so he played and was never charged. A
+      // token with a digit is junk unless it is somebody.
+      if (!player && /\d/.test(raw)) continue;
 
       const r = {
         token: raw,

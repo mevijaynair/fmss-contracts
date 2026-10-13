@@ -1,6 +1,6 @@
 // gameweeks.js — game history list + detail modal.
 import { api } from '../api.js';
-import { store, toast, defaultContract } from '../store.js';
+import { store, toast, defaultContract, refreshContracts } from '../store.js';
 import { $, esc, money, fmtDate, contractSeg, openModal, closeModal, rosterOptions } from '../util.js';
 import { fixtureDate, dayName, describeDays, loadSchedule, markNoGame, reopenDate } from '../schedule-ui.js';
 
@@ -995,6 +995,9 @@ async function renderIssues() {
 
 export function loadGameweeks() {
   if (contractId === undefined) contractId = defaultContract();
+  // This screen prices too — the amount offered when somebody is added to a
+  // game already recorded comes off the rate card. Same staleness, same fix.
+  refreshContracts(api);
   // Both, like Results: a season read across the two nights answers "what have
   // we actually played" without asking twice. The fixture panel below cannot
   // follow — see renderSchedule — because a fixture day belongs to one contract.

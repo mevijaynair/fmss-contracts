@@ -1,6 +1,6 @@
 // gameday.js — paste WhatsApp teams → parse → editable preview → confirm & deduct.
 import { api } from '../api.js';
-import { store, toast, defaultContract } from '../store.js';
+import { store, toast, defaultContract, refreshContracts } from '../store.js';
 import { $, esc, money, today, fmtDate, contractSeg, rosterOptions } from '../util.js';
 import { loadDashboard } from './dashboard.js';
 import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.js';
@@ -1097,6 +1097,18 @@ export function initGameday() {
 
 export function loadGameday() {
   contractId ??= defaultContract();
+
+  // The rate card, fresh, every time this screen opens — this screen prices
+  // the pasted sheet from it, and the copy loaded at sign-in goes stale the
+  // moment anybody edits a rate. A preview already on screen is deliberately
+  // left alone: its amounts may have been typed over by hand.
+  refreshContracts(api).then(() => {
+    contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
+      contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
+    });
+    drawVenues();
+  });
+
   // The grounds the club has bookings at, so a night away from the usual one
   // can be picked. Quietly skipped for anyone who cannot read the bookings —
   // the contracts' own venues still fill the picker.

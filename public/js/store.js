@@ -25,6 +25,28 @@ export const store = {
  */
 export const defaultContract = () => store.contracts[0]?.id || store.activeContract;
 
+/**
+ * Re-read the contracts, for the screens that PRICE from them.
+ *
+ * `store.contracts` is filled once at sign-in. That is fine for a name in a
+ * dropdown and quietly wrong for money: the rate card and the pitch cost live
+ * on the same object, and Game Day and the Season screen both work out what
+ * to charge from it. A rate changed in Settings — or on a phone, or by
+ * somebody else — was therefore ignored on those two screens until the whole
+ * page was reloaded, which is what "the guest rate did not take" looks like
+ * from the outside.
+ *
+ * Two rows over the wire, on opening a screen. Failure is not worth reporting:
+ * the copy from sign-in is still better than an empty picker.
+ */
+export async function refreshContracts(api) {
+  try {
+    const cs = await api.contracts();
+    if (cs?.length) store.contracts = cs;
+  } catch { /* keep what we have */ }
+  return store.contracts;
+}
+
 let toastTimer = null;
 export function toast(msg, isErr = false) {
   const t = document.getElementById('toast');
