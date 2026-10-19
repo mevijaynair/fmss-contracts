@@ -20,9 +20,16 @@ function isPlayer() { return store.user?.role === 'player'; }
  */
 export function splitNote(c) {
   if (!c.split_group || !c.split_total) return '';
+  // "600 of 1,000 split 2 ways" never said what it was split ACROSS, and
+  // sitting above a row reading "Shone 43 from Abhi" it read as split between
+  // two people. It is contracts, and the useful half of the answer is which
+  // one the rest went to — the row already shows this part's own amount.
+  const peers = (c.split_peers || [])
+    .map(p => `${money(p.amount)} to ${esc(p.contract_name)}`).join(', ');
+  const where = peers ? ` — ${peers}` : ` split ${c.split_parts} ways`;
   return ` <span class="split-note" data-split-group="${esc(c.split_group)}"
-    title="One payment of ${money(c.split_total)} divided across ${c.split_parts} contracts. Click to see the other part${c.split_parts === 2 ? '' : 's'}.">
-    ${money(c.amount)} of ${money(c.split_total)} split ${c.split_parts} ways</span>`;
+    title="One payment of ${money(c.split_total)}, divided across ${c.split_parts} contracts. Click for the whole breakdown.">
+    part of ${money(c.split_total)}${where}</span>`;
 }
 
 /** Show the other legs of the payment, so a bank line can be reconciled whole. */

@@ -120,7 +120,39 @@ export const contributionsRepo = {
       LEFT JOIN players p ON p.id = q.player_id
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY q.date DESC, q.created_at DESC`;
-    return db.prepare(sql).all(...args);
+    const rows = db.prepare(sql).all(...args);
+
+    /**
+     * Where the OTHER parts of a split payment went.
+     *
+     * "600 of 1,000 split 2 ways" says a payment was divided and not what it
+     * was divided across — and directly above a row reading "Shone 43 from
+     * Abhi", two ways reads as two people. It is two contracts, and naming
+     * the one the rest landed on is the whole answer.
+     *
+     * Fetched separately rather than joined: the log can be filtered to one
+     * player or one contract, and the sibling of a Saturdays row is a Mon/Thu
+     * row that the filter has just excluded. A subquery sees it; the result
+     * set does not.
+     */
+    const groups = [...new Set(rows.map(r => r.split_group).filter(Boolean))];
+    if (groups.length) {
+      const holes = groups.map(() => '?').join(',');
+      const sibs = db.prepare(`SELECT s.id, s.split_group, s.amount, s.contract_id,
+          c.name AS contract_name
+        FROM contributions s LEFT JOIN contracts c ON c.id = s.contract_id
+        WHERE s.split_group IN (${holes})`).all(...groups);
+      const byGroup = {};
+      for (const s of sibs) (byGroup[s.split_group] ??= []).push(s);
+      for (const r of rows) {
+        if (!r.split_group) continue;
+        r.split_peers = (byGroup[r.split_group] || [])
+          .filter(s => s.id !== r.id)
+          .map(s => ({ amount: s.amount,
+            contract_name: s.contract_name || s.contract_id }));
+      }
+    }
+    return rows;
   },
 
   /**

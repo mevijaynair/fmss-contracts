@@ -1310,6 +1310,41 @@ function alsoOn(playerId, opening, games = 0, amount = 40, daysAgo = 7) {
   playsOn(OTHER, playerId, games, amount, daysAgo);
 }
 
+test('a split payment says which contract the rest of it went to', () => {
+  // "600 of 1,000 split 2 ways" never said what it was split ACROSS, and in a
+  // log where the line above reads "Shone 43 from Abhi", two ways reads as
+  // two people.
+  const p = player('Split note', 0);
+  const group = 'grp_split_note';
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 400,
+    date: '2026-07-02', split_group: group });
+  contributionsRepo.create({ player_id: p, contract_id: OTHER, amount: 600,
+    date: '2026-07-02', split_group: group });
+
+  const big = contributionsRepo.all({ playerId: p }).find(r => r.contract_id === OTHER);
+  assert.equal(big.split_total, 1000);
+  assert.equal(big.split_parts, 2);
+  assert.deepEqual(big.split_peers, [{ amount: 400, contract_name: 'Test' }],
+    'named by contract, not counted as a number of ways');
+
+  // Filtered to one contract, the sibling is not in the result set at all —
+  // the note still has to be able to name it, which is why the peers are
+  // fetched rather than grouped from the rows that came back.
+  const only = contributionsRepo.all({ playerId: p, contractId: OTHER });
+  assert.equal(only.length, 1, 'the Mon/Thu half is filtered out');
+  assert.deepEqual(only[0].split_peers, [{ amount: 400, contract_name: 'Test' }],
+    'and is still named');
+});
+
+test('a payment that is not split carries no peers', () => {
+  const p = player('Not split', 0);
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 120,
+    date: '2026-07-03' });
+  const row = contributionsRepo.all({ playerId: p })[0];
+  assert.equal(row.split_total, null);
+  assert.equal(row.split_peers, undefined, 'nothing to say about a single payment');
+});
+
 test('a payment is suggested against what is owed before anything else', () => {
   const p = player('Short on Saturdays', 200);       // 200 up on the main contract
   alsoOn(p, -150, 0);                                // 150 down on the other
