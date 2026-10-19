@@ -843,6 +843,74 @@ test('there is nothing to re-read when no message was kept', () => {
   assert.throws(() => gameweeksRepo.resplitSides(gw.id), /no pasted message/);
 });
 
+test('a statement walks from the opening balance to the balance on the ledger', () => {
+  // This is the figure that gets sent to a player to explain what they owe,
+  // so the walk has to land exactly where the ledger says — and say so. A
+  // statement that quietly disagrees with the balance is an argument the
+  // club loses.
+  const p = player('Statement', -100);
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 250,
+    date: '2026-07-01', comments: 'cash' });
+  const g1 = playGame({ pitch: 0, players: [{ player_id: p, amount: 30 }] });
+  const g2 = playGame({ pitch: 0, players: [{ player_id: p, amount: 30 }] });
+
+  const t = statsRepo.playerTimeline(p, CONTRACT);
+  assert.equal(t.opening, -100);
+  assert.equal(t.events.length, 3, 'one payment and two games');
+  assert.equal(t.presentBalance, 90, '-100 + 250 - 30 - 30');
+  assert.equal(t.ledgerBalance, balanceOf(p), 'and the ledger agrees');
+  assert.equal(t.reconciles, true);
+  assert.equal(t.events[t.events.length - 1].runningBalance, 90,
+    'the last running total is the balance');
+  assert.ok(g1.id && g2.id);
+});
+
+test("a statement says whose game each charge was, not just whose balance paid", () => {
+  // AWS carries Ali, so his statement has two charges a night and no way to
+  // tell them apart without the name of whoever actually played.
+  const payer = player('Carrier', 0);
+  const guest = player('Carried', 0);
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: payer, amount: 27 },
+    { player_id: guest, amount: 27, charged_to: payer },
+  ] });
+  assert.ok(gw.id);
+
+  const t = statsRepo.playerTimeline(payer, CONTRACT);
+  const charges = t.events.filter(e => e.type === 'charge');
+  assert.equal(charges.length, 2, 'both games are on the payer’s balance');
+  assert.deepEqual(charges.map(c => c.played_by).sort(), ['Carried', 'Carrier']);
+  assert.equal(charges.find(c => c.played_by === 'Carried').for_someone_else, 1);
+  assert.equal(charges.find(c => c.played_by === 'Carrier').for_someone_else, 0);
+});
+
+test('a statement that did not add up would say so', () => {
+  // The statement and the balance are built from the same settlement rules on
+  // purpose, so no ordinary data can separate them — which is exactly why a
+  // flag that has never been seen false is worth proving.
+  //
+  // They do differ on one state the schema allows: the ledger resolves who
+  // settles with COALESCE(charged_to, player_id), which takes an empty string
+  // at face value and lands the charge on nobody, while the timeline uses
+  // NULLIF and lands it on the player. Nothing writes '' today — production
+  // has none — so this is a tripwire, and the flag is what makes it one
+  // instead of a silent disagreement with somebody's balance.
+  const p = player('Mismatch', 0);
+  const gw = playGame({ pitch: 0, players: [{ player_id: p, amount: 40 }] });
+  assert.equal(statsRepo.playerTimeline(p, CONTRACT).reconciles, true,
+    'before: the walk lands on the ledger');
+
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,
+    amount,charged_to,paid) VALUES (?,?,?,'',0,'',25,'',0)`).run('ch_empty_ct', gw.id, p);
+
+  const t = statsRepo.playerTimeline(p, CONTRACT);
+  assert.equal(t.reconciles, false, 'the walk no longer reaches the ledger');
+  assert.equal(t.presentBalance, t.ledgerBalance - 25,
+    'and by exactly the charge the two read differently');
+  db.prepare('DELETE FROM charges WHERE id = ?').run('ch_empty_ct');
+  assert.equal(statsRepo.playerTimeline(p, CONTRACT).reconciles, true, 'and back again');
+});
+
 test('editing a game keeps the fields the form did not send', () => {
   // The Season form sends four fields. Writing every column and defaulting the
   // absent ones to '' erased the pasted team message — the only record of who

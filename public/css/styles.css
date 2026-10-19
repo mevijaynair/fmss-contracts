@@ -1666,3 +1666,18 @@ body.is-view-as .whoami { color: color-mix(in srgb, var(--warning) 72%, var(--te
 tr:hover > td .res-open, .res-row:hover .res-open {
   text-decoration-style: solid; text-decoration-color: var(--sport);
   color: var(--sport-on-soft); }
+
+/* --- Player statement: how a balance got to where it is ------------------
+   Sent to the person it belongs to, so it is built to be read by someone
+   who did not write it: a date, what happened, and what the balance was
+   after it. */
+.st-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; }
+.st-table .st-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.st-table .st-run { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+/* The two lines that are not movements: where it started and where it ended. */
+.st-opening > td { background: var(--bg-subtle); font-weight: 600; }
+.st-total > td { border-top: 2px solid var(--border-strong); font-size: 1rem; }
+.st-total .num { font-weight: 700; }
+.st-fallback { display: block; width: 100%; min-height: 10rem; margin-top: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }

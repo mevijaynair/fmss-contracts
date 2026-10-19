@@ -1343,6 +1343,114 @@ function matchRecordBlock(r) {
 }
 
 // Render audit trail (grouped by date with color coding)
+/**
+ * How a balance got to where it is, line by line, ending on the balance.
+ *
+ * The Contributions and Charges tabs each hold half the answer and neither
+ * adds up to anything, so explaining a figure to the player it belongs to
+ * meant exporting both and doing the sums by hand. This is the sum: the
+ * opening balance it started from, every movement since in date order with
+ * a running total, and the figure it lands on.
+ *
+ * Two things make it worth sending rather than merely reading. It says where
+ * the opening balance came from — "says who?" is the first question anybody
+ * asks of a number they owe — and it states whether the walk actually
+ * reaches the balance the ledger holds. A statement that silently disagrees
+ * with somebody's balance is an argument the club loses.
+ */
+function statementLine(e, contractName) {
+  if (e.type === 'contribution') {
+    return { what: 'Paid in', note: e.comments || '', amount: e.amount };
+  }
+  if (e.type === 'charge') {
+    const who = e.for_someone_else ? ` — for ${esc(e.played_by)}` : '';
+    const how = e.is_captain ? ' (captain rate)' : '';
+    return { what: `${esc(contractName)} game${who}${how}`,
+      note: e.team ? `${esc(e.team)}` : '', amount: -e.amount };
+  }
+  return { what: 'Adjustment', note: e.comments || '', amount: e.amount };
+}
+
+function renderStatement(player, t, cId) {
+  if (!t) return '<div class="hint">No statement for this contract.</div>';
+  const cName = store.contracts.find(c => c.id === cId)?.name || cId;
+  const when = (d) => String(d || '').slice(0, 10);
+
+  const rows = (t.events || []).map((e) => {
+    const l = statementLine(e, cName);
+    return `<tr>
+      <td class="num st-date">${esc(when(e.date))}</td>
+      <td>${l.what}${l.note ? ` <span class="hint">${esc(l.note)}</span>` : ''}</td>
+      <td class="num">${balCell(l.amount)}</td>
+      <td class="num st-run">${money(e.runningBalance)}</td>
+    </tr>`;
+  }).join('');
+
+  const src = t.opening_source;
+  const openedOn = src?.locked_at ? when(src.locked_at) : null;
+
+  return `
+    <div class="st-head">
+      <div>
+        <h4 class="mini-h" style="margin:0">${esc(player?.name || '')} · ${esc(cName)}</h4>
+        <p class="hint" style="margin:0.2rem 0 0">Every movement since the opening balance,
+          oldest first. The last figure is the balance.</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" data-copy-statement
+        title="Copy as plain text, ready to send">Copy</button>
+    </div>
+    <div class="table-scroll mt">
+      <table class="sams-table st-table">
+        <thead><tr><th>Date</th><th>What</th><th class="num">Amount</th>
+          <th class="num">Balance</th></tr></thead>
+        <tbody>
+          <tr class="st-opening">
+            <td class="num st-date">${esc(openedOn || '')}</td>
+            <td>Opening balance${src?.notes
+    ? ` <span class="hint">${esc(String(src.notes).split('.')[0])}</span>` : ''}</td>
+            <td class="num"></td>
+            <td class="num st-run">${money(t.opening)}</td>
+          </tr>
+          ${rows}
+          <tr class="st-total">
+            <td></td><td><strong>Balance now</strong></td><td class="num"></td>
+            <td class="num">${balCell(t.presentBalance)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    ${t.reconciles
+    ? `<p class="hint mt">These lines add up to ${money(t.presentBalance)}, which is
+        the balance on the ledger — nothing is missing from this list.</p>`
+    : `<p class="panel panel-warn mt" style="padding:0.7rem 0.9rem">
+        <strong>These lines add up to ${money(t.presentBalance)}, but the ledger says
+        ${money(t.ledgerBalance)}.</strong> Something affecting this balance is not shown
+        here, so do not send it until the difference of
+        ${money(Math.abs((t.ledgerBalance ?? 0) - t.presentBalance))} is explained.</p>`}`;
+}
+
+/** The same statement as plain text, for WhatsApp. */
+function statementText(player, t, cId) {
+  const cName = store.contracts.find(c => c.id === cId)?.name || cId;
+  const when = (d) => String(d || '').slice(0, 10);
+  const strip = (s) => String(s).replace(/<[^>]*>/g, '');
+  const pad = (s, n) => String(s).padEnd(n);
+  const num = (n) => String(money(n)).padStart(8);
+
+  const out = [`${player?.name || ''} — ${cName}`, ''];
+  out.push(`${pad('Opening balance', 34)}${num(t.opening)}`);
+  if (t.opening_source?.notes) out.push(`  (${String(t.opening_source.notes).split('.')[0]})`);
+  for (const e of t.events || []) {
+    const l = statementLine(e, cName);
+    out.push(`${when(e.date)}  ${pad(strip(l.what).slice(0, 30), 30)}`
+      + `${num(l.amount)}${num(e.runningBalance)}`);
+  }
+  out.push('');
+  out.push(`${pad('BALANCE NOW', 34)}${num(t.presentBalance)}`);
+  if (!t.reconciles) out.push(`(does not match the ledger figure of ${money(t.ledgerBalance)})`);
+  return out.join('\n');
+}
+
 function renderAuditTrail(transactions) {
   if (!transactions || transactions.length === 0) {
     return '<div class="hint">No transactions yet.</div>';
@@ -1505,6 +1613,7 @@ async function renderPlayerDetail(player, stats, record) {
   let tabsHtml = `
     <div class="tab-bar">
       <button class="tab-btn active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="statement">Statement</button>
       <button class="tab-btn" data-tab="audit-trail">Audit Trail</button>
       <button class="tab-btn" data-tab="contributions">Contributions</button>
       <button class="tab-btn" data-tab="charges">Charges</button>
@@ -1539,6 +1648,11 @@ async function renderPlayerDetail(player, stats, record) {
         </div>
         ${formBlock(record, totalGames, billedGames, recordOnlyGames)}
       </section>
+    </div>
+
+    <!-- STATEMENT TAB — the arithmetic behind the balance, for sending on -->
+    <div class="tab-content" data-tab="statement" hidden>
+      ${renderStatement(player, stats.timeline, contractId)}
     </div>
 
     <!-- AUDIT TRAIL TAB (all transactions: contributions + external events + charges) -->
@@ -1630,6 +1744,25 @@ async function renderPlayerDetail(player, stats, record) {
       });
     });
   });
+
+  // Plain text, because where this is going is WhatsApp. The clipboard API
+  // needs a secure context and a user gesture; this has the gesture, and the
+  // fallback selects the text so it can still be copied by hand.
+  $('playerStatsGrid').querySelector('[data-copy-statement]')?.addEventListener('click',
+    async (ev) => {
+      const text = statementText(player, stats.timeline, contractId);
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Statement copied — paste it to them');
+      } catch {
+        const box = document.createElement('textarea');
+        box.className = 'st-fallback';
+        box.value = text;
+        ev.target.after(box);
+        box.select();
+        toast('Copy did not work here — the text is selected, copy it by hand', true);
+      }
+    });
 
   detailCard.hidden = false;
   currentDetailPlayerId = player.id;

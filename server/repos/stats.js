@@ -1,6 +1,7 @@
 // stats.js — player statistics: timeline, team history, cost breakdown, attendance.
 import { db } from '../db.js';
 import { normaliseScore, winningTeam, isTournament } from '../results_import.js';
+import { ledgersRepo } from './ledgers.js';
 
 export const statsRepo = {
   /**
@@ -243,9 +244,16 @@ export const statsRepo = {
        sign in, so they were the club's most visible wrong figures. */
     const charges = db.prepare(`
       SELECT ch.id, ch.amount, g.date, g.id as gameweek_id, ch.team, ch.is_captain,
-             ch.rate_type, 'charge' as type
+             ch.rate_type, 'charge' as type,
+             -- WHOSE game it was, which is not always whose balance pays for
+             -- it. AWS carries Ali, so his statement has two charges a night
+             -- and no way to tell them apart without this.
+             pl.name AS played_by,
+             CASE WHEN COALESCE(NULLIF(ch.charged_to,''), ch.player_id) = ch.player_id
+                  THEN 0 ELSE 1 END AS for_someone_else
       FROM charges ch
       JOIN gameweeks g ON g.id = ch.gameweek_id
+      JOIN players pl ON pl.id = ch.player_id
       LEFT JOIN players s ON s.id = COALESCE(NULLIF(ch.charged_to, ''), ch.player_id)
       WHERE COALESCE(NULLIF(ch.charged_to, ''), ch.player_id) = ?
         AND COALESCE(ch.settle_contract_id, g.contract_id) = ?
@@ -279,7 +287,37 @@ export const statsRepo = {
     }
     balance = Math.round(balance * 100) / 100;
 
-    return { opening: opening?.opening_balance || 0, events, presentBalance: balance };
+    /**
+     * Does the walk arrive where the ledger says it should?
+     *
+     * This is the one figure in the app that gets sent to a player to explain
+     * what they owe, so a statement that silently disagrees with their
+     * balance is worse than no statement: it is an argument the club loses.
+     * The ledger is the authority; this says plainly when the two differ
+     * rather than letting a reader assume the list is complete.
+     */
+    // present_balance is derived, not a column — ledgersRepo.get is the only
+    // thing that knows the settlement rules behind it.
+    const ledger = ledgersRepo.get(playerId, contractId);
+    const ledgerBalance = ledger
+      ? Math.round((Number(ledger.present_balance) || 0) * 100) / 100
+      : null;
+
+    // Where the opening balance came from, in the words the baseline was
+    // closed with. "Opening balance −513" invites "says who?"; the sheet and
+    // the date it was taken from answer it.
+    const snap = db.prepare(`SELECT opening_balance, locked_at, notes
+      FROM opening_balances_snapshot WHERE player_id = ? AND contract_id = ?`)
+      .get(playerId, contractId);
+
+    return {
+      opening: opening?.opening_balance || 0,
+      opening_source: snap ? { locked_at: snap.locked_at, notes: snap.notes } : null,
+      events,
+      presentBalance: balance,
+      ledgerBalance,
+      reconciles: ledgerBalance === null || Math.abs(ledgerBalance - balance) < 0.005,
+    };
   },
 
   // Descriptive stats (team history, games, costs, streaks) intentionally include
