@@ -413,6 +413,44 @@ for (const p of players) {
 }
 ok('every record adds up to the games played', rateBad === 0, `${rateBad} inconsistency(ies)`);
 
+/* The check above compares two readings of the result ROW, so a wrong row
+   moves both and neither notices — it was silent while 8 October recorded a
+   result between "Team 1" and "B", a side nobody in the club was on, and
+   credited all twelve players with the win. These two look at the row itself.
+
+   First: both sides named in a result have to be sides somebody was actually
+   charged on. A result against a team with no players is not a result. */
+let ghost = 0;
+const ghostDetail = [];
+for (const [gw, r] of results) {
+  const sides = sidesOf.all(gw).map(s => s.team);
+  if (sides.length < 2) continue;                 // reported on its own below
+  for (const name of [r.team_a_name, r.team_b_name]) {
+    if (!sides.some(s => sameSide(s, name))) {
+      ghost++;
+      const d = db.prepare('SELECT date FROM gameweeks WHERE id = ?').get(gw)?.date;
+      if (ghostDetail.length < 6) ghostDetail.push(`${d}: result names "${name}", sides are ${sides.join(' / ')}`);
+    }
+  }
+}
+ok('every result is between two sides that were played', ghost === 0,
+  ghostDetail.join('\n          '));
+
+/* Second: a game that was played has two sides. One side means the roster
+   parsed wrong, and everybody in it is about to be recorded as a winner. */
+let lopsided = 0;
+const lopDetail = [];
+for (const g of db.prepare(`SELECT id, date, historical FROM gameweeks`).all()) {
+  if (isTourney(g.id)) continue;
+  const n = sidesOf.all(g.id).length;
+  const played = db.prepare('SELECT COUNT(*) c FROM charges WHERE gameweek_id = ?').get(g.id).c;
+  if (played > 1 && n === 1) {
+    lopsided++;
+    if (lopDetail.length < 6) lopDetail.push(`${g.date}: ${played} players, all on one side`);
+  }
+}
+ok('no game has everybody on one side', lopsided === 0, lopDetail.join('\n          '));
+
 /* ================================================== 6. What is still missing */
 section('6. Known gaps');
 
