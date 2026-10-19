@@ -1363,10 +1363,13 @@ function statementLine(e, contractName) {
     return { what: 'Paid in', note: e.comments || '', amount: e.amount };
   }
   if (e.type === 'charge') {
-    const who = e.for_someone_else ? ` — for ${esc(e.played_by)}` : '';
+    const who = e.for_someone_else ? ` — ${esc(e.played_by)}'s place` : '';
     const how = e.is_captain ? ' (captain rate)' : '';
-    return { what: `${esc(contractName)} game${who}${how}`,
-      note: e.team ? `${esc(e.team)}` : '', amount: -e.amount };
+    // Which side they played on is not why they were charged, and a column
+    // of Red and Blue in a statement about money is something to explain
+    // away rather than something that explains.
+    return { what: `${contractName ? esc(contractName) + ' game' : 'Game'}${who}${how}`,
+      note: '', amount: -e.amount };
   }
   return { what: 'Adjustment', note: e.comments || '', amount: e.amount };
 }
@@ -1392,7 +1395,8 @@ function renderStatement(player, t, cId) {
   return `
     <div class="st-head">
       <div>
-        <h4 class="mini-h" style="margin:0">${esc(player?.name || '')} · ${esc(cName)}</h4>
+        <h4 class="mini-h" style="margin:0">${esc(player?.name || '')}${
+  cName ? ` · ${esc(cName)}` : ''}</h4>
         <p class="hint" style="margin:0.2rem 0 0">Every movement since the opening balance,
           oldest first. The last figure is the balance.</p>
       </div>
@@ -1404,10 +1408,19 @@ function renderStatement(player, t, cId) {
         <thead><tr><th>Date</th><th>What</th><th class="num">Amount</th>
           <th class="num">Balance</th></tr></thead>
         <tbody>
+          <!-- No date in the date column. The only date on record is when
+               the baseline was LOCKED, and putting 12 Sep against a figure
+               that games from 6 Aug are deducted from reads as a list in
+               the wrong order. The lock date belongs in the note, where it
+               is provenance rather than a position in the sequence. -->
           <tr class="st-opening">
-            <td class="num st-date">${esc(openedOn || '')}</td>
+            <td class="num st-date">—</td>
             <td>Opening balance${src?.notes
-    ? ` <span class="hint">${esc(String(src.notes).split('.')[0])}</span>` : ''}</td>
+    ? ` <span class="hint">${esc(String(src.notes).split('.')[0])}${
+      // The note usually names the lock date itself; saying it twice reads
+      // like two different dates.
+      openedOn && !String(src.notes).includes(openedOn)
+        ? `, locked ${esc(openedOn)}` : ''}</span>` : ''}</td>
             <td class="num"></td>
             <td class="num st-run">${money(t.opening)}</td>
           </tr>
@@ -1437,7 +1450,7 @@ function statementText(player, t, cId) {
   const pad = (s, n) => String(s).padEnd(n);
   const num = (n) => String(money(n)).padStart(8);
 
-  const out = [`${player?.name || ''} — ${cName}`, ''];
+  const out = [`${player?.name || ''}${cName ? ` — ${cName}` : ''}`, ''];
   out.push(`${pad('Opening balance', 34)}${num(t.opening)}`);
   if (t.opening_source?.notes) out.push(`  (${String(t.opening_source.notes).split('.')[0]})`);
   for (const e of t.events || []) {
