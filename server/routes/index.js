@@ -466,6 +466,16 @@ r.put('/gameweeks/:id/charges/:chargeId/settlement', wrap((req) => {
     reprice: req.body?.reprice,
   });
 }));
+// Put everyone back on the side the pasted message says they were on. A GET
+// says what it would do; the POST does it. Sides only — see resplitSides.
+r.get('/gameweeks/:id/sides', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.resplitSides(req.params.id);
+}));
+r.post('/gameweeks/:id/sides', wrap((req) => {
+  requireAdmin(req);
+  return gameweeksRepo.resplitSides(req.params.id, { apply: true });
+}));
 r.delete('/gameweeks/:id/charges/:chargeId', wrap((req) => {
   requireAdmin(req);
   return gameweeksRepo.removeCharge(req.params.id, req.params.chargeId);

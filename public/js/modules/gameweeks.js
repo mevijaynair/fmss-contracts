@@ -582,6 +582,14 @@ async function detail(id) {
         <h4 class="mini-h">Original text</h4>
         <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
         ${g.captains_raw ? `<p class="hint">Captains column: ${esc(g.captains_raw)}</p>` : ''}
+        <!-- The sides are twelve dropdowns to fix one at a time, and the
+             message that says who was with whom is sitting right above. One
+             button, and it only ever changes sides — never what anybody
+             owes. -->
+        ${g.historical || !String(g.teams_raw || '').trim() ? '' : `
+          <button type="button" class="btn btn-secondary btn-sm mt" id="gwResplit"
+            title="Read the sides again from the message above. Moves nobody's money.">
+            ⇄ Set the sides from this text</button>`}
       </div>
     </div>
 
@@ -769,6 +777,30 @@ async function detail(id) {
         reopen(); render();
       } catch (e) { toast(e.message, true); el.checked = !el.checked; }
     }));
+
+  // Shown before it is done, because it moves people and the text it reads
+  // may not be what the person remembers pasting.
+  $('gwResplit')?.addEventListener('click', async () => {
+    try {
+      const plan = await api.get(`/gameweeks/${id}/sides`);
+      if (!plan.moves.length) {
+        toast(plan.unknown.length
+          ? `Everyone the text names is already on the right side. Not in the text: ${
+            plan.unknown.join(', ')}`
+          : 'Everyone is already on the side the text says.');
+        return;
+      }
+      const lines = plan.moves.map(m =>
+        `  ${m.name}: ${m.from || '(no side)'} → ${m.to}`).join('\n');
+      if (!confirm(`Move ${plan.moves.length} player(s) to the side the message says:\n\n${
+        lines}\n\n${plan.unknown.length
+        ? `Left alone — not named in the text: ${plan.unknown.join(', ')}\n\n` : ''
+      }Sides only. Nobody's balance changes, and the move is refused if it would.`)) return;
+      const out = await api.post(`/gameweeks/${id}/sides`, {});
+      toast(`${out.moves.length} moved · ${out.sides.join(' v ')}`);
+      reopen(); render();
+    } catch (e) { toast(e.message, true); }
+  });
 
   document.querySelectorAll('.ch-team').forEach(el =>
     el.addEventListener('change', () => patch(el.dataset.charge)));

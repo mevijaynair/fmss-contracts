@@ -4,6 +4,7 @@ import { ledgersRepo } from './ledgers.js';
 import { auditRepo } from './audit.js';
 import { gameResultsRepo } from './game_results.js';
 import { normaliseScore, winningTeam } from '../results_import.js';
+import { parseTeams } from '../parser.js';
 
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -156,19 +157,46 @@ function parseScore(raw, aName, bName) {
   const text = String(raw || '').trim();
   if (!text) return null;
   const num = (s) => Number(String(s).replace(/\D/g, ''));
+  const quote = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  /**
+   * The names of the two sides, then any bare word.
+   *
+   * The pattern used to be `[A-Za-z]+` alone, which cannot express a side
+   * called "Team 2" — it has a space and a digit — and that is the name the
+   * roster parser gives a side when no colour was marked. "Team 2 win 9-8"
+   * therefore matched nothing here, fell through to the bare "9-8" branch,
+   * and was read in listed order: the FIRST side was recorded as winning a
+   * game the second one won. The real names go first in the alternation so
+   * they are preferred over the generic word.
+   */
+  const SIDE = `${quote(aName)}|${quote(bName)}|[A-Za-z]+`;
+
+  /**
+   * Is the side named in the text the second one?
+   *
+   * The trailing s comes off both, because the club writes "Blues win" and
+   * the side is called "Blue". Compared exactly, that is not team B, so a
+   * Blue win was recorded as a Red one whenever Blue was listed second —
+   * silent, and the opposite of what the sentence says. winningTeam() in
+   * results_import.js has always been plural-tolerant; this was not, which
+   * is why the Results screen and the Season panel could disagree.
+   */
+  const fold = (s) => String(s).trim().toLowerCase().replace(/s$/, '');
+  const isB = (s) => fold(s) === fold(bName);
 
   // "<team> win 13-9" / "<team> won 13 - 9"
-  const won = text.match(/([A-Za-z]+)\s*(?:win|won|wins)\s*(\d+)\s*[-–:]\s*(\d+)/i);
+  const won = text.match(new RegExp(`(${SIDE})\\s*(?:win|won|wins)\\s*(\\d+)\\s*[-–:]\\s*(\\d+)`, 'i'));
   if (won) {
     const hi = Math.max(num(won[2]), num(won[3]));
     const lo = Math.min(num(won[2]), num(won[3]));
-    return won[1].toLowerCase() === String(bName).toLowerCase()
-      ? { a: lo, b: hi } : { a: hi, b: lo };
+    return isB(won[1]) ? { a: lo, b: hi } : { a: hi, b: lo };
   }
   // "Red 13 - Blue 9"
-  const named = text.match(/([A-Za-z]+)\s*(\d+)\s*[-–:]\s*([A-Za-z]+)\s*(\d+)/i);
+  const named = text.match(
+    new RegExp(`(${SIDE})\\s*(\\d+)\\s*[-–:]\\s*(${SIDE})\\s*(\\d+)`, 'i'));
   if (named) {
-    return named[1].toLowerCase() === String(bName).toLowerCase()
+    return isB(named[1])
       ? { a: num(named[4]), b: num(named[2]) }
       : { a: num(named[2]), b: num(named[4]) };
   }
@@ -774,6 +802,97 @@ export const gameweeksRepo = {
    * somebody makes, not a side effect of ticking a box. The caller is told
    * what it would be either way — see `captain_rate` on the result.
    */
+  /**
+   * Re-read which side everyone was on from the message the game came from.
+   *
+   * When a paste parses into one side — no colours marked, as on 8 October —
+   * putting twelve people back on two sides means twelve dropdowns, one at a
+   * time, and nobody does that. The pasted text is still on the game and it
+   * says plainly who was with whom, so it is read again and the sides are
+   * taken from it.
+   *
+   * Sides ONLY. The armband is deliberately not re-read: a captain is priced
+   * at the captain rate, so changing one changes what somebody owes, and a
+   * button described as fixing the sides must not move money. That is not a
+   * promise in a comment — it is checked against every contract's charge
+   * total inside the transaction, and the whole thing rolls back if a single
+   * fil has moved.
+   *
+   * Reports rather than guesses: a player in the game who is not in the text,
+   * or a side the text gives that nobody is on, comes back named.
+   */
+  resplitSides(gameweekId, { apply = false } = {}) {
+    const g = db.prepare('SELECT * FROM gameweeks WHERE id = ?').get(gameweekId);
+    if (!g) throw new Error('Gameweek not found');
+    if (!String(g.teams_raw || '').trim()) {
+      throw new Error('This game has no pasted message to read the sides from');
+    }
+
+    const charges = db.prepare(`SELECT ch.id, ch.player_id, ch.team, p.name
+      FROM charges ch JOIN players p ON p.id = ch.player_id
+      WHERE ch.gameweek_id = ?`).all(gameweekId);
+    if (!charges.length) throw new Error('No players on this game');
+
+    // Parsed against the people who actually played, not the whole club: a
+    // name in the text that nobody was charged for is not somebody to find a
+    // side for, and matching against the full roster would let a stray word
+    // resolve to an absent player and claim their place.
+    const roster = charges.map(c => ({ id: c.player_id, name: c.name, aliases: [] }));
+    const parsed = parseTeams(g.teams_raw, roster);
+    const sideOf = new Map();
+    for (const row of parsed.rows) {
+      if (row.player_id && row.team && !sideOf.has(row.player_id)) {
+        sideOf.set(row.player_id, row.team);
+      }
+    }
+
+    const moves = [];
+    const unknown = [];
+    for (const c of charges) {
+      const want = sideOf.get(c.player_id);
+      if (!want) { unknown.push(c.name); continue; }
+      if (want !== c.team) moves.push({ id: c.id, name: c.name, from: c.team, to: want });
+    }
+    const sides = [...new Set([...sideOf.values()])];
+    const plan = { sides, moves, unknown, applied: false };
+    if (!apply || !moves.length) return plan;
+
+    const totals = () => Object.fromEntries(db.prepare('SELECT id FROM contracts').all()
+      .map(c => [c.id, round2(db.prepare(`SELECT COALESCE(SUM(amount),0) t FROM charges ch
+        JOIN gameweeks gg ON gg.id = ch.gameweek_id WHERE gg.contract_id = ?`).get(c.id).t)]));
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const before = totals();
+      const set = db.prepare('UPDATE charges SET team = ? WHERE id = ?');
+      for (const m of moves) set.run(m.to, m.id);
+      const after = totals();
+      for (const [k, v] of Object.entries(before)) {
+        if (Math.abs((after[k] ?? 0) - v) > 0.005) {
+          throw new Error(`Refusing: ${k} charges moved ${v} to ${after[k]} — `
+            + 'changing a side must not change what anybody owes');
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+
+    // The result was worked out against the old sides and still names them.
+    // It has to be thrown away before the score is written again, because
+    // applyScore prefers the names already on the result row over the ones
+    // the charges give — which is how 8 October ended up with a result
+    // between "Team 1" and "B", a side nobody in the club was on. Deleting
+    // it first is what makes the rebuild read the corrected sides.
+    if (String(g.score || '').trim()) {
+      db.prepare('DELETE FROM game_results WHERE gameweek_id = ?').run(gameweekId);
+      applyScore(gameweekId, g.score);
+    }
+    plan.applied = true;
+    return plan;
+  },
+
   updateCharge(gameweekId, chargeId, { team, is_captain, reprice = false }) {
     const row = db.prepare('SELECT * FROM charges WHERE id = ? AND gameweek_id = ?')
       .get(chargeId, gameweekId);

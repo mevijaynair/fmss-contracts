@@ -689,6 +689,160 @@ test('editing the score writes the result stats are built from', () => {
   assert.equal(read().result, undefined, 'clearing the box clears the result');
 });
 
+test('a side whose name is not one plain word can still be named as the winner', () => {
+  // "Team 2" is what the roster parser calls the second side when no colour
+  // was marked, and the score reader could not express it: the pattern was
+  // [A-Za-z]+, which matches neither the space nor the digit. "Team 2 win
+  // 9-8" therefore matched nothing, fell through to the bare-numbers branch,
+  // and was read in listed order — recording the FIRST side as having won a
+  // game the second one won. That is 8 October, twelve players, six of them
+  // credited with somebody else's win.
+  const a = player('First side', 500); const b = player('Second side', 500);
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: a, amount: 0, team: 'Team 1' }, { player_id: b, amount: 0, team: 'Team 2' },
+  ] });
+  const read = () => ({
+    ...db.prepare('SELECT score, scoreline FROM gameweeks WHERE id = ?').get(gw.id),
+    result: db.prepare(`SELECT team_a_name an, team_b_name bn, goals_team_a a, goals_team_b b, result
+                        FROM game_results WHERE gameweek_id = ?`).get(gw.id),
+  });
+
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Team 2 win 9-8' });
+  let r = read();
+  assert.equal(r.result.result, 'b_wins', 'the side that was named is the side that won');
+  assert.equal(r.result.a, 8);
+  assert.equal(r.result.b, 9);
+  assert.equal(r.result.an, 'Team 1');
+  assert.equal(r.result.bn, 'Team 2', 'and both sides are named from the charges');
+  assert.equal(r.score, 'Team 2 win 9-8', 'the sentence reads back the same way');
+
+  // The other side, to prove it is reading the name and not just preferring B.
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Team 1 win 9-8' });
+  r = read();
+  assert.equal(r.result.result, 'a_wins');
+  assert.equal(r.result.a, 9);
+});
+
+test('the plural the club actually writes names the right side', () => {
+  // The club writes "Blues win 7-1". Compared exactly, "Blues" is not the
+  // side called "Blue", so it was not recognised as team B and the win went
+  // to whoever was listed first. winningTeam() in results_import.js has
+  // always dropped the trailing s; this had not, so the Results screen and
+  // the Season panel could disagree about who won the same game.
+  const a = player('Red one', 500); const b = player('Blue one', 500);
+  const gw = playGame({ pitch: 0, players: [
+    { player_id: a, amount: 0, team: 'Red' }, { player_id: b, amount: 0, team: 'Blue' },
+  ] });
+  const result = () => db.prepare('SELECT result, goals_team_a a, goals_team_b b FROM game_results WHERE gameweek_id = ?').get(gw.id);
+
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Blues win 7-1' });
+  assert.equal(result().result, 'b_wins', 'Blues winning is Blue winning');
+  assert.equal(result().b, 7);
+
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Reds win 7-1' });
+  assert.equal(result().result, 'a_wins', 'and Reds winning is still Red winning');
+});
+
+test('the sides can be re-read from the message the game came from', () => {
+  // Twelve people on one side means twelve dropdowns to fix by hand, which is
+  // why 8 October stayed wrong. The pasted text is still on the game and says
+  // who was with whom, so it is read again.
+  const names = ['Alfa', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
+  const ids = names.map(n => player(n, 500));
+  const raw = `${names.slice(0, 3).join(' ')}\n\n${names.slice(3).join(' ')}`;
+  const gw = playGame({ pitch: 0, teams_raw: raw, score: 'Team 2 win 9-8',
+    players: ids.map(id => ({ player_id: id, amount: 30, team: 'Team 1' })) });
+
+  const owed = () => ids.map(balanceOf);
+  const before = owed();
+
+  const plan = gameweeksRepo.resplitSides(gw.id);
+  assert.equal(plan.applied, false, 'asking is not doing');
+  assert.equal(plan.moves.length, 3, 'the second three move; the first three are already right');
+  assert.deepEqual(plan.unknown, [], 'and everybody in the game is in the text');
+
+  const done = gameweeksRepo.resplitSides(gw.id, { apply: true });
+  assert.equal(done.applied, true);
+  const sides = db.prepare(`SELECT p.name, ch.team FROM charges ch JOIN players p ON p.id = ch.player_id
+    WHERE ch.gameweek_id = ? ORDER BY p.name`).all(gw.id);
+  assert.equal(sides.filter(s => s.team === 'Team 1').length, 3);
+  assert.equal(sides.filter(s => s.team === 'Team 2').length, 3);
+  assert.equal(sides.find(s => s.name === 'Delta').team, 'Team 2');
+
+  assert.deepEqual(owed(), before, 'and not one balance moved');
+});
+
+test('re-reading the sides rebuilds a result that named a side nobody was on', () => {
+  // The result was decided when everyone was on one side, so it names a
+  // second team with no players in it — and every player in the game counts
+  // as having won. Leaving that behind a correction of the sides would be
+  // fixing the half that is visible.
+  const a = player('Golf', 500); const b = player('Hotel', 500);
+  const gw = playGame({ pitch: 0, teams_raw: 'Golf\n\nHotel',
+    players: [{ player_id: a, amount: 30, team: 'Team 1' },
+      { player_id: b, amount: 30, team: 'Team 1' }] });
+
+  // Scored while they were all on one side, which is the state being fixed:
+  // the second side is whatever applyScore could fall back to, and nobody is
+  // on it.
+  gameweeksRepo.updateMetadata(gw.id, { score: 'Team 1 win 9-8' });
+  let res = db.prepare('SELECT * FROM game_results WHERE gameweek_id = ?').get(gw.id);
+  assert.notEqual(res.team_b_name, 'Team 2', 'before: the losing side is a name nobody holds');
+
+  gameweeksRepo.resplitSides(gw.id, { apply: true });
+  res = db.prepare('SELECT * FROM game_results WHERE gameweek_id = ?').get(gw.id);
+  assert.equal(res.team_a_name, 'Team 1');
+  assert.equal(res.team_b_name, 'Team 2', 'after: both sides are sides that exist');
+  assert.equal(res.result, 'a_wins');
+});
+
+test('a player the message does not mention is named, not guessed at', () => {
+  const a = player('India', 500); const b = player('Juliett', 500);
+  const gw = playGame({ pitch: 0, teams_raw: 'India', players: [
+    { player_id: a, amount: 30, team: 'Red' }, { player_id: b, amount: 30, team: 'Blue' },
+  ] });
+  const plan = gameweeksRepo.resplitSides(gw.id);
+  assert.deepEqual(plan.unknown, ['Juliett'], 'the one who was added after the paste');
+  assert.ok(!plan.moves.some(m => m.name === 'Juliett'),
+    'and nothing is proposed for them');
+});
+
+test('a re-split that moved money would roll back whole', () => {
+  // The promise the button makes is that it only changes sides. Today a team
+  // is not money and the check cannot fire, which is exactly why it is worth
+  // proving: a guard nobody has ever seen work is a comment. A trigger makes
+  // the forbidden thing happen — the shape a schema change could one day take
+  // — and the whole edit has to come back, sides included.
+  const a = player('Kilo', 500); const b = player('Lima', 500);
+  const gw = playGame({ pitch: 0, teams_raw: 'Kilo\n\nLima', players: [
+    { player_id: a, amount: 30, team: 'Team 1' },
+    { player_id: b, amount: 30, team: 'Team 1' },
+  ] });
+  const before = [balanceOf(a), balanceOf(b)];
+
+  db.exec(`CREATE TRIGGER test_team_costs_money AFTER UPDATE OF team ON charges
+           BEGIN UPDATE charges SET amount = amount + 1 WHERE id = NEW.id; END`);
+  try {
+    assert.throws(() => gameweeksRepo.resplitSides(gw.id, { apply: true }),
+      /must not change what anybody owes/);
+  } finally {
+    db.exec('DROP TRIGGER test_team_costs_money');
+  }
+
+  assert.deepEqual([balanceOf(a), balanceOf(b)], before, 'no balance moved');
+  const sides = db.prepare('SELECT team FROM charges WHERE gameweek_id = ?').all(gw.id);
+  assert.ok(sides.every(s => s.team === 'Team 1'),
+    'and the sides went back too — it is one change or none');
+});
+
+test('there is nothing to re-read when no message was kept', () => {
+  const a = player('No text', 500);
+  const gw = playGame({ pitch: 0, teams_raw: '', players: [
+    { player_id: a, amount: 30, team: 'Red' },
+  ] });
+  assert.throws(() => gameweeksRepo.resplitSides(gw.id), /no pasted message/);
+});
+
 test('editing a game keeps the fields the form did not send', () => {
   // The Season form sends four fields. Writing every column and defaulting the
   // absent ones to '' erased the pasted team message — the only record of who

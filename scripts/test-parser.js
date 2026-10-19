@@ -152,6 +152,83 @@ test('an out-of-contract captain still pays the guest rate', () => {
   assert.equal(guest.amount, 35, 'and pays the guest rate for it');
 });
 
+test('a blank line between two blocks is two sides, with no colours anywhere', () => {
+  // 8 October, exactly as it was pasted. No emoji, no colour word, just a
+  // blank line — and all twelve came out on one side. A game with one side
+  // has no opponent, so the result credited every player with the win,
+  // including the six who lost.
+  const out = parseTeams(
+    'Tushar(c) Jeetu Nihas\n\nRony(c) Nihal Rohit',
+    ROSTER, {}, { contracted_10: 30, captain_10: 25, noncontract: 35 });
+
+  assert.deepEqual(out.teams, ['Team 1', 'Team 2'], 'two sides, numbered in the order written');
+  const side = (t) => out.rows.filter(r => r.team === t).map(r => r.player_id);
+  assert.equal(side('Team 1').length, 3);
+  assert.equal(side('Team 2').length, 3);
+  assert.ok(side('Team 1').includes('tushar'), 'the first block is the first side');
+  assert.ok(side('Team 2').includes('rony'), 'and the second block the second');
+  assert.ok(!side('Team 1').includes('rony'), 'the captains are not on the same side');
+
+  // One armband each, which is also what the rate card is paying for.
+  for (const t of ['Team 1', 'Team 2']) {
+    assert.equal(out.rows.filter(r => r.team === t && r.is_captain).length, 1,
+      `${t} has exactly one captain`);
+  }
+
+  // The same roster with no armbands at all, so the blank line is the only
+  // thing that can split it. Without this the armband rule below covers for
+  // this one and the blank line could stop working unnoticed.
+  const plain = parseTeams('Tushar Jeetu Nihas\n\nRony Nihal Rohit',
+    ROSTER, {}, { contracted_10: 30, noncontract: 35 });
+  assert.deepEqual(plain.teams, ['Team 1', 'Team 2'], 'the blank line alone is enough');
+  assert.equal(plain.rows.find(r => r.player_id === 'rony').team, 'Team 2');
+});
+
+test('a blank line under a header does not open a side of its own', () => {
+  // The line above the roster is not a team. Numbering a block before knowing
+  // it holds a player would call this one Team 1 and push the real sides to
+  // Team 2 and Team 3 — which is three sides, and the Results screen holds
+  // three-sided games out of every match table as tournaments.
+  const out = parseTeams(
+    'Game tonight 8pm at the dome\n\nTushar(c) Jeetu Nihas\n\nRony(c) Nihal Rohit',
+    ROSTER, {}, { contracted_10: 30, captain_10: 25, noncontract: 35 });
+  assert.deepEqual(out.teams, ['Team 1', 'Team 2']);
+  assert.equal(out.rows.filter(r => r.matched).length, 6, 'the six who played');
+  assert.ok(out.rows.filter(r => !r.matched).every(r => !r.team),
+    'and a word from the header is on no side at all');
+});
+
+test('two armbands and one block is split at the second one', () => {
+  // The same roster with no blank line either. One captain per side is the
+  // one thing about a football team that can be relied on.
+  const out = parseTeams(
+    'Tushar(c) Jeetu Nihas Rony(c) Nihal Rohit',
+    ROSTER, {}, { contracted_10: 30, captain_10: 25, noncontract: 35 });
+  assert.deepEqual(out.teams, ['Team 1', 'Team 2']);
+  assert.equal(out.rows.filter(r => r.team === 'Team 1').length, 3);
+  assert.equal(out.rows.find(r => r.player_id === 'rony').team, 'Team 2');
+});
+
+test('the armband split is refused when it would leave five against one', () => {
+  // Captain written LAST on each side. Splitting at the second armband would
+  // give 5 and 1, which is not a game — so the block is left exactly as it
+  // was. Wrong and unchanged beats wrong and rearranged.
+  const out = parseTeams(
+    'Jeetu Nihas Nihal Tushar(c) Rohit Rony(c)',
+    ROSTER, {}, { contracted_10: 30, captain_10: 25, noncontract: 35 });
+  assert.deepEqual(out.teams, ['Team 1'], 'one side, as before — not a bad guess');
+});
+
+test('a colour-led roster is untouched by the blank-line rule', () => {
+  // The format that already worked has to keep working: the blank line here
+  // falls between two blocks that name themselves.
+  const out = parseTeams(
+    'Red: Tushar (C), Jeetu, Rohit\n\nBlue: Rony (C), Nihas, Nihal',
+    ROSTER, {}, { contracted_10: 30, captain_10: 25, noncontract: 35 });
+  assert.deepEqual(out.teams, ['Red', 'Blue']);
+  assert.equal(out.rows.length, 6);
+});
+
 test('a whole roster lands on the right people', () => {
   const out = parseTeams(
     'Red: Rohit2, Tush, Jeetu\nBlue: Rohit, Nihal, Roji',

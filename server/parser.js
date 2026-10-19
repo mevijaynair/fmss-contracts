@@ -131,7 +131,26 @@ function splitTeams(text) {
 
   for (let line of lines) {
     line = line.trim();
-    if (!line) continue;
+    /**
+     * A blank line between two blocks of names is how a roster with no
+     * colours separates the sides, and it was being thrown away.
+     *
+     *   Toby(c) Hari Jaison Vijay Arjun Neel
+     *                                          <- this
+     *   Vinod(c) Rojy Devansh Saleel Bibbin Abhi
+     *
+     * All twelve came out on one side, and nothing downstream survives that:
+     * the result row then names a second team nobody is on, so every player
+     * in the game is recorded as having won it. That is 8 October, where six
+     * of them lost.
+     *
+     * Only a block with something already in it is closed, so a blank line
+     * under a header — "Game tonight 8pm" — separates nothing.
+     */
+    if (!line) {
+      if (current.tokens.length) { push(); current = { team: '', tokens: [] }; }
+      continue;
+    }
 
     // Word-led team line ("Blue: ...", "Reds - ...").
     const wm = line.match(WORD_TEAM);
@@ -196,7 +215,13 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
   let teamCount = 0;
 
   for (const block of blocks) {
-    const team = block.team || `Team ${++teamCount}`;
+    // Named at the END of the block, once it is known whether anybody in it is
+    // actually on the roster. A block of nothing but words — "Game tonight 8pm"
+    // above a blank line — would otherwise take "Team 1" and push the two real
+    // sides to Team 2 and Team 3, which is three sides, and three sides is a
+    // tournament: held out of every match table on the Results screen.
+    const blockStart = rows.length;
+    let anyMatched = false;
     let pendingCaptainFor = null;     // index of last real token (for trailing "(C)")
     for (let raw of block.tokens) {
       // The comma comes off FIRST. "Rony (C), Khilji" splits into "Rony" and
@@ -231,9 +256,10 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
       // token with a digit is junk unless it is somebody.
       if (!player && /\d/.test(raw)) continue;
 
+      if (player) anyMatched = true;
       const r = {
         token: raw,
-        team,
+        team: block.team,        // filled in below for a block with no name
         is_captain: isCapt,
         player_id: player ? player.id : null,
         display_name: player ? player.name : raw,
@@ -250,6 +276,39 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
 
       rows.push(r);
       pendingCaptainFor = rows.length - 1;
+    }
+
+    // A block that named itself keeps that name whatever is in it. One that
+    // did not is a side only if somebody on the roster is in it; otherwise its
+    // words belong to no side, which is what they are.
+    if (!block.team && rows.length > blockStart) {
+      const name = anyMatched ? `Team ${++teamCount}` : '';
+      for (let i = blockStart; i < rows.length; i++) rows[i].team = name;
+    }
+  }
+
+  /**
+   * Last resort: two armbands and one side is not a game.
+   *
+   * A roster with no colours AND no blank line between the sides leaves
+   * everybody in one block, and the cost of that is not cosmetic — a game
+   * with one side has no opponent, so the result credits all twelve players
+   * with the win. One captain per side is the one thing about a football
+   * team this app can rely on, so where exactly two are marked and only one
+   * side came out, the second armband starts the second side.
+   *
+   * Guarded by the shape of the result: the club writes the captain first,
+   * and a split that leaves five against one means they did not, so it is
+   * refused and the block is left as it was. Wrong-but-unchanged beats
+   * wrong-and-rearranged.
+   */
+  const captainAt = rows.map((r, i) => (r.is_captain ? i : -1)).filter(i => i >= 0);
+  if (new Set(rows.map(r => r.team).filter(Boolean)).size === 1 && captainAt.length === 2) {
+    const cut = captainAt[1];
+    const a = cut;
+    const b = rows.length - cut;
+    if (a >= 2 && b >= 2 && Math.abs(a - b) <= 2) {
+      rows.forEach((r, i) => { r.team = i < cut ? 'Team 1' : 'Team 2'; });
     }
   }
 
@@ -327,7 +386,9 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
     rates_configured: configuredRates,
     rates_missing: configuredRates === 0,
     all_amounts_zero: allZero,
-    teams: [...new Set(rows.map(r => r.team))],
+    // Falsy filtered: a row whose block named no side and matched nobody has
+    // no team, and an empty string is not a side to be counted as one.
+    teams: [...new Set(rows.map(r => r.team).filter(Boolean))],
     rows,
     unmatched: unmatchedWithSuggestions,
     // Players appearing more than once. Non-empty means the game cannot be
