@@ -316,14 +316,22 @@ for (const g of db.prepare(
 function readScore(text) {
   const t = String(text || '').toLowerCase();
   if (/\b(draw|drew|tie|tied|even)\b/.test(t)) return 'draw';
-  const m = t.match(/\b([a-z]+)\s*(?:team\s*)?(?:win|wins|won)\b/)          // Blue win 7-5
-    || t.match(/\b(?:win|wins|won)\s*(?:by|for|to)?\s*(?:the\s+)?([a-z]+)/) // won by Blue
-    || t.match(/\d+\s*[-–:]\s*\d+\s*(?:to\s*)?(?:the\s+)?([a-z]+)/);        // 12-9 to the blues
-  return m ? m[1] : null;
+  // The trailing \d* is not decoration: a side with no colour marked is called
+  // "Team 2", and [a-z]+ stops dead at the space before the digit.
+  const m = t.match(/\b([a-z]+\s*\d*)\s*(?:team\s*)?(?:win|wins|won)\b/)     // Blue win 7-5
+    || t.match(/\b(?:win|wins|won)\s*(?:by|for|to)?\s*(?:the\s+)?([a-z]+\s*\d*)/) // won by Blue
+    || t.match(/\d+\s*[-–:]\s*\d+\s*(?:to\s*)?(?:the\s+)?([a-z]+)/);         // 12-9 to the blues
+  return m ? m[1].trim() : null;
 }
-// "Blue" on the charge and "BLUES" in the sentence are the same side.
+/* "Blue" on the charge and "BLUES" in the sentence are the same side.
+   "Team 1" and "Team 2" are NOT, and this said they were: stripping every
+   character that is not a letter threw away the only thing telling them
+   apart, so both folded to "team" and every player in such a game counted as
+   a winner. That is not a quibble — 8 October has no colours, and this check
+   went on agreeing that the losing six had won after the app had been
+   corrected. Digits are part of a side's name. */
 const sameSide = (a, b) => {
-  const n = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '').replace(/s$/, '');
+  const n = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
   return !!n(a) && n(a) === n(b);
 };
 
