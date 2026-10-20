@@ -376,40 +376,15 @@
               <button type="submit" class="btn mt">Add contribution</button>
             </form>
           </div>
-          <!-- Money that moves without a game: the pot paying somebody, somebody
-               paying into it, or credit moved between two players. -->
-          <div class="sams-card role-admin-only">
-            <div class="card-header"><h3 class="card-title">Move money</h3>
-              <span class="card-sub">Between a player and the kitty, or between two players</span></div>
-            <form id="moveForm">
-              <div class="form-row">
-                <div class="form-group"><label>Take it out of</label><select id="mv_from"></select></div>
-                <div class="form-group"><label>Put it into</label><select id="mv_to"></select></div>
-              </div>
-              <div class="form-row mt">
-                <div class="form-group"><label>Amount (AED)</label>
-                  <input type="number" id="mv_amount" step="1" placeholder="120"></div>
-                <div class="form-group"><label>Date</label><input type="date" id="mv_date"></div>
-              </div>
-              <div class="form-row mt">
-                <div class="form-group"><label>Which balance it moves on</label>
-                  <select id="mv_contract"></select>
-                  <p class="hint" style="margin:0.3rem 0 0" id="mv_contract_note"></p></div>
-                <div class="form-group"><label>What for</label>
-                  <input type="text" id="mv_note" placeholder="e.g. reimbursed for the shirts"></div>
-              </div>
-              <!-- What this will do, in the words the cashier would use, with
-                   the two balances before and after. The form had three
-                   dropdowns and no answer to "so which balance goes down". -->
-              <div class="mv-preview mt" id="mv_preview" hidden></div>
-              <button type="submit" class="btn mt">Move it</button>
-            </form>
-            <div id="mvLog" class="mt"></div>
-          </div>
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Contributions log</h3>
               <div style="display:flex; gap:0.5rem; align-items:center;">
                 <select id="contribFilter" style="width:auto;"><option value="">All players</option></select>
+                <!-- Behind a button: one movement has been recorded in the
+                     club history against thirty-five payments, and its form
+                     was taking half this screen. -->
+                <button class="btn btn-secondary btn-sm role-admin-only" id="openMoveMoney"
+                  title="Between a player and the kitty, or between two players">⇄ Move money</button>
               </div></div>
             <div class="table-scroll">
               <table class="sams-table" id="contribTable">

@@ -789,6 +789,30 @@ export function initSchema() {
       }
     },
 
+    /*
+     * paid_by — who handed the money over, when that is not whose balance it
+     * lands on.
+     *
+     * Abhi pays 175 and wants 75 of it on Nihas's balance and 43 on Shone's.
+     * The only way to record that was to credit Nihas and Shone and type
+     * "from Abhi" into the comment, which is how the log actually reads
+     * today — "Nihas 75 from Abhi", "Shone 43 from Abhi", "Got 355 from
+     * Charles and 303 from Rakesh". Three of thirty-five payments, with the
+     * payer's name living in prose: nothing on Abhi's own record says he
+     * paid anything, and nothing can be counted or checked.
+     *
+     * It changes no balance. Which balance a payment credits is still
+     * player_id, so every ledger query is correct untouched; this only says
+     * whose hand it came out of.
+     */
+    () => {
+      const cols = db.prepare('PRAGMA table_info(contributions)').all().map(c => c.name);
+      if (!cols.includes('paid_by')) {
+        db.exec('ALTER TABLE contributions ADD COLUMN paid_by TEXT REFERENCES players(id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_contrib_paidby ON contributions(paid_by)');
+      }
+    },
+
     // Games that predate the contract's baseline and never billed anybody were
     // tracked on the credit sheets, not in here. They carry a charge row per
     // player worth 0 — an attendance record — and the opening balance already

@@ -19,17 +19,35 @@ import { esc, money, balCell } from '../util.js';
  * again — the point of the line under the box is that it keeps up with typing.
  */
 export function allocRowsHtml(lines) {
-  return lines.map(l => `
-    <div class="alloc-row" data-balance="${l.balance}" data-cost="${l.cost_per_game}">
+  return lines.map(l => allocRowHtml(l)).join('');
+}
+
+/**
+ * One row of "where this money goes".
+ *
+ * `for_player` is set when the row credits SOMEBODY ELSE — Abhi pays 175 and
+ * 75 of it belongs on Nihas's balance. The money still lands on one person's
+ * one contract, which is why it is the same row shape; the only difference
+ * is whose name is on it, and that the row can be taken off again.
+ */
+export function allocRowHtml(l) {
+  const other = l.for_player_id ? ` <span class="alloc-for">for ${esc(l.for_player)}</span>` : '';
+  return `
+    <div class="alloc-row" data-balance="${l.balance || 0}" data-cost="${l.cost_per_game || 0}">
       <input type="hidden" data-split-contract value="${esc(l.contract_id)}">
+      ${l.for_player_id
+    ? `<input type="hidden" data-split-for value="${esc(l.for_player_id)}">` : ''}
       <div class="alloc-name">
-        <strong>${esc(l.contract_name)}</strong>
-        <span class="hint" data-split-why>${esc(l.why)}</span>
+        <strong>${esc(l.contract_name)}${other}</strong>
+        <span class="hint" data-split-why>${esc(l.why || '')}</span>
       </div>
-      <div class="alloc-now"><span class="hint">now</span> ${balCell(l.balance)}</div>
+      <div class="alloc-now"><span class="hint">now</span> ${balCell(l.balance || 0)}</div>
       <input type="number" data-split-amount step="1" class="alloc-amt"
-        value="${l.suggested}" aria-label="Amount for ${esc(l.contract_name)}">
-    </div>`).join('');
+        value="${l.suggested ?? 0}" aria-label="Amount for ${esc(l.contract_name)}">
+      ${l.for_player_id
+    ? '<button type="button" class="link-btn" data-split-drop title="Take this off">✕</button>'
+    : ''}
+    </div>`;
 }
 
 /**
@@ -70,6 +88,9 @@ export function refreshAllocs(host, total, sumEl) {
 export function readAllocs(host) {
   return [...host.querySelectorAll('.alloc-row')].map(row => ({
     contract_id: row.querySelector('[data-split-contract]')?.value || '',
+    // Null when the row is for the payer themselves, which is the ordinary
+    // case and what the caller already knows.
+    for_player_id: row.querySelector('[data-split-for]')?.value || null,
     amount: Math.round(Number(row.querySelector('[data-split-amount]')?.value) || 0),
   })).filter(s => s.contract_id && s.amount > 0);
 }

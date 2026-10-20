@@ -310,9 +310,21 @@ export const statsRepo = {
       FROM opening_balances_snapshot WHERE player_id = ? AND contract_id = ?`)
       .get(playerId, contractId);
 
+    // Money they handed over for other people. It changes no balance of
+    // theirs — which is exactly why it has to be said somewhere, or the only
+    // record that Abhi paid 118 towards Nihas and Shone is a sentence in
+    // somebody else's comment.
+    const forOthers = db.prepare(`SELECT q.amount, q.date, p.name AS for_player,
+        c.name AS contract_name
+      FROM contributions q JOIN players p ON p.id = q.player_id
+      LEFT JOIN contracts c ON c.id = q.contract_id
+      WHERE q.paid_by = ? AND q.historical = 0
+      ORDER BY q.date DESC`).all(playerId);
+
     return {
       opening: opening?.opening_balance || 0,
       opening_source: snap ? { locked_at: snap.locked_at, notes: snap.notes } : null,
+      paid_for_others: forOthers,
       events,
       presentBalance: balance,
       ledgerBalance,

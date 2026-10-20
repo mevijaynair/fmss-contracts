@@ -1681,3 +1681,11 @@ tr:hover > td .res-open, .res-row:hover .res-open {
 .st-total .num { font-weight: 700; }
 .st-fallback { display: block; width: 100%; min-height: 10rem; margin-top: 0.6rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+
+/* The "some of it is for someone else" row under the allocation panel. */
+.alloc-add { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+  margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px dashed var(--border-color); }
+.alloc-add select { width: auto; flex: 1 1 8rem; min-width: 7rem;
+  font-size: 0.85rem; padding: 0.35rem 0.5rem; }
+/* Whose balance a row credits, when it is not the person paying. */
+.alloc-for { font-weight: 600; color: var(--sport-on-soft); }

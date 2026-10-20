@@ -5,7 +5,8 @@ import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl,
   openModal, closeModal } from '../util.js';
-import { allocRowsHtml, refreshAllocs, readAllocs, splitGroupFor } from './split_panel.js';
+import { allocRowsHtml, allocRowHtml, refreshAllocs, readAllocs,
+  splitGroupFor } from './split_panel.js';
 
 function contractName(id) {
   return store.contracts.find(c => c.id === id)?.name.split(' ')[0] || (id || '—');
@@ -82,7 +83,12 @@ async function renderLog() {
     return `
     <tr style="${c.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(c.date))}</td>
-      <td>${moved ? movementWho(c) : esc(c.player_name || c.name_raw || '—')}</td>
+      <td>${moved ? movementWho(c) : `${esc(c.player_name || c.name_raw || '—')}${
+  // Whose hand it came out of, where that is not whose balance it landed
+  // on. This used to live in the comment as prose — "Nihas 75 from Abhi".
+  c.paid_by_name
+    ? ` <span class="mv-other" title="Handed over by ${esc(c.paid_by_name)}">← ${
+      esc(c.paid_by_name)}</span>` : ''}`}</td>
       <td>${esc(contractName(c.contract_id))}</td>
       <td class="num">${balCell(c.amount)}</td>
       <td>${moved
@@ -335,10 +341,20 @@ function initAdmin() {
     </div>
     <p class="hint" id="splitWhy"></p>
     <div id="splitRows"></div>
-    <p class="hint" id="splitSum"></p>`;
+    <p class="hint" id="splitSum"></p>
+    <!-- Abhi hands over 175 and 118 of it is for Nihas and Shone. Until now
+         the only way to record that was to credit them and type "from Abhi"
+         in the comment, which left nothing at all on Abhi's own record. -->
+    <div class="alloc-add">
+      <span class="hint">Some of it is for someone else?</span>
+      <select id="splitForWho" aria-label="Pay towards another player"></select>
+      <select id="splitForContract" aria-label="Which of their balances"></select>
+      <button type="button" class="btn btn-secondary btn-sm" id="splitAddWho">Add</button>
+    </div>`;
   contribForm.insertBefore(panel, contribForm.querySelector('button[type="submit"]'));
 
   $('splitReset').addEventListener('click', () => drawSplit(lastSuggestion, true));
+  $('splitAddWho').addEventListener('click', addSomeoneElse);
   $('cf_player').addEventListener('change', askForSuggestion);
   $('cf_amount').addEventListener('input', askForSuggestion);
 
@@ -381,16 +397,23 @@ function initAdmin() {
         // "1 of 300 split 1 way" everywhere it is read would be noise.
         const group = splitGroupFor(splits);
         for (const split of splits) {
+          // A row naming somebody else credits THEIR balance, and records
+          // whose hand the money came out of. Nothing of it lands on the
+          // payer: that is the whole point of the row.
           await api.createContribution({
-            player_id: playerId,
+            player_id: split.for_player_id || playerId,
             contract_id: split.contract_id,
             amount: split.amount,
+            paid_by: split.for_player_id ? playerId : null,
             date, comments, split_group: group,
           });
         }
-        toast(splits.length > 1
-          ? `${money(totalAmount)} split across ${splits.length} contracts ✓`
-          : 'Contribution added ✓');
+        const others = splits.filter(s => s.for_player_id).length;
+        toast(others
+          ? `${money(totalAmount)} recorded — ${others} part${others === 1 ? '' : 's'} on somebody else's balance ✓`
+          : splits.length > 1
+            ? `${money(totalAmount)} split across ${splits.length} contracts ✓`
+            : 'Contribution added ✓');
         $('cf_amount').value = ''; $('cf_comments').value = '';
         askForSuggestion();
         renderLog();
@@ -450,6 +473,59 @@ function askForSuggestion() {
   }, 250);
 }
 
+/** A row crediting somebody other than the person who handed the money over. */
+async function addSomeoneElse() {
+  const who = $('splitForWho').value;
+  const cid = $('splitForContract').value;
+  const rows = document.getElementById('splitRows');
+  if (!who || !cid || !rows) return;
+  if (who === $('cf_player').value) {
+    toast('That is the person paying — their own share is already a row', true);
+    return;
+  }
+  if (rows.querySelector(`[data-split-for][value="${CSS.escape(who)}"]`)
+    && [...rows.querySelectorAll('.alloc-row')].some(r =>
+      r.querySelector('[data-split-for]')?.value === who
+      && r.querySelector('[data-split-contract]')?.value === cid)) {
+    toast('That balance is already on the list', true);
+    return;
+  }
+
+  // Their current balance, so the row can say what the payment does to it —
+  // the same thing every other row says.
+  let balance = 0;
+  try {
+    const ls = await api.get(`/players/${who}/ledgers`) || [];
+    balance = Number(ls.find(l => l.contract_id === cid)?.present_balance) || 0;
+  } catch { /* the row still works, it just cannot show the consequence */ }
+
+  rows.insertAdjacentHTML('beforeend', allocRowHtml({
+    contract_id: cid,
+    contract_name: contractName(cid),
+    for_player_id: who,
+    for_player: store.players.find(p => p.id === who)?.name || who,
+    balance,
+    cost_per_game: 0,
+    suggested: 0,
+    why: '',
+  }));
+  wireSplitRows();
+  updateSplitTotal();
+}
+
+/** (Re)attach the handlers every allocation row needs. */
+function wireSplitRows() {
+  const rows = document.getElementById('splitRows');
+  if (!rows) return;
+  rows.querySelectorAll('[data-split-amount]').forEach((el) => {
+    el.removeEventListener('input', updateSplitTotal);
+    el.addEventListener('input', updateSplitTotal);
+  });
+  rows.querySelectorAll('[data-split-drop]').forEach(b => {
+    b.onclick = () => { b.closest('.alloc-row').remove(); updateSplitTotal(); };
+  });
+}
+
 /**
  * Draw the panel. `fresh` fills the boxes from the suggestion; without it the
  * numbers already typed are left alone and only the workings are redrawn.
@@ -466,15 +542,11 @@ function drawSplit(s, fresh = false) {
     return;
   }
 
-  // One contract in play: no panel at all, just point the contract picker at
-  // it. A split form offering one row is a question with one answer.
-  if (s.lines.length === 1) {
-    panel.hidden = true;
-    $('cf_contract').value = s.lines[0].contract_id;
-    $('cf_contract').disabled = false;
-    return;
-  }
-
+  // Shown even for a single contract now. It used to hide, on the grounds
+  // that a split form offering one row is a question with one answer — but
+  // the panel is no longer only about splitting across contracts. It is
+  // where money is sent to somebody else, and that question has an answer
+  // worth asking however many contracts the payer is on.
   panel.hidden = false;
   // Two answers to "which contract" on one form is one too many: while the
   // split is open, the picker above it decides nothing.
@@ -483,10 +555,27 @@ function drawSplit(s, fresh = false) {
 
   if (fresh) {
     rows.innerHTML = allocRowsHtml(s.lines);
-    rows.querySelectorAll('[data-split-amount]').forEach(el =>
-      el.addEventListener('input', updateSplitTotal));
+    wireSplitRows();
   }
+  fillSomeoneElsePickers();
   updateSplitTotal();
+}
+
+/** The two pickers under the rows: who else, and which of their balances. */
+function fillSomeoneElsePickers() {
+  const who = $('splitForWho');
+  const cid = $('splitForContract');
+  if (!who || !cid) return;
+  const payer = $('cf_player').value;
+  const keep = who.value;
+  who.innerHTML = '<option value="">someone else…</option>'
+    + rosterOptions(store.players.filter(p =>
+      p.id !== payer && p.special_role !== 'cashier'), '', { includeGuests: false });
+  if (keep) who.value = keep;
+  if (!cid.options.length) {
+    cid.innerHTML = (store.contracts || [])
+      .map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  }
 }
 
 /**
@@ -811,6 +900,51 @@ async function renderMovements() {
     }));
 }
 
+/**
+ * Move money, on demand rather than permanently on screen.
+ *
+ * This was a card with six fields, a live preview and a log of its own,
+ * sitting under the payment form on every visit. One movement has ever been
+ * recorded, against thirty-five payments — it was half a screen of controls
+ * for something done once a year, and it is most of what made this page
+ * hard to read. The form is unchanged; it just waits to be asked for.
+ */
+export function moveMoneyModal() {
+  openModal('Move money', `
+    <p class="hint">Between a player and the kitty, or between two players.
+      This is not a payment into the club — it is money that already exists
+      changing hands.</p>
+    <form id="moveForm" class="mt">
+      <div class="form-row">
+        <div class="form-group"><label for="mv_from">Take it out of</label>
+          <select id="mv_from"></select></div>
+        <div class="form-group"><label for="mv_to">Put it into</label>
+          <select id="mv_to"></select></div>
+      </div>
+      <div class="form-row mt">
+        <div class="form-group"><label for="mv_amount">Amount (AED)</label>
+          <input type="number" id="mv_amount" step="1" placeholder="120"></div>
+        <div class="form-group"><label for="mv_date">Date</label>
+          <input type="date" id="mv_date"></div>
+      </div>
+      <div class="form-row mt">
+        <div class="form-group"><label for="mv_contract">Which balance it moves on</label>
+          <select id="mv_contract"></select>
+          <p class="hint" style="margin:0.3rem 0 0" id="mv_contract_note"></p></div>
+        <div class="form-group"><label for="mv_note">What for</label>
+          <input type="text" id="mv_note" placeholder="e.g. reimbursed for the shirts"></div>
+      </div>
+      <div class="mv-preview mt" id="mv_preview" hidden></div>
+      <button type="submit" class="btn mt">Move it</button>
+    </form>
+    <h4 class="mini-h mt">Moved before</h4>
+    <div id="mvLog"></div>`, { wide: true });
+
+  fillMoveSelects();
+  initMoveMoney();
+  renderMovements();
+}
+
 function initMoveMoney() {
   const form = $('moveForm');
   if (!form) return;
@@ -848,7 +982,9 @@ function initMoveMoney() {
 export function initContributions() {
   if (isPlayer()) return;   // player UI is built lazily on first load
   initAdmin();
-  initMoveMoney();
+  // The move form is built when the button is pressed, so there is nothing
+  // to wire here — only the button that asks for it.
+  $('openMoveMoney')?.addEventListener('click', moveMoneyModal);
 }
 
 export function loadContributions() {
@@ -857,6 +993,5 @@ export function loadContributions() {
     return renderMyContributions();
   }
   fillSelects();
-  fillMoveSelects();
-  return Promise.all([renderPendingApprovals(), renderLog(), renderMovements(), renderRemoved()]);
+  return Promise.all([renderPendingApprovals(), renderLog(), renderRemoved()]);
 }

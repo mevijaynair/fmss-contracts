@@ -1438,6 +1438,61 @@ test('a payment cannot be put back twice', () => {
   assert.equal(balanceOf(p), 90, 'the second attempt credits nothing');
 });
 
+test('one person can pay towards another, without it touching their own balance', () => {
+  // Abhi hands over 175: 75 of it belongs on Nihas's balance, 43 on Shone's,
+  // and the rest on his own. Until now that was three credits with "from
+  // Abhi" typed into the comment, and nothing at all on Abhi's record.
+  const abhi = player('Abhi pays', 0);
+  const nihas = player('Nihas gets', 0);
+  const shone = player('Shone gets', 0);
+  const group = 'grp_abhi_175';
+  const common = { date: '2026-07-10', contract_id: CONTRACT, split_group: group };
+  contributionsRepo.create({ ...common, player_id: nihas, amount: 75, paid_by: abhi });
+  contributionsRepo.create({ ...common, player_id: shone, amount: 43, paid_by: abhi });
+  contributionsRepo.create({ ...common, player_id: abhi, amount: 57 });
+
+  assert.equal(balanceOf(nihas), 75, "it lands on the other player's balance");
+  assert.equal(balanceOf(shone), 43);
+  assert.equal(balanceOf(abhi), 57, 'and only his own share lands on his');
+
+  // On their rows it says whose hand it came out of.
+  const row = contributionsRepo.all({ playerId: nihas })[0];
+  assert.equal(row.paid_by, abhi);
+  assert.equal(row.paid_by_name, 'Abhi pays');
+
+  // And on his, the money he will never see credited anywhere.
+  const mine = contributionsRepo.paidForOthers(abhi);
+  assert.equal(mine.length, 2, 'both the parts that went elsewhere');
+  assert.equal(mine.reduce((s, r) => s + r.amount, 0), 118);
+  assert.deepEqual(mine.map(r => r.for_player).sort(), ['Nihas gets', 'Shone gets']);
+  assert.equal(contributionsRepo.paidForOthers(nihas).length, 0,
+    'the person credited did not pay for anybody');
+
+  // The statement is where he actually reads it, and it must not pretend the
+  // 118 moved his balance.
+  const t = statsRepo.playerTimeline(abhi, CONTRACT);
+  assert.equal(t.reconciles, true);
+  assert.equal(t.presentBalance, 57);
+  assert.equal(t.paid_for_others.length, 2);
+});
+
+test('paying towards yourself is just paying', () => {
+  // paid_by equal to the player is the ordinary case, and storing it would
+  // put "← themselves" on thirty-two rows to be useful on three.
+  const p = player('Self payer', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 50, date: '2026-07-11', paid_by: p });
+  assert.equal(c.paid_by, null);
+  assert.equal(contributionsRepo.paidForOthers(p).length, 0);
+});
+
+test('a payment cannot name a payer who does not exist', () => {
+  const p = player('Credited', 0);
+  assert.throws(() => contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 10, date: '2026-07-12', paid_by: 'nobody_at_all' }), /No such player/);
+  assert.equal(balanceOf(p), 0, 'and nothing was written');
+});
+
 test('a payment that is not split carries no peers', () => {
   const p = player('Not split', 0);
   contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 120,
