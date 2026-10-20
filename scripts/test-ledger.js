@@ -1336,6 +1336,108 @@ test('a split payment says which contract the rest of it went to', () => {
     'and is still named');
 });
 
+test('removing a payment takes it off the balance and keeps it recoverable', () => {
+  // One click on the X used to destroy a payment outright. It now moves to a
+  // bin: the balance has to drop exactly as it always did, and the row has to
+  // be genuinely gone from every reader — not hidden behind a flag that
+  // fourteen queries would each have to remember.
+  const p = player('Removable', 0);
+  // TWO payments, deliberately. With one, "delete the row named" and "delete
+  // everything this player ever paid" are the same statement, and a test
+  // that cannot tell them apart is not watching the dangerous one.
+  const keep = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 100, date: '2026-07-03', comments: 'keep me' });
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 250, date: '2026-07-04', comments: 'cash' });
+  assert.equal(balanceOf(p), 350);
+
+  contributionsRepo.remove(c.id, { reason: 'entered twice' });
+  assert.equal(balanceOf(p), 100, 'the balance falls by that payment and no other');
+  const left = contributionsRepo.all({ playerId: p });
+  assert.equal(left.length, 1, 'and only the one named is gone');
+  assert.equal(left[0].id, keep.id);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM contributions WHERE id=?').get(c.id).n, 0,
+    'out of the table every other query reads, not flagged in it');
+  assert.equal(statsRepo.playerTimeline(p, CONTRACT).reconciles, true,
+    'and the statement still ties out');
+
+  const bin = contributionsRepo.removed({ days: 14 });
+  assert.equal(bin.length, 1);
+  assert.equal(bin[0].reason, 'entered twice', 'with the reason it was given');
+  assert.equal(bin[0].amount, 250);
+});
+
+test('a removed payment goes back exactly as it was', () => {
+  const p = player('Restorable', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 180, date: '2026-07-05', comments: 'bank', split_group: 'grp_restore' });
+  contributionsRepo.remove(c.id, { reason: 'wrong player' });
+  assert.equal(balanceOf(p), 0);
+
+  const back = contributionsRepo.restore(c.id, { reason: 'it was the right player after all' });
+  assert.equal(balanceOf(p), 180, 'the balance comes back');
+  assert.equal(back.id, c.id, 'the same row, so a split keeps its group');
+  assert.equal(back.split_group, 'grp_restore');
+  assert.equal(back.amount, 180);
+  assert.equal(back.date, '2026-07-05');
+  assert.match(back.comments, /^bank · put back/, 'and says on its face that it came back');
+  assert.equal(contributionsRepo.removed({ days: 14 }).find(r => r.id === c.id), undefined,
+    'and it is out of the bin');
+});
+
+test('a removal without a reason is refused', () => {
+  // The reason is the answer to the only question a restored payment ever
+  // raises, and now is the only moment anybody knows it.
+  const p = player('No reason', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 60, date: '2026-07-06' });
+  assert.throws(() => contributionsRepo.remove(c.id, { reason: '  ' }), /Say why/);
+  assert.equal(balanceOf(p), 60, 'and nothing moved');
+  assert.throws(() => contributionsRepo.remove('no_such_payment', { reason: 'x' }),
+    /no longer on the list/);
+});
+
+test('a removal that moved more than the payment rolls back whole', () => {
+  // The balance after a removal has to be the balance before, less that
+  // payment. Nothing in ordinary use can break that, which is why the check
+  // is worth proving: a trigger makes the delete disturb a second payment —
+  // the shape a careless WHERE clause would take — and the whole removal has
+  // to come back, the bin row with it.
+  const p = player('Rollback', 0);
+  contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 100,
+    date: '2026-07-08' });
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 40,
+    date: '2026-07-09' });
+  assert.equal(balanceOf(p), 140);
+
+  db.exec(`CREATE TRIGGER test_delete_spills AFTER DELETE ON contributions
+           BEGIN UPDATE contributions SET amount = amount + 5
+                 WHERE player_id = OLD.player_id; END`);
+  try {
+    assert.throws(() => contributionsRepo.remove(c.id, { reason: 'try it' }),
+      /Refusing: the balance would go to/);
+  } finally {
+    db.exec('DROP TRIGGER test_delete_spills');
+  }
+
+  assert.equal(balanceOf(p), 140, 'nothing moved');
+  assert.equal(contributionsRepo.all({ playerId: p }).length, 2, 'both payments still there');
+  assert.equal(contributionsRepo.removed({ days: 14 }).filter(r => r.id === c.id).length, 0,
+    'and nothing was left behind in the bin');
+});
+
+test('a payment cannot be put back twice', () => {
+  const p = player('Once only', 0);
+  const c = contributionsRepo.create({ player_id: p, contract_id: CONTRACT,
+    amount: 90, date: '2026-07-07' });
+  contributionsRepo.remove(c.id, { reason: 'mistake' });
+  contributionsRepo.restore(c.id, { reason: 'undo' });
+  assert.equal(balanceOf(p), 90);
+  assert.throws(() => contributionsRepo.restore(c.id, { reason: 'again' }),
+    /not in the removed list/);
+  assert.equal(balanceOf(p), 90, 'the second attempt credits nothing');
+});
+
 test('a payment that is not split carries no peers', () => {
   const p = player('Not split', 0);
   contributionsRepo.create({ player_id: p, contract_id: CONTRACT, amount: 120,

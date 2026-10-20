@@ -87,7 +87,9 @@ export const api = {
     `/contributions/suggest?player_id=${encodeURIComponent(playerId)}&amount=${amount}`),
   splitSiblings: (groupId) => req('GET', `/contributions/split/${groupId}`),
   editContribution: (id, patch) => req('PUT', `/contributions/${id}`, patch),
-  deleteContribution: (id) => req('DELETE', `/contributions/${id}`),
+  deleteContribution: (id, reason) => req('DELETE', `/contributions/${id}`, { reason }),
+  removedContributions: (days = 14) => req('GET', `/contributions/removed?days=${days}`),
+  restoreContribution: (id, reason) => req('POST', `/contributions/${id}/restore`, { reason }),
 
   kitty: () => req('GET', '/kitty'),
   createKitty: (k) => req('POST', '/kitty', k),

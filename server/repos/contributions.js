@@ -408,7 +408,111 @@ export const contributionsRepo = {
     return db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
   },
 
-  remove(id) {
-    db.prepare('DELETE FROM contributions WHERE id = ?').run(id);
+  /**
+   * Take a payment off a balance, reversibly.
+   *
+   * One click used to destroy it. The row now moves to contributions_removed
+   * whole, so the balance drops exactly as it always did — every query that
+   * reads contributions simply stops seeing it — and it can be put back as
+   * the row it was rather than retyped from memory.
+   *
+   * A reason is required. The question a restored or missing payment always
+   * raises is "why was that taken off", and the only moment anybody knows
+   * the answer is now.
+   */
+  remove(id, { reason = '', by = 'admin' } = {}) {
+    const row = db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
+    if (!row) throw new Error('That payment is no longer on the list');
+    if (!String(reason).trim()) throw new Error('Say why it is being removed');
+
+    const before = row.player_id
+      ? round2(ledgersRepo.get(row.player_id, row.contract_id)?.present_balance ?? 0) : 0;
+    const name = row.player_id
+      ? (db.prepare('SELECT name FROM players WHERE id=?').get(row.player_id)?.name || '')
+      : (row.name_raw || '');
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`INSERT INTO contributions_removed
+        (id, player_id, player_name, contract_id, amount, date, removed_at, removed_by, reason, payload)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        row.id, row.player_id, name, row.contract_id, row.amount, row.date,
+        new Date().toISOString(), by, String(reason).trim(), JSON.stringify(row));
+      db.prepare('DELETE FROM contributions WHERE id = ?').run(id);
+
+      // The balance has to fall by the payment and by nothing else. An
+      // imported row is already inside the opening balance and moves
+      // nothing, which is why the expected change is read from the row.
+      if (row.player_id) {
+        const after = round2(ledgersRepo.get(row.player_id, row.contract_id)?.present_balance ?? 0);
+        const want = round2(before - (row.historical ? 0 : row.amount));
+        if (after !== want) {
+          throw new Error(`Refusing: the balance would go to ${after}, not ${want}`);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return { ok: true, id, amount: row.amount };
+  },
+
+  /** Payments taken off recently, newest first — the window to undo one in. */
+  removed({ days = 14 } = {}) {
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    return db.prepare(`SELECT id, player_id, player_name, contract_id, amount, date,
+        removed_at, removed_by, reason
+      FROM contributions_removed WHERE removed_at >= ?
+      ORDER BY removed_at DESC`).all(since);
+  },
+
+  /** Put one back, exactly as it was. */
+  restore(id, { reason = '' } = {}) {
+    const gone = db.prepare('SELECT * FROM contributions_removed WHERE id = ?').get(id);
+    if (!gone) throw new Error('That payment is not in the removed list');
+    let row;
+    try { row = JSON.parse(gone.payload); }
+    catch { throw new Error('The stored copy of that payment cannot be read'); }
+
+    // The player or the contract may have gone in the meantime, and putting
+    // the row back would fail on the foreign key with nothing useful said.
+    if (row.player_id && !db.prepare('SELECT id FROM players WHERE id=?').get(row.player_id)) {
+      throw new Error(`${gone.player_name || row.player_id} is no longer on the roster`);
+    }
+    if (row.contract_id && !db.prepare('SELECT id FROM contracts WHERE id=?').get(row.contract_id)) {
+      throw new Error(`There is no longer a ${row.contract_id} contract`);
+    }
+
+    const before = row.player_id
+      ? round2(ledgersRepo.get(row.player_id, row.contract_id)?.present_balance ?? 0) : 0;
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (row.player_id && row.contract_id) ledgersRepo.ensure(row.player_id, row.contract_id);
+      const cols = Object.keys(row);
+      db.prepare(`INSERT INTO contributions (${cols.join(',')})
+        VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map(c => row[c]));
+      db.prepare('DELETE FROM contributions_removed WHERE id = ?').run(id);
+
+      if (row.player_id) {
+        const after = round2(ledgersRepo.get(row.player_id, row.contract_id)?.present_balance ?? 0);
+        const want = round2(before + (row.historical ? 0 : row.amount));
+        if (after !== want) {
+          throw new Error(`Refusing: the balance would go to ${after}, not ${want}`);
+        }
+      }
+      // Said out loud in the log, because a payment reappearing on a balance
+      // weeks later is otherwise indistinguishable from one entered twice.
+      const note = String(reason).trim();
+      db.prepare('UPDATE contributions SET comments = ? WHERE id = ?').run(
+        `${row.comments ? `${row.comments} · ` : ''}put back ${
+          new Date().toISOString().slice(0, 10)}${note ? `: ${note}` : ''}`, id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return db.prepare('SELECT * FROM contributions WHERE id = ?').get(id);
   },
 };

@@ -975,7 +975,22 @@ r.put('/contributions/:id', wrap((req) => {
     comments: req.body?.comments, date: req.body?.date,
   });
 }));
-r.delete('/contributions/:id', wrap((req) => { requireAdmin(req); contributionsRepo.remove(req.params.id); return { ok: true }; }));
+// Removing a payment moves it to the bin rather than destroying it, and says
+// why. See contributionsRepo.remove.
+r.delete('/contributions/:id', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.remove(req.params.id, {
+    reason: req.body?.reason || '', by: req.user?.id || 'admin',
+  });
+}));
+r.get('/contributions/removed', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.removed({ days: Math.min(90, Number(req.query.days) || 14) });
+}));
+r.post('/contributions/:id/restore', wrap((req) => {
+  requireAdmin(req);
+  return contributionsRepo.restore(req.params.id, { reason: req.body?.reason || '' });
+}));
 
 // ---- player self-service: submit contribution for approval ----
 r.get('/my/contributions', wrap((req) => {

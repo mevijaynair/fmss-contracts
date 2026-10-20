@@ -101,10 +101,8 @@ async function renderLog() {
   wireSplitNotes($('contribTable'));
 
   $('contribTable').querySelectorAll('[data-del]').forEach(b =>
-    b.addEventListener('click', async () => {
-      try { await api.deleteContribution(b.dataset.del); toast('Removed'); renderLog(); }
-      catch (e) { toast(e.message, true); }
-    }));
+    b.addEventListener('click', () => removeContributionModal(
+      rows.find(r => r.id === b.dataset.del))));
 
   // The same undo as the Move money list above. A movement has two halves and
   // the log shows both, so the confirmation says what the single ✕ does to the
@@ -124,6 +122,103 @@ async function renderLog() {
   $('contribTable').querySelectorAll('[data-edit]').forEach(b =>
     b.addEventListener('click', () => editContributionModal(
       rows.find(r => r.id === b.dataset.edit))));
+}
+
+/**
+ * Taking a payment off somebody's balance, with something in the way.
+ *
+ * This was a bare ✕ that deleted on the first click. A payment is the one
+ * entry a player disputes, and the mis-click costs real money off a real
+ * balance with nothing left on screen to say it ever existed.
+ *
+ * Three things stand in the way now: the figures are shown back, the balance
+ * it lands on is worked out before anything happens, and a reason is typed.
+ * The reason is not bureaucracy — it is the answer to the question a
+ * restored payment always raises, and this is the only moment anybody knows
+ * it.
+ */
+function removeContributionModal(c) {
+  if (!c) { toast('That payment is no longer on the list', true); return; }
+  if (c.historical) { toast('An imported payment cannot be removed', true); return; }
+  openModal('Remove this payment?', `
+    <div class="kv"><span class="k">Player</span>
+      <span class="v">${esc(c.player_name || c.name_raw || '—')}</span></div>
+    <div class="kv"><span class="k">Contract</span>
+      <span class="v">${esc(contractName(c.contract_id))}</span></div>
+    <div class="kv"><span class="k">Amount</span><span class="v">${money(c.amount)}</span></div>
+    <div class="kv"><span class="k">Dated</span><span class="v">${esc(fmtDate(c.date))}</span></div>
+    ${c.split_group ? `<p class="hint mt">This is one part of a payment of ${
+    money(c.split_total)}. The other part${c.split_parts === 2 ? '' : 's'} stay${
+    c.split_parts === 2 ? 's' : ''} where ${c.split_parts === 2 ? 'it is' : 'they are'} —
+      remove ${c.split_parts === 2 ? 'it' : 'them'} separately if the whole payment is wrong.</p>` : ''}
+    <p class="hint mt">Their ${esc(contractName(c.contract_id))} balance goes down by
+      <strong>${money(c.amount)}</strong>. Nothing is destroyed: it moves to the removed
+      list below the log, and can be put back from there.</p>
+    <div class="form-group mt"><label for="rm_why">Why is it being removed?</label>
+      <input type="text" id="rm_why" maxlength="200" autocomplete="off"
+        placeholder="e.g. entered twice, or the cash never arrived"></div>
+    <button class="btn btn-danger full-w mt" id="rm_go">Remove ${money(c.amount)}</button>`);
+
+  $('rm_go').addEventListener('click', async () => {
+    const why = $('rm_why').value.trim();
+    if (!why) { toast('Say why — it is the one thing nobody remembers later', true); return; }
+    try {
+      await api.deleteContribution(c.id, why);
+      closeModal();
+      toast(`${money(c.amount)} removed — it is in the removed list if that was wrong`);
+      renderLog();
+      renderRemoved();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
+/** The window to undo a removal in. Empty most of the time, and then absent. */
+async function renderRemoved() {
+  const host = $('removedLog');
+  if (!host) return;
+  let rows = [];
+  try { rows = await api.removedContributions(14); } catch { host.innerHTML = ''; return; }
+  if (!rows.length) { host.innerHTML = ''; return; }
+
+  host.innerHTML = `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">Removed recently</h3>
+        <span class="card-sub">${rows.length} payment${rows.length === 1 ? '' : 's'}
+          taken off in the last 14 days · nothing here is counted in any balance</span></div>
+      <div class="table-scroll">
+        <table class="sams-table">
+          <thead><tr><th>Removed</th><th>Player</th><th>Contract</th>
+            <th class="num">Amount</th><th>Why</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `
+            <tr>
+              <td class="num">${esc(String(r.removed_at).slice(0, 10))}</td>
+              <td>${esc(r.player_name || '—')}</td>
+              <td>${esc(contractName(r.contract_id))}</td>
+              <td class="num">${money(r.amount)}</td>
+              <td>${esc(r.reason || '—')} <span class="hint">dated ${esc(fmtDate(r.date))}</span></td>
+              <td class="row-actions"><button class="btn btn-secondary btn-sm"
+                data-restore="${esc(r.id)}">Put it back</button></td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <p class="hint">Older removals are kept too — they just stop showing here. Ask if you
+        need one back.</p>
+    </div>`;
+
+  host.querySelectorAll('[data-restore]').forEach(b =>
+    b.addEventListener('click', async () => {
+      const r = rows.find(x => x.id === b.dataset.restore);
+      const why = prompt(`Put ${money(r.amount)} back on ${r.player_name}'s `
+        + `${contractName(r.contract_id)} balance?\n\nIt was removed because: ${r.reason}`
+        + '\n\nWhy is it going back? (added to the payment\'s note)');
+      if (why === null) return;
+      try {
+        await api.restoreContribution(r.id, why);
+        toast(`${money(r.amount)} put back`);
+        renderLog();
+        renderRemoved();
+      } catch (e) { toast(e.message, true); }
+    }));
 }
 
 /**
@@ -763,5 +858,5 @@ export function loadContributions() {
   }
   fillSelects();
   fillMoveSelects();
-  return Promise.all([renderPendingApprovals(), renderLog(), renderMovements()]);
+  return Promise.all([renderPendingApprovals(), renderLog(), renderMovements(), renderRemoved()]);
 }

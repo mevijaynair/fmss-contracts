@@ -1073,6 +1073,49 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_att_host ON event_attendees(host_player_id)');
       }
     },
+    /*
+     * contributions_removed — the bin a deleted payment sits in.
+     *
+     * One click on ✕ took a payment off somebody's balance for good, with no
+     * confirmation and nothing to undo it. A removed payment is now moved
+     * here rather than destroyed, and can be put back exactly as it was.
+     *
+     * A SEPARATE TABLE, not a deleted_at flag on contributions. Fourteen
+     * queries across the repos, the routes, the audit and the fuzzer read
+     * that table, and a flag would have to be excluded in every one of them:
+     * the balance, the statement, the standing sheet, the export, the
+     * period report. Missing one would not break — it would quietly show a
+     * payment that no longer counts, or count one that is not shown. Moving
+     * the row out means every reader is correct without being touched, and
+     * the balance drops on removal exactly as it always has.
+     *
+     * payload is the whole original row as JSON, so a restore is the row
+     * that was taken away rather than a reconstruction of it — same id, so
+     * a split payment keeps its group.
+     *
+     * No foreign keys: this outlives the player and the contract on purpose.
+     * A row whose player has since been deleted is still a record of what
+     * happened, and an FK would make deleting that player fail instead.
+     */
+    () => {
+      try { db.prepare('SELECT id FROM contributions_removed LIMIT 1').get(); }
+      catch {
+        db.exec(`CREATE TABLE contributions_removed (
+          id          TEXT PRIMARY KEY,
+          player_id   TEXT,
+          player_name TEXT,
+          contract_id TEXT,
+          amount      REAL NOT NULL,
+          date        TEXT,
+          removed_at  TEXT NOT NULL,
+          removed_by  TEXT,
+          reason      TEXT NOT NULL DEFAULT '',
+          payload     TEXT NOT NULL
+        )`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_cr_when ON contributions_removed(removed_at)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_cr_player ON contributions_removed(player_id)');
+      }
+    },
   ];
   for (const mig of migrations) mig();
 }
