@@ -151,44 +151,41 @@ function applyRate(r, meta) {
   }
 }
 
-// Match player including nicknames and cashier/admin
+// Short forms the club types that are not prefixes of the name, so the
+// server's matcher cannot reach them. Anything that IS a prefix (Tush/Tushar)
+// or a spelling (Roji/Rojy) belongs in that player's aliases instead, where it
+// is stored once and applies everywhere rather than only on this screen.
+const NICKNAMES = {
+  vj: 'vijay',
+  aj: 'arjun',
+  rj: 'raj',
+};
+
+/**
+ * The last word on who a token is — and deliberately a narrower word than the
+ * server's, never a wider one.
+ *
+ * This runs only on names the server has already declined to match, and it
+ * used to decide them by substring: `token.includes(player.name)`. That is how
+ * "Arjun2" became Arjun. "arjun2".includes("arjun") is true, so a brand-new
+ * player was folded into the existing one of that name, silently, and the
+ * charge for the night went onto a man who was not there.
+ *
+ * The server's matcher already handles prefixes, dropped letters and aliases,
+ * and refuses to cross a number because a number is how two men who share a
+ * name are told apart. A looser rule here does not add intelligence — it only
+ * overrides those guards, on the one screen where the override spends money.
+ * So: exact name, exact id, exact alias, exact nickname. If the server did not
+ * know, this says it does not know either, and the row shows as a new name.
+ */
 function findPlayerByToken(token) {
   const t = token.toLowerCase().trim();
-
-  // Common nickname map
-  const nicknames = {
-    'vj': 'vijay',
-    'v': 'vijay',
-    'aj': 'arjun',
-    'rj': 'raj',
-    'sam': 'sameer',
-    'ash': 'ashish',
-  };
-
-  // Check direct match first
-  let p = store.players?.find(p =>
-    p.name.toLowerCase() === t ||
-    p.id === t
-  );
-  if (p) return p;
-
-  // Check partial match (contains)
-  p = store.players?.find(p =>
-    p.name.toLowerCase().includes(t) ||
-    t.includes(p.name.toLowerCase())
-  );
-  if (p) return p;
-
-  // Check aliases and nicknames
-  const expanded = nicknames[t] || t;
-  p = store.players?.find(p =>
-    p.name.toLowerCase().includes(expanded) ||
-    expanded.includes(p.name.toLowerCase()) ||
-    (p.aliases && p.aliases.some(a => a.toLowerCase() === t))
-  );
-  if (p) return p;
-
-  return null;
+  if (!t) return null;
+  const exact = (q) => store.players?.find(p =>
+    p.name.toLowerCase() === q
+    || p.id === q
+    || (Array.isArray(p.aliases) && p.aliases.some(a => String(a).toLowerCase() === q)));
+  return exact(t) || (NICKNAMES[t] ? exact(NICKNAMES[t]) : null) || null;
 }
 
 // How long away before a familiar name deserves a second look. Two months is
@@ -336,30 +333,30 @@ async function showUnmatchedMapping(unmatched) {
       continue;
     }
 
-    if (suggestions.length === 0) {
-      // No suggestion - skip (no dialogs, user can manually fix via dropdown if needed)
-      continue;
-    }
-
-    // Multiple suggestions - auto-pick first (user can fix via dropdown if wrong)
-    mappedPlayers[token] = suggestions[0].id;
+    // Nobody near it, or several people equally near it. Both are left as a
+    // new name for the dropdown to settle. Taking the first of several was a
+    // coin toss over whose balance moves, dressed as a decision — and the row
+    // then reads like any other matched player, so there is nothing left on
+    // screen to say a guess was made.
   }
 
   // Apply mappings to rows
+  let mapped = 0;
+  const unknown = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    if (!r.matched && mappedPlayers[r.token]) {
-      const mapped = store.players.find(p => p.id === mappedPlayers[r.token]);
-      if (mapped) {
-        r.player_id = mapped.id;
-        r.display_name = mapped.name;
-        r.matched = true;
-        r.introduced_by = mapped.introduced_by || null;
-        r.player_type = mapped.player_type || 'regular';
-        r.outside_cost = mapped.outside_cost || null;
-      }
-    }
+    if (r.matched) continue;
+    const to = mappedPlayers[r.token] && store.players.find(p => p.id === mappedPlayers[r.token]);
+    if (!to) { unknown.push(r.token); continue; }
+    r.player_id = to.id;
+    r.display_name = to.name;
+    r.matched = true;
+    r.introduced_by = to.introduced_by || null;
+    r.player_type = to.player_type || 'regular';
+    r.outside_cost = to.outside_cost || null;
+    mapped++;
   }
+  return { mapped, unknown };
 }
 
 // Mark unidentified/outside players inline via dropdown (removed dialog prompts)
@@ -483,6 +480,116 @@ function settlementOf(r) {
   };
 }
 
+/**
+ * Re-price everybody when the headcount crosses the 10/11 line.
+ *
+ * The rate column follows the number of players, so taking a duplicate out or
+ * putting a missed man in can move the whole night from one column to the
+ * other. currentBucket() already noticed; the rows did not — each kept the
+ * rate_type it was given at parse time, so eleven players could be charged on
+ * the 10-a-side card with the twelfth on the 12. The total was then neither
+ * price, and it reconciles against nothing.
+ */
+function repriceIfBucketMoved(meta, before) {
+  const after = currentBucket(meta);
+  if (after === before) return false;
+  rows.forEach(r => applyRate(r, meta));
+  toast(`${rows.length} players — everyone re-priced on the ${after}-a-side card`, false);
+  return true;
+}
+
+/**
+ * Put somebody into the preview by hand.
+ *
+ * The parse reads a WhatsApp message, and the message is written by a person
+ * in a hurry: a name left off, a late arrival in a reply nobody pasted, a
+ * spelling that matches nobody. Until now the only repair was to fix the text
+ * and parse the night again from the top, losing every amount, armband and
+ * who-pays-for-whom already set on the other eleven rows.
+ *
+ * A typed name that is exactly somebody is that person. Anything else is a new
+ * player, created at confirm by the same prompt that handles a name the parser
+ * could not place — so there is one way a stranger enters the roster, not two.
+ */
+function renderAddRow(meta) {
+  const host = $('gdAddRow');
+  if (!host) return;
+
+  const taken = new Set(rows.map(r => r.player_id).filter(Boolean));
+  const free = (store.players || [])
+    .filter(p => !p.is_sandbox && !taken.has(p.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // The sides actually in front of us, not the ones the parse found — a side
+  // can empty out as rows are removed.
+  let sides = [...new Set(rows.map(r => r.team).filter(Boolean))];
+  if (sides.length < 2) sides = ['Team 1', 'Team 2'];
+  // A missed player almost always belongs to the side that is short, so that
+  // is the one offered first.
+  const sizeOf = (t) => rows.filter(r => r.team === t).length;
+  const shortest = [...sides].sort((a, b) => sizeOf(a) - sizeOf(b))[0];
+
+  host.innerHTML = `
+    <label class="gd-addrow-label" for="gdAddName">Someone missing?</label>
+    <input id="gdAddName" list="gdAddNames" class="gd-addrow-name" autocomplete="off"
+      placeholder="Type a name" aria-label="Name of the player to add">
+    <datalist id="gdAddNames">${free.map(p => `<option value="${esc(p.name)}"></option>`).join('')}</datalist>
+    <select id="gdAddTeam" class="gd-addrow-team" aria-label="Which side they played for">
+      ${sides.map(t => `<option value="${esc(t)}"${t === shortest ? ' selected' : ''}>${esc(t)}</option>`).join('')}
+    </select>
+    <label class="gd-addrow-capt"><input type="checkbox" id="gdAddCapt"> captain</label>
+    <button type="button" class="btn btn-secondary" id="gdAddGo">Add to the game</button>
+    <p class="hint gd-addrow-hint">A name nobody on the roster has is added as a new player when you confirm the game.</p>`;
+
+  const add = () => {
+    const typed = $('gdAddName').value.trim();
+    if (!typed) { toast('Type the name of the player to add', true); return; }
+
+    const player = findPlayerByToken(typed);
+    if (player && taken.has(player.id)) {
+      toast(`${player.name} is already in this game — a player can only be charged once a night`, true);
+      return;
+    }
+    // Two rows with the same unrecognised spelling would create the same new
+    // player twice on confirm, and the second insert is the one that fails.
+    if (!player && rows.some(r => !r.player_id
+      && r.display_name.toLowerCase() === typed.toLowerCase())) {
+      toast(`${typed} is already in this game`, true);
+      return;
+    }
+
+    const before = currentBucket(meta);
+    const r = {
+      token: typed,
+      team: $('gdAddTeam').value,
+      is_captain: $('gdAddCapt').checked,
+      player_id: player ? player.id : null,
+      display_name: player ? player.name : typed,
+      matched: !!player,
+      introduced_by: player?.introduced_by || null,
+      player_type: player?.player_type || 'regular',
+      outside_cost: player?.outside_cost || null,
+      added_by_hand: true,
+    };
+    rows.push(r);
+    applyRate(r, meta);
+    // The new row is priced on the card the night is on; if the night just
+    // moved card, everybody including this row is priced again.
+    if (!repriceIfBucketMoved(meta, before)) {
+      toast(player
+        ? `${player.name} added to ${r.team}`
+        : `${typed} added to ${r.team} — new to the roster, so you will be asked to confirm`, false);
+    }
+    renderPreview(meta);
+    $('gdAddName').focus();
+  };
+
+  $('gdAddGo').addEventListener('click', add);
+  $('gdAddName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); add(); }
+  });
+}
+
 function renderPreview(meta) {
   $('gdPreviewCard').hidden = false;
   const outsideCount = rows.filter(r => r.player_type === 'outside').length;
@@ -578,7 +685,11 @@ function renderPreview(meta) {
 
     return `
     <tr>
-      <td><strong>${esc(r.display_name)}</strong>${r.is_captain ? '<span class="capt-badge">C</span>' : ''}${
+      <td><strong>${esc(r.display_name)}</strong><span class="capt-badge is-toggle${
+  r.is_captain ? '' : ' is-off'}" data-capt="${i}" role="button" tabindex="0"
+        title="${r.is_captain
+    ? 'Captain — on the captain\'s rate. Click to take the armband off.'
+    : 'Click if they wore the armband — the captain\'s place is priced differently.'}">C</span>${
   !r.matched ? ' <span class="miss-badge">new / unmatched</span>' : ''}${identityWarning(r)}</td>
       <td><span class="team-dot team-${esc(r.team)}"></span>${esc(r.team)}</td>
       <td>${typeControl}</td>
@@ -664,7 +775,32 @@ function renderPreview(meta) {
   $('gdTable').querySelectorAll('.amt-input').forEach(inp =>
     inp.addEventListener('input', () => { rows[inp.dataset.i].amount = Number(inp.value) || 0; recalcTotal(); }));
   $('gdTable').querySelectorAll('[data-del]').forEach(btn =>
-    btn.addEventListener('click', () => { rows.splice(Number(btn.dataset.del), 1); renderPreview(meta); }));
+    btn.addEventListener('click', () => {
+      const before = currentBucket(meta);
+      rows.splice(Number(btn.dataset.del), 1);
+      repriceIfBucketMoved(meta, before);
+      renderPreview(meta);
+    }));
+
+  // The armband is a price, not a decoration: the captain's place is cheaper,
+  // and the parse gets it from a "(C)" somebody may not have typed. It was
+  // shown and could not be corrected, so a missed armband meant re-pasting the
+  // whole message with one bracket added.
+  $('gdTable').querySelectorAll('[data-capt]').forEach(el => {
+    const flip = () => {
+      const row = rows[el.dataset.capt];
+      row.is_captain = !row.is_captain;
+      applyRate(row, meta);
+      toast(`${row.display_name} ${row.is_captain ? 'is' : 'is no longer'} captain`, false);
+      renderPreview(meta);
+    };
+    el.addEventListener('click', flip);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+    });
+  });
+
+  renderAddRow(meta);
   recalcTotal();
 }
 
@@ -880,9 +1016,18 @@ async function doParse() {
     // Show unmatched players with mapping suggestions
     const unmatchedTokens = parseResult.unmatched;
     if (unmatchedTokens.length) {
-      await showUnmatchedMapping(unmatchedTokens);
+      const { mapped, unknown } = await showUnmatchedMapping(unmatchedTokens);
       renderPreview(parseResult);
-      toast(`Mapped ${unmatchedTokens.length} unmatched players. Mark outside/unidentified via dropdown.`, false);
+      // Say which names are still nobody, by name. "3 unmatched" sends the
+      // cashier hunting down a twelve-row table for the ones to fix; the
+      // names themselves are the whole of the work left to do.
+      const parts = [];
+      if (mapped) parts.push(`Matched ${mapped} name${mapped === 1 ? '' : 's'}.`);
+      if (unknown.length) {
+        parts.push(`${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not on the roster `
+          + '— pick someone, or add them, from the dropdown on their row.');
+      }
+      toast(parts.join(' '), unknown.length > 0);
     } else {
       renderPreview(parseResult);
     }
@@ -994,8 +1139,16 @@ async function doConfirm() {
     for (const r of newOnes) {
       const p = await api.createPlayer({ name: r.display_name });
       charges[rows.indexOf(r)].player_id = p.id;
+      r.player_id = p.id;
     }
     store.players = await api.players();
+    // The sides were written down before these people existed, so each of them
+    // was filed under a null id — and a side list is read back by player id, so
+    // whoever was just created had no side at all. They were charged for a game
+    // the result then could not place them in, which is how a man ends up
+    // neither winning nor losing a match he played.
+    gameweek.teams_json = JSON.stringify(
+      rows.map(r => ({ player_id: r.player_id, team: r.team })));
   }
 
   // The result travels with the game rather than following it in a second call,

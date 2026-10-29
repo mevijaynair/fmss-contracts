@@ -51,6 +51,28 @@ function normalize(s) {
 /** Just the digits of a name — "rohit2" -> "2", "rohit" -> "". */
 const digitsOf = (s) => s.replace(/\D/g, '');
 
+/**
+ * "Arjun2" is a person; "8pm" is a time.
+ *
+ * Two men share a name and the club tells them apart by putting a number on
+ * the end of one. If that man is already on the roster he is matched by name.
+ * If he is NOT — his first night, the game he is added in — the digit used to
+ * delete him: not matched, not reported, gone. Twelve names were pasted and
+ * eleven players came out, and the twelfth was never charged for a game he
+ * played. Nothing downstream can notice that, because there is no row.
+ *
+ * Shape is what separates the two. A numbered name is letters first with a
+ * digit or two on the end; a time, a date or a kick-off leads with the number
+ * — "8pm", "7:30", "20th", "5aside" — so requiring letters-then-digits throws
+ * all of those out on their own. The words that are never names are still
+ * never names with a number stuck to them ("team2", "game1").
+ */
+const NUMBERED_NAME = /^([a-z]{3,})\d{1,2}$/;
+const looksLikeNumberedName = (norm) => {
+  const m = String(norm).match(NUMBERED_NAME);
+  return !!m && !STOP.has(m[1]);
+};
+
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
   if (Math.abs(m - n) > 1) return 2;             // we only care about <=1
@@ -249,12 +271,12 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
 
       const player = matchToken(raw, players, index);
 
-      // Times and dates are not names — "8pm", "7:30", "20th". They used to be
-      // dropped by the digit alone, which also dropped the one player whose
-      // name has a number in it: "Rohit2" left the roster silently, not even
-      // reported as an unknown name, so he played and was never charged. A
-      // token with a digit is junk unless it is somebody.
-      if (!player && /\d/.test(raw)) continue;
+      // Times and dates are not names — "8pm", "7:30", "20th". A token with a
+      // digit is junk unless it is somebody, or unless it is shaped like the
+      // somebody the club has not got yet: "Arjun2" on the night Arjun2 is
+      // added. Dropping that one is how a twelve-man paste becomes eleven
+      // charges with nothing said.
+      if (!player && /\d/.test(raw) && !looksLikeNumberedName(norm)) continue;
 
       if (player) anyMatched = true;
       const r = {
@@ -342,10 +364,17 @@ export function parseTeams(text, players, statusOf = {}, rates = {}) {
   // Build unmatched list with similar player suggestions
   const unmatchedWithSuggestions = Array.from(unmatchedTokens).map(token => {
     const suggestions = [];
+    const n = normalize(token);
     for (const player of players) {
-      if (levenshtein(normalize(token), normalize(player.name)) <= 1) {
-        suggestions.push({ id: player.id, name: player.name });
-      }
+      const key = normalize(player.name);
+      // The same rule the matcher above lives by: a number in a name is how
+      // two men who share one are told apart, so "Arjun2" must never be
+      // offered "Arjun" to correct himself to. One character apart is exactly
+      // what makes it a tempting suggestion and exactly what makes it the
+      // wrong man — and a suggestion is worse than a guess, because the next
+      // screen applies it for you and the charge looks like the app's idea.
+      if (digitsOf(key) !== digitsOf(n)) continue;
+      if (levenshtein(n, key) <= 1) suggestions.push({ id: player.id, name: player.name });
     }
     return { token, suggestions };
   });

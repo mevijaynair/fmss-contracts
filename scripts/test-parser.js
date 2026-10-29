@@ -60,6 +60,57 @@ test('a bare number is nobody', () => {
   assert.equal(who('12'), null);
 });
 
+test('a numbered name nobody has yet comes back as a name to add', () => {
+  // The other half of the number rule, and the one that cost a charge.
+  // matchToken correctly refused to give "Arjun2" to Arjun — and then the junk
+  // filter threw the token away for having a digit in it, so he was not
+  // matched, not reported, and not in the game. Twelve names pasted, eleven
+  // players charged, nothing on screen to say which one went missing.
+  const out = parseTeams(
+    '❤️ Rony(C) - Tushar Jeetu Rojy Nihas Nihal\n\n💙 Rohit(C) - Rohit2 Rohit3 Tush AWS Fernando',
+    ROSTER, {}, { contracted_12: 27, captain_12: 20, noncontract: 35 });
+
+  assert.equal(out.num_players, 12, 'everybody pasted is in the game');
+  assert.ok(out.rows.some(r => r.token === 'Rohit3'), 'the new man is on the roster sheet');
+  assert.equal(out.rows.find(r => r.token === 'Rohit3').player_id, null,
+    'as nobody yet — not as the Rohit he is one character away from');
+  assert.ok(out.unmatched.map(u => u.token).includes('Rohit3'),
+    'and he is reported, so Game Day can offer to add him');
+});
+
+test('a numbered name is never offered the man it is not', () => {
+  // The suggestion is applied for you on the next screen, so offering Rohit to
+  // correct Rohit3 is not a hint — it is the wrong charge, one click away, and
+  // it arrives looking like the app worked it out.
+  const out = parseTeams('Red: Rohit3 Tushar', ROSTER, {},
+    { contracted_10: 30, noncontract: 35 });
+  const sugg = out.unmatched.find(u => u.token === 'Rohit3').suggestions;
+  assert.deepEqual(sugg, [], 'no suggestion is better than the wrong one');
+
+  // A plain misspelling still gets its hint — the rule is about the number,
+  // not about giving up on suggestions. "Tushor" is one SUBSTITUTION out, so
+  // the matcher refuses it (that is how Nihal and Nihas stay two people) and
+  // it is exactly the case a suggestion is for.
+  const typo = parseTeams('Red: Tushor Jeetu', ROSTER, {},
+    { contracted_10: 30, noncontract: 35 });
+  assert.deepEqual(typo.unmatched.find(u => u.token === 'Tushor')?.suggestions
+    .map(s => s.id), ['tushar']);
+});
+
+test('the relaxed filter still throws out everything that is not a name', () => {
+  // "letters then digits" is what lets Arjun2 through, so each of these has to
+  // fail that shape on its own: the digit leads, or the word is one that is
+  // never a name whatever is stuck to it.
+  // The long number matters on its own: a man is told apart from his namesake
+  // by one digit or two, never by a year, so "Oct2026" is a date however many
+  // letters it starts with.
+  const out = parseTeams(
+    'Game1 at 8pm, 7:30, 20th, 5aside, Team2, 2026-10-29, Oct2026\nRed: Tushar Jeetu',
+    ROSTER, {}, { contracted_10: 30, noncontract: 35 });
+  assert.deepEqual(out.rows.map(r => r.token), ['Tushar', 'Jeetu']);
+  assert.deepEqual(out.unmatched, [], 'and none of it arrives as a name to add');
+});
+
 test('a dropped or inserted letter is still the same person', () => {
   assert.equal(who('Jeethu'), 'jeetu');
   assert.equal(who('Tushr'), 'tushar');

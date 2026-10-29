@@ -608,6 +608,27 @@ input.error:focus, select.error:focus, textarea.error:focus { box-shadow: 0 0 0 
 .capt-badge { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; color: #fff;
   background: var(--warning); padding: 0.05rem 0.35rem; border-radius: 5px; margin-left: 0.35rem; }
 .miss-badge { font-size: 0.66rem; color: var(--danger); font-weight: 600; }
+/* The armband as a control. "Off" has to stay visible — a toggle you cannot
+   see is one you cannot use to correct a captain the parse missed — but it
+   must not read as an armband, so it keeps the shape and loses the fill. */
+.capt-badge.is-toggle { cursor: pointer; }
+.capt-badge.is-toggle:hover { filter: brightness(1.15); }
+.capt-badge.is-toggle:focus-visible { outline: 2px solid var(--sport); outline-offset: 2px; }
+.capt-badge.is-off { background: transparent; color: var(--text-faint);
+  box-shadow: inset 0 0 0 1px var(--border-strong); opacity: 0.55; }
+.capt-badge.is-off:hover { opacity: 1; }
+
+/* Put somebody into the charge preview by hand, under the table they are
+   joining. One line on a desktop; it wraps to its own rows on a phone. */
+.gd-addrow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px dashed var(--border-color); }
+.gd-addrow-label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+.gd-addrow-name { flex: 1 1 10rem; min-width: 0; max-width: 16rem; padding: 0.35rem 0.5rem; }
+.gd-addrow-team { width: auto; padding: 0.35rem 0.5rem; font-size: 0.85rem; }
+.gd-addrow-capt { display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: 0.82rem; color: var(--text-muted); white-space: nowrap; }
+.gd-addrow-capt input { width: auto; margin: 0; }
+.gd-addrow-hint { flex: 1 0 100%; margin: 0; }
 .pending-badge { font-size: 0.7rem; font-weight: 600; color: #ff9800; padding: 0.3rem 0.5rem;
   border-radius: 4px; background: rgba(255, 152, 0, 0.15); }
 
