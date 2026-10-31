@@ -34,6 +34,17 @@ function billedPlayer(att) {
   return att.player_id || att.host_player_id || null;
 }
 
+/**
+ * How the money reached the collector. Only meaningful for someone who hands
+ * something over — a balance payer hands over nothing, so it is recorded as
+ * cash and never read.
+ *
+ * Anything unrecognised becomes 'cash' rather than being refused: this decides
+ * which column a figure is printed in, and a typo in it must not be able to
+ * stop a collection being recorded.
+ */
+const viaOf = (v) => (String(v || '').toLowerCase() === 'bank' ? 'bank' : 'cash');
+
 function writeTxn(db, { id, playerId, contractId, amount, description, eventId, createdBy }) {
   const now = new Date().toISOString();
   db.prepare(
@@ -161,6 +172,7 @@ export const externalEventsRepo = {
     const {
       player_id = null, guest_name = null, host_player_id = null,
       tier = 'adult', pay_method = 'cash', amount_due, notes = null,
+      received_via = 'cash',
     } = payload;
 
     if (!player_id && !guest_name) {
@@ -190,9 +202,11 @@ export const externalEventsRepo = {
     const id = generateId();
     db.prepare(
       `INSERT INTO event_attendees
-         (id, event_id, player_id, guest_name, host_player_id, tier, amount_due, pay_method, paid, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-    ).run(id, eventId, player_id, guest_name, host_player_id, tier, due, pay_method, notes, new Date().toISOString());
+         (id, event_id, player_id, guest_name, host_player_id, tier, amount_due,
+          pay_method, received_via, paid, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+    ).run(id, eventId, player_id, guest_name, host_player_id, tier, due,
+      pay_method, viaOf(received_via), notes, new Date().toISOString());
 
     this.syncAttendeeTxn(db, eventId, id);
     this.repostIfBanked(db, eventId);
@@ -208,6 +222,7 @@ export const externalEventsRepo = {
     const next = {
       tier: patch.tier ?? att.tier,
       pay_method: patch.pay_method ?? att.pay_method,
+      received_via: viaOf(patch.received_via ?? att.received_via),
       host_player_id: patch.host_player_id !== undefined ? (patch.host_player_id || null) : att.host_player_id,
       notes: patch.notes !== undefined ? patch.notes : att.notes,
     };
@@ -221,9 +236,11 @@ export const externalEventsRepo = {
     if (!Number.isFinite(due) || due < 0) throw new Error('Invalid amount');
 
     db.prepare(
-      `UPDATE event_attendees SET tier = ?, pay_method = ?, host_player_id = ?, amount_due = ?, notes = ?
+      `UPDATE event_attendees SET tier = ?, pay_method = ?, received_via = ?,
+         host_player_id = ?, amount_due = ?, notes = ?
        WHERE id = ?`
-    ).run(next.tier, next.pay_method, next.host_player_id, due, next.notes, attendeeId);
+    ).run(next.tier, next.pay_method, next.received_via, next.host_player_id,
+      due, next.notes, attendeeId);
 
     // Switching to cash must clear a debit that is no longer owed.
     this.syncAttendeeTxn(db, att.event_id, attendeeId);
@@ -314,6 +331,13 @@ export const externalEventsRepo = {
     const cashOutstanding = sum(a => a.pay_method === 'cash' && !a.paid);
     const balanceCharged = sum(a => a.pay_method === 'balance');
 
+    // Where the money that has arrived actually IS. "Cash collected" covered
+    // notes in a pocket and a bank transfer equally, which is the one thing
+    // the person holding it needs told apart at the end of the night.
+    const handed = (a) => a.pay_method === 'cash';
+    const inPocket = sum(a => handed(a) && a.paid && viaOf(a.received_via) === 'cash');
+    const inBank = sum(a => handed(a) && a.paid && viaOf(a.received_via) === 'bank');
+
     const byTier = {};
     for (const a of attendees) {
       const t = byTier[a.tier] || (byTier[a.tier] = { heads: 0, due: 0 });
@@ -341,6 +365,23 @@ export const externalEventsRepo = {
       cash_collected: round(cashCollected),
       cash_outstanding: round(cashOutstanding),
       balance_charged: round(balanceCharged),
+      // The same collected money, split by where it is sitting.
+      in_pocket: round(inPocket),
+      in_bank: round(inBank),
+      /**
+       * Cash the club has to produce that nobody will hand over.
+       *
+       * A member paying off their contract balance settles their share on
+       * paper and hands across nothing, but whoever the collection is FOR
+       * still has to be given notes. That money is already the club's to hold
+       * — it was prepaid — so producing it costs the club nothing and must
+       * not be booked as an expense; the pot is profit and loss, and charging
+       * it here would show a loss on a collection that broke even.
+       *
+       * It is stated rather than posted, so the cash box can be reconciled
+       * without the P&L being told a story that is not true.
+       */
+      club_supplies: round(balanceCharged),
       // What the programme made or lost: everything owed against what it cost.
       // Against actual once it is known, against budget while still planning.
       net: round(dueTotal - (actual || budget)),
@@ -354,7 +395,7 @@ export const externalEventsRepo = {
   close(db, eventId) {
     const s = this.summary(db, eventId);
     if (s.cash_outstanding > 0) {
-      throw new Error(`${s.cash_outstanding} AED is still to be collected in cash — mark it in or write it off before closing.`);
+      throw new Error(`${s.cash_outstanding} AED has not come in yet — mark it received, or take those people off, before closing.`);
     }
     db.prepare('UPDATE external_events SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?')
       .run('closed', new Date().toISOString(), new Date().toISOString(), eventId);

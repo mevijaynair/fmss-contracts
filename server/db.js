@@ -1140,6 +1140,28 @@ export function initSchema() {
         db.exec('CREATE INDEX IF NOT EXISTS idx_cr_player ON contributions_removed(player_id)');
       }
     },
+    /**
+     * event_attendees: how the money actually reached you.
+     *
+     * pay_method answers one question — does this touch their ledger? — and it
+     * is the question the money code turns on, so it stays as it is (and its
+     * CHECK with it; widening that means rebuilding the table).
+     *
+     * "Cash in my pocket" and "a transfer sitting in my bank" are the same
+     * answer to that question and completely different answers to the one the
+     * collector actually asks at the end of the night: what am I holding, and
+     * where is it? That was unaskable, so a whip-round came out as one
+     * undifferentiated "cash" figure covering notes, bank transfers, and money
+     * still to arrive.
+     *
+     * Null for a balance payer, who hands over nothing.
+     */
+    () => {
+      const cols = db.prepare('PRAGMA table_info(event_attendees)').all();
+      if (cols.length && !cols.some(c => c.name === 'received_via')) {
+        db.exec("ALTER TABLE event_attendees ADD COLUMN received_via TEXT NOT NULL DEFAULT 'cash'");
+      }
+    },
   ];
   for (const mig of migrations) mig();
 }

@@ -122,34 +122,85 @@ async function openEvent(id) {
   renderDetail();
 }
 
-function moneyPanel(s, ev) {
-  const cell = (label, value, color) => `
-    <div style="flex:1;min-width:110px;">
+/**
+ * Where the money is — which is not the same question as how much there is.
+ *
+ * A collection used to report one "cash in" figure covering notes in a pocket,
+ * a bank transfer that had landed, and a share settled off somebody's contract
+ * balance that nobody would ever hand over. Three different things to the
+ * person who has to produce the envelope at the end of the night.
+ */
+function moneyPanel(s, attendees) {
+  const cell = (label, value, color, note) => `
+    <div style="flex:1;min-width:112px;">
       <div class="hint" style="margin-bottom:0.2rem;">${label}</div>
       <div style="font-size:1.15rem;font-weight:600;${color ? `color:${color};` : ''}">${value}</div>
+      ${note ? `<div class="hint" style="font-size:0.72rem;margin-top:0.15rem;">${note}</div>` : ''}
     </div>`;
+
+  // Who is still to pay, by name. "100 outstanding" sends you down the list
+  // looking for them; the name is the whole of what you do next.
+  const owing = attendees
+    .filter(a => a.pay_method !== 'balance' && !a.paid)
+    .map(a => esc(a.player_name || a.guest_name));
+  const owingNote = owing.length
+    ? (owing.length > 3 ? `${owing.slice(0, 3).join(', ')} +${owing.length - 3}` : owing.join(', '))
+    : '';
+
   const netColor = s.net < 0 ? 'var(--danger)' : 'var(--success)';
   const varColor = s.budget_variance > 0 ? 'var(--danger)' : 'var(--success)';
+
   return `
-    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;padding:1rem;background:var(--bg-subtle);border-radius:8px;margin-bottom:1rem;">
+    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;padding:1rem;background:var(--bg-subtle);border-radius:8px;margin-bottom:0.8rem;">
       ${cell('Heads', `${s.headcount} <span class="hint" style="font-size:0.8rem;">(${s.members} members, ${s.guests} guests)</span>`)}
+      ${cell('Collected', money(s.due_total))}
+      ${cell('Cash in hand', money(s.in_pocket))}
+      ${cell('In your bank', money(s.in_bank))}
+      ${cell('Off balances', money(s.balance_charged), null,
+    s.balance_charged ? 'nobody hands this over' : '')}
+      ${cell('Still to come', money(s.cash_outstanding),
+    s.cash_outstanding ? 'var(--warning)' : null, owingNote)}
+    </div>
+
+    ${s.club_supplies ? `
+      <p class="hint" style="margin:0 0 1rem;">
+        <strong>${money(s.club_supplies)}</strong> of this was settled off contract balances, so nobody
+        will hand it over — the club puts in that much cash from money it already holds for them.
+        The kitty is not charged for it: the pot is profit and loss, and this collection costs the
+        club nothing.
+      </p>` : ''}
+
+    <div style="display:flex;gap:1.2rem;flex-wrap:wrap;padding:0.8rem 1rem;border:1px solid var(--border-color);border-radius:8px;margin-bottom:1rem;">
       ${cell('Budget', money(s.budget))}
-      ${cell('Actual', s.actual ? money(s.actual) : '<span class="hint">not set</span>',
+      ${cell('What it cost', s.actual ? money(s.actual) : '<span class="hint">not set</span>',
     s.actual ? varColor : null)}
-      ${cell('Owed by attendees', money(s.due_total))}
-      ${cell('Cash in', money(s.cash_collected))}
-      ${cell('Cash outstanding', money(s.cash_outstanding), s.cash_outstanding ? 'var(--warning)' : null)}
-      ${cell('From balances', money(s.balance_charged))}
       ${cell(s.net < 0 ? 'Shortfall' : 'Surplus', `${s.net > 0 ? '+' : ''}${money(s.net)}`, netColor)}
     </div>
-    ${s.actual ? '' : '<p class="hint" style="margin:-0.5rem 0 1rem;">Net is measured against the budget until you record what it actually cost.</p>'}`;
+    ${s.actual ? '' : '<p class="hint" style="margin:-0.5rem 0 1rem;">Surplus is measured against the budget until you record what it actually cost.</p>'}`;
 }
+
+/**
+ * One control for "how are they paying", three plain answers, two columns
+ * underneath it.
+ *
+ * pay_method answers whether a ledger is touched; received_via answers where
+ * the money ends up. Both are real distinctions and neither is a sentence
+ * anybody says out loud, so the screen asks the question the collector
+ * actually asks and splits the answer itself.
+ */
+const METHODS = [['balance', 'Their balance'], ['cash', 'Cash'], ['bank', 'Bank transfer']];
+const methodOf = (a) => (a.pay_method === 'balance' ? 'balance'
+  : (a.received_via === 'bank' ? 'bank' : 'cash'));
+const methodPatch = (v) => (v === 'balance'
+  ? { pay_method: 'balance' }
+  : { pay_method: 'cash', received_via: v });
 
 function attendeeRow(a, ev) {
   const locked = ev.status === 'closed';
   const name = a.player_name || a.guest_name;
   const sub = a.player_name ? 'member' : (a.host_name ? `guest of ${esc(a.host_name)}` : 'guest');
   const tiers = Object.keys(ev.tiers || {});
+  const method = methodOf(a);
   return `
     <tr>
       <td><strong>${esc(name)}</strong><br><span class="hint" style="font-size:0.8rem;">${sub}</span></td>
@@ -164,18 +215,23 @@ function attendeeRow(a, ev) {
       </td>
       <td>
         <select class="att-method" data-id="${a.id}" ${locked ? 'disabled' : ''} style="padding:0.3rem;">
-          <option value="cash" ${a.pay_method === 'cash' ? 'selected' : ''}>Cash</option>
-          <option value="balance" ${a.pay_method === 'balance' ? 'selected' : ''}>Balance</option>
+          ${METHODS.map(([v, l]) =>
+    `<option value="${v}" ${method === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
       </td>
       <td style="text-align:center;">
-        ${a.pay_method === 'balance'
+        ${method === 'balance'
       ? '<span class="hint" title="Already taken from their contract balance">settled</span>'
       // Once closed the checkbox is dead weight, but whether they actually paid
       // is exactly what you come back to a closed programme to find out.
       : locked
-        ? (a.paid ? '<span style="color:var(--success);">✓ paid</span>' : '<span class="hint">unpaid</span>')
-        : `<input type="checkbox" class="att-paid" data-id="${a.id}" ${a.paid ? 'checked' : ''}>`}
+        ? (a.paid ? '<span style="color:var(--success);">✓ in</span>' : '<span class="hint">not in</span>')
+        : `<label class="hint" style="display:inline-flex;gap:0.3rem;align-items:center;cursor:pointer;"
+             title="${method === 'bank' ? 'Tick once the transfer has landed' : 'Tick once you have the notes'}">
+             <input type="checkbox" class="att-paid" data-id="${a.id}" ${a.paid ? 'checked' : ''}
+               style="width:auto;margin:0;">
+             ${a.paid ? 'in' : (method === 'bank' ? 'awaited' : 'to collect')}
+           </label>`}
       </td>
       <td class="row-actions">
         ${locked ? '' : `<button class="link-btn" data-remove="${a.id}" title="Remove">✕</button>`}
@@ -200,7 +256,7 @@ function renderDetail() {
         </div>
       </div>
 
-      ${moneyPanel(s, ev)}
+      ${moneyPanel(s, attendees)}
 
       <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:1rem;">
         <div class="form-group" style="flex:1;min-width:130px;margin:0;"><label>Budget</label>
@@ -248,8 +304,9 @@ function renderDetail() {
             <div class="form-group" style="flex:1;min-width:110px;margin:0;"><label>Tier</label>
               <select id="addTier">${Object.entries(ev.tiers || {}).map(([t, rate]) =>
           `<option value="${t}">${esc(t)} (${rate})</option>`).join('')}</select></div>
-            <div class="form-group" style="flex:1;min-width:110px;margin:0;"><label>Pays by</label>
-              <select id="addMethod"><option value="cash">Cash</option><option value="balance">Balance</option></select></div>
+            <div class="form-group" style="flex:1;min-width:130px;margin:0;"><label>Pays by</label>
+              <select id="addMethod">${METHODS.map(([v, l]) =>
+    `<option value="${v}">${l}</option>`).join('')}</select></div>
             <button class="btn" id="addGo">Add</button>
           </div>
           <p class="hint" style="margin:0.6rem 0 0;">A guest paying from a balance needs a host — they have no ledger of their own.</p>
@@ -262,8 +319,10 @@ function renderDetail() {
         ${locked
       ? '<button class="btn btn-secondary" id="evReopen">Reopen</button>'
       : '<button class="btn" id="evClose">Close programme</button>'}
-        <button class="btn btn-secondary" id="evKitty">
-          Post ${s.net < 0 ? 'shortfall' : 'surplus'} of ${money(Math.abs(s.net))} to kitty
+        <button class="btn btn-secondary" id="evKitty" ${s.net ? '' : 'disabled'}>
+          ${s.net
+      ? `Post ${s.net < 0 ? 'shortfall' : 'surplus'} of ${money(Math.abs(s.net))} to kitty`
+      : 'Nothing to post — it breaks even'}
         </button>
         <button class="link-btn" id="evDelete" style="color:var(--danger);margin-left:auto;">Delete programme</button>
       </div>
@@ -299,7 +358,7 @@ function wireDetail(ev, locked) {
     $('addGo').addEventListener('click', guard(async () => {
       const payload = {
         tier: $('addTier').value,
-        pay_method: $('addMethod').value,
+        ...methodPatch($('addMethod').value),
       };
       if (addingGuest) {
         payload.guest_name = $('addName').value.trim();
@@ -315,7 +374,7 @@ function wireDetail(ev, locked) {
     root().querySelectorAll('.att-tier').forEach(sel => sel.addEventListener('change',
       guard(() => api.updateAttendee(sel.dataset.id, { tier: sel.value }))));
     root().querySelectorAll('.att-method').forEach(sel => sel.addEventListener('change',
-      guard(() => api.updateAttendee(sel.dataset.id, { pay_method: sel.value }))));
+      guard(() => api.updateAttendee(sel.dataset.id, methodPatch(sel.value)))));
     root().querySelectorAll('.att-amt').forEach(inp => inp.addEventListener('change',
       guard(() => api.updateAttendee(inp.dataset.id, { amount_due: Number(inp.value) || 0 }))));
     root().querySelectorAll('.att-paid').forEach(cb => cb.addEventListener('change',
