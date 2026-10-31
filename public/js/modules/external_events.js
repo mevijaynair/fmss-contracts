@@ -5,7 +5,7 @@
 // single `openId` rather than a router, because there are only ever two levels.
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
-import { $, esc, money } from '../util.js';
+import { $, esc, money, viewEl } from '../util.js';
 
 let openId = null;
 let cache = null;        // the open programme's { event, attendees, summary }
@@ -22,7 +22,29 @@ const TYPES = [
   ['trip', 'Trip / Tour'], ['equipment', 'Equipment'], ['other', 'Other'],
 ];
 
-const root = () => $('eventsRoot');
+/**
+ * The box this view draws into — made, if it is somehow not there.
+ *
+ * This used to be a plain lookup, and loadExternalEvents returned silently
+ * when it came back null. That is the one way this screen could end up blank
+ * with nothing said anywhere: no toast, no console line, no server log, just
+ * an empty rectangle under a correct-looking page title. A missing container
+ * is a thing to fix, not a thing to go quiet about.
+ */
+function root() {
+  let el = $('eventsRoot');
+  if (el) return el;
+  const section = viewEl('events');
+  if (!section) {
+    console.error('[programmes] neither #eventsRoot nor the events view is in the page');
+    return null;
+  }
+  console.warn('[programmes] #eventsRoot was missing — rebuilt it');
+  el = document.createElement('div');
+  el.id = 'eventsRoot';
+  section.appendChild(el);
+  return el;
+}
 
 /**
  * Say what went wrong, on the screen, where the thing that failed should be.
@@ -456,5 +478,13 @@ export function initExternalEvents() {
 
 export function loadExternalEvents() {
   if (!root()) return;
-  return openId ? openEvent(openId) : renderList();
+  // Anything thrown on the way to the markup used to leave the view as it was
+  // — empty — so the catch is here as well as inside each renderer.
+  try {
+    return Promise.resolve(openId ? openEvent(openId) : renderList())
+      .catch(e => renderFailure(e, openId ? 'This programme' : 'The programme list'));
+  } catch (e) {
+    renderFailure(e, 'This screen');
+    return undefined;
+  }
 }
