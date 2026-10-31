@@ -36,7 +36,11 @@ async function req(method, path, body) {
 
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  // The status travels with the error. "Admin only" and "not found" look
+  // identical in a message box, and which one it is decides what you do
+  // next — sign in again, or report a bug.
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`),
+    { status: res.status });
   return data;
 }
 

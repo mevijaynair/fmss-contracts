@@ -24,10 +24,48 @@ const TYPES = [
 
 const root = () => $('eventsRoot');
 
+/**
+ * Say what went wrong, on the screen, where the thing that failed should be.
+ *
+ * Both halves of this view build their whole markup in one assignment at the
+ * end, so anything that throws on the way there leaves the view exactly as it
+ * was: empty. The only report was a toast, which fades — so what a person is
+ * left looking at is a blank rectangle, and there is no way to tell "nothing
+ * here yet" from "this is broken".
+ *
+ * An empty programme list is a sentence. A failure should be one too.
+ */
+function renderFailure(err, what) {
+  const status = err?.status;
+  const advice = status === 403
+    ? 'You are signed in, but this session is not an administrator one. Sign out and sign in again on the admin form.'
+    : status === 404 ? 'That programme is not there any more. Go back to the list.'
+      : status >= 500 ? 'The server failed on this one — the message above is what it said.'
+        : 'Reload the page. If it keeps happening, the message above is the thing to report.';
+  root().innerHTML = `
+    <div class="sams-card">
+      <div class="card-header"><h3 class="card-title">${esc(what)} could not be loaded</h3></div>
+      <p style="margin:0 0 0.6rem;"><strong>${esc(err?.message || String(err))}</strong>${
+  status ? ` <span class="hint">(HTTP ${status})</span>` : ''}</p>
+      <p class="hint" style="margin:0 0 0.9rem;">${esc(advice)}</p>
+      <button class="btn btn-secondary" id="evRetry">Try again</button>
+    </div>`;
+  $('evRetry').addEventListener('click', () => loadExternalEvents());
+}
+
 // ---- list ------------------------------------------------------------------
 
 async function renderList() {
-  const events = await api.listEvents();
+  let events;
+  try { events = await api.listEvents(); }
+  catch (e) { renderFailure(e, 'The programme list'); return; }
+  // A shape that is not a list is a bug worth naming, rather than one let
+  // through as "events.map is not a function".
+  if (!Array.isArray(events)) {
+    renderFailure(new Error('The server sent back something that is not a list of programmes'),
+      'The programme list');
+    return;
+  }
   const rows = events.map(e => {
     const st = STATUS_STYLE[e.status] || STATUS_STYLE.planning;
     // While still planning there is no actual spend to measure against, so the
@@ -118,7 +156,8 @@ async function renderList() {
 
 async function openEvent(id) {
   openId = id;
-  cache = await api.getEvent(id);
+  try { cache = await api.getEvent(id); }
+  catch (e) { renderFailure(e, 'This programme'); return; }
   renderDetail();
 }
 
