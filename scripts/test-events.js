@@ -31,6 +31,7 @@ if (path.resolve(DB_FILE) !== path.resolve(scratch)) {
 const { externalEventsRepo: ev } = await import('../server/repos/external_events.js');
 const { ledgersRepo } = await import('../server/repos/ledgers.js');
 const { kittyRepo } = await import('../server/repos/kitty.js');
+const { contributionsRepo } = await import('../server/repos/contributions.js');
 initSchema();
 db.exec('PRAGMA foreign_keys = ON');
 
@@ -203,6 +204,45 @@ test('the deduction is dated the day of the collection, and stays there', () => 
   // reader of the sheet actually relies on.
   const days = new Set(['alfa', 'bravo', 'charlie', 'delta'].map(dayOf));
   assert.deepEqual([...days], ['2026-10-31'], 'all of them, one day');
+});
+
+test('a share taken off a balance shows up in the contributions log', () => {
+  // The third way money leaves a balance without a game. It is not a payment
+  // and not a movement, so the log everyone reads to answer "where did this
+  // go" showed nothing at all — the balance was 100 lower and the only record
+  // of why lived on a screen most people never open.
+  const id = sendOff();
+
+  // A manual correction on the same ledger. `transactions` holds transfers and
+  // adjustments as well as programme shares, and a movement is ALREADY in this
+  // log through its own legs — so a query that does not say which type it
+  // wants reports other people's rows as programmes and double counts a
+  // transfer.
+  db.prepare(`INSERT INTO transactions
+      (id, player_id, contract_id, type, amount, description, status, created_at, updated_at)
+    VALUES ('t_manual_1','alfa','sat','adjustment',-25,'a correction','approved',
+            '2026-10-30T12:00:00.000Z','2026-10-30T12:00:00.000Z')`).run();
+
+  const mine = contributionsRepo.log({ playerId: 'alfa' });
+  const prog = mine.filter(r => r.kind === 'programme');
+  assert.equal(prog.length, 1, 'exactly one, not one per edit');
+  assert.equal(prog[0].amount, -100, 'signed the way it hit the balance');
+  assert.equal(prog[0].direction, 'out');
+  assert.equal(prog[0].counterparty, 'Send-off', 'named by the programme it went to');
+  assert.equal(prog[0].date, '2026-10-31', 'on the day of the collection');
+  assert.ok(!prog.some(r => r.comments === 'a correction'),
+    'a manual adjustment is not a programme share');
+
+  // Somebody who paid cash owes the log nothing — their balance never moved.
+  assert.equal(contributionsRepo.log({ playerId: 'echo' })
+    .filter(r => r.kind === 'programme').length, 0);
+
+  // And it leaves when the programme does, rather than stranding a row that
+  // points at something no longer there.
+  ev.deleteEvent(db, id);
+  assert.equal(contributionsRepo.log({ playerId: 'alfa' })
+    .filter(r => r.kind === 'programme').length, 0);
+  db.prepare("DELETE FROM transactions WHERE id = 't_manual_1'").run();
 });
 
 test('deleting a collection puts every balance back', () => {

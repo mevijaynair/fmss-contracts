@@ -192,9 +192,51 @@ export const contributionsRepo = {
   log({ playerId, contractId } = {}) {
     const paid = this.all({ playerId, contractId });
     const moved = movementsRepo.legs({ playerId, contractId });
-    return [...paid, ...moved].sort((a, b) =>
+    const programmes = this.programmeLegs({ playerId, contractId });
+    return [...paid, ...moved, ...programmes].sort((a, b) =>
       String(b.date).localeCompare(String(a.date))
       || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  },
+
+  /**
+   * A programme's share, taken off a balance.
+   *
+   * The third way money leaves a balance without a game being played: a
+   * send-off, a dinner, a tour. It is not a payment and not a movement, so
+   * the log that everyone reads to answer "where did this go" showed nothing
+   * at all — the balance was 100 lower and the only record of why lived on a
+   * screen most people never open.
+   *
+   * Named with the programme on the other side of it, the way a movement
+   * names its counterparty, because a row that just says "-100" is the thing
+   * that gets argued about.
+   */
+  programmeLegs({ playerId = null, contractId = null } = {}) {
+    const where = ["t.type = 'event_deduction'", "t.status = 'approved'",
+      't.contract_id IS NOT NULL'];
+    const args = [];
+    if (playerId) { where.push('t.player_id = ?'); args.push(playerId); }
+    if (contractId) { where.push('t.contract_id = ?'); args.push(contractId); }
+
+    return db.prepare(`SELECT t.id, t.player_id, p.name AS player_name,
+        t.contract_id, t.amount, t.description AS comments, t.created_at,
+        substr(COALESCE(t.created_at, t.updated_at), 1, 10) AS date,
+        t.event_id, e.title AS event_title
+      FROM transactions t
+      JOIN players p ON p.id = t.player_id
+      LEFT JOIN external_events e ON e.id = t.event_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY date DESC, t.created_at DESC`).all(...args)
+      .map(r => ({
+        ...r,
+        kind: 'programme',
+        historical: 0,
+        amount: round2(r.amount),
+        // Whoever fronted a programme is CREDITED what it cost, so these are
+        // not all debits and the direction cannot be assumed from the kind.
+        direction: Number(r.amount) < 0 ? 'out' : 'in',
+        counterparty: r.event_title || 'a programme',
+      }));
   },
 
   /**

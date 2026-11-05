@@ -80,10 +80,16 @@ async function renderLog() {
     $('contribFilter').value ? { player_id: $('contribFilter').value } : {});
   $('contribTable').querySelector('tbody').innerHTML = rows.slice(0, 400).map(c => {
     const moved = c.kind === 'movement';
+    // A programme's share is the third way money leaves a balance without a
+    // game: it has two names like a movement, but it is not undoable from
+    // here — the guest list owns it, and taking the row away without taking
+    // the person off the programme would put the two permanently out of step.
+    const prog = c.kind === 'programme';
+    const twoNames = moved || prog;
     return `
     <tr style="${c.historical ? 'opacity: 0.65; background-color: var(--bg-subtle);' : ''}">
       <td class="num">${esc(fmtDate(c.date))}</td>
-      <td>${moved ? movementWho(c) : `${esc(c.player_name || c.name_raw || '—')}${
+      <td>${twoNames ? movementWho(c) : `${esc(c.player_name || c.name_raw || '—')}${
   // Whose hand it came out of, where that is not whose balance it landed
   // on. This used to live in the comment as prose — "Nihas 75 from Abhi".
   c.paid_by_name
@@ -93,9 +99,13 @@ async function renderLog() {
       <td class="num">${balCell(c.amount)}</td>
       <td>${moved
     ? `<span class="tag tag-moved" title="Not a payment into the club — money moved between two balances, recorded in Move money above">⇄ Moved</span> ${esc(c.comments || '')}`
-    : `${esc(c.comments || '')}${splitNote(c)}`}</td>
+    : prog
+      ? `<span class="tag tag-moved" title="A programme's share, taken off this balance. Change it on the programme's guest list, not here.">◇ Programme</span> ${esc(c.comments || '')}`
+      : `${esc(c.comments || '')}${splitNote(c)}`}</td>
       <td class="row-actions">${c.historical ? '<span class="tag" style="background: var(--bg-subtle); color: var(--text-muted);" title="Came in with the opening balances — already counted there, so it cannot be edited or removed">📋 Imported</span>'
-    : moved
+    : prog
+      ? `<a class="link-btn" data-goto="events" title="Open Programmes to change this">on ${esc(c.counterparty || 'the programme')}</a>`
+      : moved
       ? `<button class="link-btn" data-mv-undo="${esc(c.movement_id)}"
              title="Undo the whole movement — both sides of it">✕</button>`
       : `<button class="link-btn" data-edit="${c.id}"
