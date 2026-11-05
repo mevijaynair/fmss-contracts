@@ -148,6 +148,23 @@ const shortStatus = (s) => (s || '').replace('Refill needed - No priority', 'Top
 /** The colour that goes with a status word, so the word carries it too. */
 const statusColour = (s) => ({ Empty: C.bad, 'Top up': C.warn, OK: C.good }[s] || C.muted);
 
+/**
+ * A faint band behind every other row.
+ *
+ * A name on the left and a figure on the right with a hand's width of
+ * nothing between them is a line the eye loses, and nobody reading this in a
+ * chat is going to hold a finger to the screen to keep their place. The band
+ * costs no space and is the whole of what makes a number belong to a name.
+ *
+ * `under` is whichever surface the row is NOT sitting on: a striped row on
+ * the page reads as a card, and a striped row inside a card reads as the
+ * page. Both come from the live stylesheet, so the stripe follows the
+ * reader's theme like every other colour here.
+ */
+function zebra(pen, i, x, w, h, under) {
+  if (i % 2) pen.rect(x, w, h, under, 8);
+}
+
 /** Measure a string in the font it will actually be drawn in. */
 function widthOf(ctx, str, size, weight = 400) {
   if (!ctx) return 0;
@@ -232,91 +249,97 @@ function paintClub(pen, d, ctx) {
   pen.text('Where everyone stands, and who still has to pay', x,
     { size: 24, color: C.muted, lead: 40 });
 
+  /**
+   * Both nights side by side, with what they come to together.
+   *
+   * This was two stacked squads, one per contract, which could not answer
+   * the question everybody actually has — am I all right? Their money is in
+   * two places, and a reader had to find their own name twice, in two lists
+   * of different lengths, and add it up. Jeetu appeared as 111 and as 122
+   * and never as the 233 he has.
+   *
+   * One line per person, the nights in their own columns, and the total in
+   * the column people will read first. A dash is not a nought: it says they
+   * are not on that night at all.
+   */
+  // One geometry for both tables on this sheet — the squad above and the
+  // still-to-pay list below — so a reader's eye runs down the same columns
+  // instead of relearning them halfway.
+  const totalR = x + w - 18;
+  const cellW = Math.min(190, Math.max(120,
+    (w - 320 - 150) / Math.max(1, d.contracts.length)));
+  const cellR = (i) => totalR - 150 - (d.contracts.length - 1 - i) * cellW;
+  const nameMax = cellR(0) - 80 - (x + 18);
+
+  pen.rect(x, w, 4, C.gold, 2);
+  pen.gap(20);
+  pen.row([
+    { str: 'Where everyone stands', x, size: 32, weight: 700, color: C.text },
+    { str: `${money(d.combined_total)} held in all`, x: x + w, size: 23, weight: 600,
+      color: C.muted, align: 'right', dy: (32 - 23) * 0.82 },
+  ], 42);
   for (const c of d.contracts) {
-    // ---- contract header
-    pen.rect(x, w, 4, C.gold, 2);
-    pen.gap(20);
-    pen.row([
-      { str: c.name, x, size: 32, weight: 700, color: C.text },
-      { str: `${money(c.rate)} per game`, x: x + w, size: 24, weight: 600, color: C.gold,
-        align: 'right', dy: (32 - 24) * 0.82 },
-    ], 44);
-    // The three counts in the colours of the three words used in the table, so
-    // the summary and the column below it are visibly the same statement. They
-    // said "out of contract" up here and "Empty" down there, which are the same
-    // thing described twice.
     inline(pen, ctx, x, [
-      { str: c.venue ? `${c.venue}  ·  ` : '' },
-      { str: `${c.totals.players} players  ·  ` },
+      { str: c.name, color: C.text, weight: 600 },
+      { str: `  ${money(c.rate)} a game  ·  ${c.totals.players} players  ·  ` },
       { str: `${c.totals.in_contract} OK`, color: C.good, weight: 600 },
       { str: '  ·  ' },
       { str: `${c.totals.refill} Top up`, color: C.warn, weight: 600 },
       { str: '  ·  ' },
       { str: `${c.totals.out} Empty`, color: C.bad, weight: 600 },
-    ], { size: 22, lead: 38 });
-
-    // ---- the squad, in two columns so the picture stays phone-shaped
-    //
-    // The status words are left-aligned on their own column. Right-aligning
-    // them ragged the left edge — "OK" started where "Top up" ended — and the
-    // eye reads a ragged edge as a mistake before it reads the word.
-    const colW = (w - 28) / 2;
-    const balRight = colW - 122;
-    const statusX = colW - 110;
-    const nameMax = balRight - 76;
-    const half = Math.ceil(c.squad.length / 2);
-    const cols = [c.squad.slice(0, half), c.squad.slice(half)];
-    const rowH = 40;
-    const tableTop = pen.y;
-    const tableH = 16 + half * rowH + 14;
-    pen.rect(x, w, tableH, C.card, 14);
-    pen.y = tableTop + 16;
-
-    for (let i = 0; i < half; i++) {
-      const lineY = pen.y;
-      cols.forEach((col, ci) => {
-        const p = col[i];
-        if (!p) return;
-        const cx = x + 18 + ci * (colW + 28);
-        const bal = p.balance;
-        const status = shortStatus(p.status);
-        pen.y = lineY;
-        pen.row([
-          { str: fit(ctx, p.name, 25, nameMax), x: cx, size: 25, color: C.text },
-          { str: money(bal), x: cx + balRight, size: 25, weight: 600, align: 'right',
-            color: bal < 0 ? C.bad : statusColour(status) },
-          { str: status, x: cx + statusX, size: 20, color: statusColour(status), dy: 2 },
-        ], rowH);
-      });
-      pen.y = lineY + rowH;
-    }
-    pen.y = tableTop + tableH;
-    pen.gap(18);
-
-    // ---- what happened lately
-    //
-    // Dates and turnout only. What each night collected used to be here: a
-    // true figure nobody reading this can act on, which invites a
-    // conversation about the club's takings instead of about the one thing
-    // this picture is for.
-    const games = c.recent_games.slice(0, 8);
-    if (games.length) {
-      pen.text(`Last ${d.weeks} weeks — ${games.length} game`
-        + `${games.length === 1 ? '' : 's'}`, x, { size: 22, weight: 600, color: C.muted, lead: 34 });
-      for (const line of gameChips(ctx, games, w - 16, 22)) {
-        const top = pen.y;
-        for (const g of line) {
-          pen.y = top;
-          pen.text(g.date, x + 8 + g.x, { size: 22, weight: 600, color: C.text, lead: 0 });
-          pen.text(g.count, x + 8 + g.x + g.dw, { size: 22, color: C.muted, lead: 0 });
-        }
-        pen.y = top + 32;
-      }
-      pen.gap(14);
-    }
-
-    pen.gap(14);
+    ], { size: 21, lead: 30 });
   }
+  pen.gap(8);
+
+  // Column headings, so three numbers in a row are three known things.
+  pen.row([
+    { str: 'Player', x: x + 18, size: 19, color: C.faint },
+    ...d.contracts.map((c, i) => ({ str: fit(ctx, c.name, 19, cellW - 16), x: cellR(i),
+      size: 19, color: C.faint, align: 'right' })),
+    { str: 'Total', x: totalR, size: 19, weight: 600, color: C.muted, align: 'right' },
+  ], 26);
+
+  {
+    const rowH = 38;
+    const top = pen.y;
+    const boxH = 14 + d.combined.length * rowH + 14;
+    pen.rect(x, w, boxH, C.card, 14);
+    pen.y = top + 14;
+    d.combined.forEach((r, ri) => {
+      zebra(pen, ri, x + 8, w - 16, rowH, C.bg);
+      pen.row([
+        { str: fit(ctx, r.name, 23, nameMax), x: x + 18, size: 23, color: C.text },
+        ...r.parts.map((p, i) => (p.balance === null
+          ? { str: '—', x: cellR(i), size: 21, color: C.faint, align: 'right', dy: 1 }
+          : { str: money(p.balance), x: cellR(i), size: 22, align: 'right', dy: 1,
+            color: p.balance < 0 ? C.bad : p.balance > 0 ? C.good : C.faint })),
+        { str: money(r.total), x: totalR, size: 24, weight: 700, align: 'right',
+          color: r.total < 0 ? C.bad : r.total > 0 ? C.good : C.faint },
+      ], rowH);
+    });
+    pen.y = top + boxH;
+    pen.gap(18);
+  }
+
+  // ---- what happened lately, both nights together
+  for (const c of d.contracts) {
+    if (!c.recent_games.length) continue;
+    pen.text(`${c.name} — last ${d.weeks} weeks`, x,
+      { size: 22, weight: 600, color: C.muted, lead: 32 });
+    for (const line of gameChips(ctx, c.recent_games, w - 16, 21)) {
+      const lineTop = pen.y;
+      for (const g of line) {
+        pen.y = lineTop;
+        pen.row([
+          { str: g.date, x: x + g.x, size: 21, weight: 600, color: C.text },
+          { str: g.count, x: x + g.x + g.dw, size: 21, color: C.faint },
+        ], 30);
+      }
+      pen.y = lineTop + 30;
+    }
+    pen.gap(10);
+  }
+  pen.gap(8);
 
   // ---- who still has to pay, ONCE, across everything
   //
@@ -335,12 +358,6 @@ function paintClub(pen, d, ctx) {
   // which is the same information with nothing lining up, so two people's
   // Saturday figures never sat under each other and the column could not be
   // read down. The headings are the contracts' own names, in their own order.
-  const totalR = x + w - 18;
-  const cellW = Math.min(190, Math.max(120,
-    (w - 320 - 150) / Math.max(1, d.contracts.length)));
-  const cellR = (i) => totalR - 150 - (d.contracts.length - 1 - i) * cellW;
-  const payNameMax = cellR(0) - 80 - (x + 18);
-
   if (pay.top_up.length) {
     pen.text(`Members to top up — ${money(-pay.top_up_total)} from ${pay.top_up.length}`, x,
       { size: 24, weight: 600, color: C.bad, lead: 36 });
@@ -355,7 +372,8 @@ function paintClub(pen, d, ctx) {
     const boxH = 14 + pay.top_up.length * rowH + 14;
     pen.rect(x, w, boxH, C.card, 14);
     pen.y = top + 14;
-    for (const r of pay.top_up) {
+    pay.top_up.forEach((r, ri) => {
+      zebra(pen, ri, x + 8, w - 16, rowH, C.bg);
       const cells = d.contracts.map((c, i) => {
         const part = r.parts.find(p => p.contract_id === c.id);
         // A dash is not a zero: it says this person is not on that contract at
@@ -365,11 +383,11 @@ function paintClub(pen, d, ctx) {
           color: part.balance < 0 ? C.bad : part.balance > 0 ? C.good : C.faint };
       });
       pen.row([
-        { str: fit(ctx, r.name, 23, payNameMax), x: x + 18, size: 23, color: C.text },
+        { str: fit(ctx, r.name, 23, nameMax), x: x + 18, size: 23, color: C.text },
         ...cells,
         { str: money(r.total), x: totalR, size: 24, weight: 700, color: C.bad, align: 'right' },
       ], rowH);
-    }
+    });
     pen.y = top + boxH;
     pen.gap(20);
   } else {
@@ -402,15 +420,16 @@ function paintClub(pen, d, ctx) {
     const boxH = 14 + pay.cash.length * rowH + 14;
     pen.rect(x, w, boxH, C.card, 14);
     pen.y = top + 14;
-    for (const r of pay.cash) {
+    pay.cash.forEach((r, ri) => {
+      zebra(pen, ri, x + 8, w - 16, rowH, C.bg);
       pen.row([
-        { str: fit(ctx, r.name, 23, payNameMax), x: x + 18, size: 23, color: C.text },
+        { str: fit(ctx, r.name, 23, nameMax), x: x + 18, size: 23, color: C.text },
         { str: String(r.games), x: cellR(d.contracts.length - 1), size: 22, color: C.muted,
           align: 'right', dy: 1 },
         { str: money(r.amount), x: totalR, size: 24, weight: 700, color: C.warn,
           align: 'right' },
       ], rowH);
-    }
+    });
     pen.y = top + boxH;
     pen.gap(16);
   }
@@ -430,6 +449,8 @@ function paintClub(pen, d, ctx) {
     { str: ' the next game is not paid for yet' },
   ], { size: 20, lead: 30 });
   pen.text('A balance is money you have already put in, waiting to be used up.', x,
+    { size: 20, color: C.muted, lead: 28 });
+  pen.text('Total is both nights added together. A dash means not on that night at all.', x,
     { size: 20, color: C.muted, lead: 28 });
   pen.text('Sent from the FMSS contract manager · figures as at '
     + longDate(d.generated_at), x, { size: 20, color: C.faint, lead: 28 });
@@ -633,7 +654,8 @@ function paintCollection(pen, d, ctx) {
         x, { size: 19, color: C.faint, lead: 30 });
     }
 
-    for (const r of g.rows) {
+    g.rows.forEach((r, ri) => {
+      zebra(pen, ri, x - 10, w + 20, 36, C.card);
       const amount = money(r.amount);
       const amountW = widthOf(ctx, amount, 24, 600);
       const effect = r.balance_now !== undefined && r.amount
@@ -649,7 +671,7 @@ function paintCollection(pen, d, ctx) {
         { str: amount, x: x + w, size: 24, weight: 600,
           color: chase || potPaid ? C.warn : C.text, align: 'right' },
       ], 36);
-    }
+    });
     pen.gap(14);
   }
 
@@ -704,7 +726,8 @@ function paintContributions(pen, d, ctx) {
       { str: money(g.total), x: x + w, size: 23, weight: 600, color: C.muted,
         align: 'right', dy: (25 - 23) * 0.82 },
     ], 36);
-    for (const r of g.rows) {
+    g.rows.forEach((r, ri) => {
+      zebra(pen, ri, x - 10, w + 20, 32, C.card);
       const amount = money(r.amount);
       const aw = widthOf(ctx, amount, 22, 600);
       const when = shortDate(r.date);
@@ -716,7 +739,7 @@ function paintContributions(pen, d, ctx) {
         { str: amount, x: x + w, size: 22, weight: 600,
           color: r.amount < 0 ? C.bad : C.text, align: 'right' },
       ], 32);
-    }
+    });
     pen.gap(12);
   }
 

@@ -219,10 +219,45 @@ export const shareRepo = {
       };
     });
 
+    /**
+     * Both nights on one line, and what they come to together.
+     *
+     * Two stacked squads could not answer the question everybody actually
+     * has — am I all right? — because their money is in two places and the
+     * sheet never added them up. Jeetu was shown as 111 and 122 and never as
+     * the 233 he has.
+     *
+     * Restricted to the names the sheet already shows, so the dormant and
+     * the retired stay hidden by the one rule that decides it rather than by
+     * a second one here. The per-contract figures are the real ones though,
+     * even where that night's squad list leaves somebody out: a total built
+     * from a filtered half is a wrong total, and this column is the one
+     * people will check.
+     */
+    const onSheet = new Set(contracts.flatMap(c => c.squad.map(sq => sq.name)));
+    const combined = ledgersRepo.allCombined()
+      .filter(r => onSheet.has(r.player_name))
+      .map(r => ({
+        name: r.player_name,
+        parts: contracts.map(c => {
+          const part = r.contracts[c.id];
+          return {
+            contract_id: c.id,
+            // Null is not nought: it says they are not on that night at all.
+            balance: part ? round2(part.present_balance) : null,
+            status: part ? part.status : null,
+          };
+        }),
+        total: round2(r.present_balance),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
     return {
       generated_at: new Date().toISOString().slice(0, 10),
       since: from,
       weeks,
+      combined,
+      combined_total: round2(combined.reduce((t, r) => t + r.total, 0)),
       kitty_total: round2(db.prepare('SELECT SUM(amount) t FROM kitty').get()?.t || 0),
       contracts,
       // One list, across everything, because that is the question the picture
