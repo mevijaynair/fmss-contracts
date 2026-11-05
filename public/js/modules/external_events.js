@@ -6,6 +6,7 @@
 import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, viewEl } from '../util.js';
+import { shareCollection } from './share.js';
 
 let openId = null;
 let cache = null;        // the open programme's { event, attendees, summary }
@@ -312,6 +313,22 @@ function attendeeRow(a, ev) {
  * Grouped rather than sorted, because the four groups are four different
  * things to do: nothing, nothing, nothing, and chase.
  */
+/**
+ * What a balance-funded share did to the balance it came off.
+ *
+ * These people handed over nothing, so the only trace of their 100 is a
+ * ledger figure lower than it was. A number that moves with no explanation
+ * beside it is the thing that gets argued about three weeks later, so the
+ * effect is said on the row — and said as an effect, not as a
+ * before-and-after, because games played since have moved the figure too.
+ */
+function balanceNote(a) {
+  if (a.pay_method !== 'balance' || !a.balance_now && a.balance_now !== 0) return '';
+  if (!Number(a.amount_due)) return '';
+  return `&minus;${money(a.amount_due)} off ${esc(a.contract_name || '')}`
+    + ` &middot; now ${money(a.balance_now)}`;
+}
+
 const SHEET_GROUPS = [
   { key: 'balance', title: 'Off contract balance', cls: 'rep-in',
     note: 'nobody hands this over — the club puts the cash in',
@@ -343,6 +360,10 @@ function collectionSheet(ev, attendees, s) {
       <strong>${money(g.total)}</strong> from ${g.rows.length}
       ${g.note ? `<span class="hint">· ${esc(g.note)}</span>` : ''}
     </div>
+    ${g.key === 'balance' ? `<p class="hint" style="margin:0.1rem 0 0.5rem;">
+      These ${g.rows.length} handed over nothing — their share came off the contract balance
+      they had already paid in, so each one's balance is lower by what is shown. The club puts
+      the cash in on their behalf.</p>` : ''}
     <div class="table-scroll">
       <table class="sams-table rep-table">
         <tbody>${g.rows.map(a => `
@@ -350,7 +371,7 @@ function collectionSheet(ev, attendees, s) {
             <td>${esc(a.player_name || a.guest_name)}${
   a.player_id ? '' : ' <span class="hint">guest</span>'}</td>
             <td class="num rep-bal">${money(a.amount_due)}</td>
-            <td class="hint">${esc(a.notes || '')}</td>
+            <td class="hint">${[balanceNote(a), esc(a.notes || '')].filter(Boolean).join(' · ')}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -360,7 +381,10 @@ function collectionSheet(ev, attendees, s) {
     <div class="sams-card" style="margin-top:1.5rem;">
       <div class="card-header">
         <h3 class="card-title">Collection sheet</h3>
-        <button class="btn btn-sm btn-secondary" data-copy-sheet>Copy for WhatsApp</button>
+        <span style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+          <button class="btn btn-sm" data-share-sheet>Send as picture</button>
+          <button class="btn btn-sm btn-secondary" data-copy-sheet>Copy as text</button>
+        </span>
       </div>
       <div class="rep-summary">
         <span><strong>${s.headcount}</strong> people</span>
@@ -382,8 +406,14 @@ function sheetText(ev, attendees, s) {
     const rows = sheetRows(attendees, g);
     if (!rows.length) continue;
     out.push('', `${g.title} — ${money(sheetTotal(rows))}`);
+    if (g.key === 'balance') {
+      out.push('  (no cash from these — it came off the contract balance they had already paid in)');
+    }
     for (const a of rows) {
-      out.push(`  ${a.player_name || a.guest_name} ${money(a.amount_due)}`
+      const bal = a.pay_method === 'balance' && Number(a.amount_due) && a.balance_now !== undefined
+        ? ` — ${money(a.amount_due)} off ${a.contract_name}, now ${money(a.balance_now)}`
+        : '';
+      out.push(`  ${a.player_name || a.guest_name} ${money(a.amount_due)}${bal}`
         + (a.notes ? ` (${a.notes})` : ''));
     }
   }
@@ -549,6 +579,11 @@ function wireDetail(ev, locked) {
   // Plain text, because where this is going is WhatsApp. The clipboard API
   // needs a secure context and a gesture; this has the gesture, and the
   // fallback selects the text so it can still be copied by hand.
+  // A picture, because that is what gets posted in the group — same route as
+  // the standing sheet, so the two look like they came from the same club.
+  root().querySelector('[data-share-sheet]')?.addEventListener('click',
+    () => shareCollection(openId));
+
   root().querySelector('[data-copy-sheet]')?.addEventListener('click', async (e) => {
     const text = sheetText(cache.event, cache.attendees, cache.summary);
     try {

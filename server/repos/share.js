@@ -32,6 +32,7 @@ import { contractsRepo } from './contracts.js';
 import { ledgersRepo } from './ledgers.js';
 import { periodReportRepo } from './period_report.js';
 import { statsRepo } from './stats.js';
+import { externalEventsRepo } from './external_events.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -149,6 +150,28 @@ function stillToPay() {
     cash,
     cash_total: round2(cash.reduce((s, r) => s + r.amount, 0)),
   };
+}
+
+/**
+ * What a balance-funded share did to the balance it came off.
+ *
+ * `present_balance` already has the charge in it, so "before" is arithmetic
+ * rather than history — which is the honest way round: the number shown as
+ * "now" is the one the player will see on their own screen, and the one
+ * shown as "was" is only there to explain the gap.
+ */
+function balanceEffect(playerId, contractId, amount) {
+  const row = (ledgersRepo.forPlayer(playerId) || [])
+    .find(r => r.contract_id === contractId);
+  if (!row) return {};
+  const now = round2(row.present_balance);
+  const contract = contractsRepo.all().find(c => c.id === contractId);
+  // Deliberately NOT a "was" figure. present_balance is today's, and other
+  // games may have landed since, so "now + amount" is what the balance would
+  // read without this charge — not what it read on the day. Stating the
+  // effect and today's figure is true; stating a before-and-after is not.
+  return { contract_id: contractId, contract_name: contract?.name || contractId,
+    balance_now: now, balance_without_this: round2(now + amount) };
 }
 
 export const shareRepo = {
@@ -283,6 +306,65 @@ export const shareRepo = {
       total_balance: round2(lines.reduce((s, l) => s + l.balance, 0)),
       total_cash_owed: round2(lines.reduce((s, l) => s + l.cash_owed, 0)),
       recent,
+    };
+  },
+  /**
+   * One collection, as the sheet shows it — the picture for the group chat.
+   *
+   * Grouped by where the money actually is, because that is what a reader
+   * wants from it: three groups that need nothing doing, and one that is a
+   * list of people to chase. The same grouping as the screen, built here for
+   * the same reason every other figure is — a picture that disagrees with
+   * the app is the one artefact nobody can check, because by the time it is
+   * wrong it is in somebody else's chat.
+   */
+  collection(eventId) {
+    const event = externalEventsRepo.getEvent(db, eventId);
+    if (!event) throw new Error('Programme not found');
+    const attendees = externalEventsRepo.listAttendees(db, eventId);
+    const s = externalEventsRepo.summary(db, eventId);
+
+    const via = (a) => (String(a.received_via || 'cash').toLowerCase() === 'bank' ? 'bank' : 'cash');
+    const defs = [
+      ['Off contract balance', 'nobody hands this over',
+        (a) => a.pay_method === 'balance'],
+      ['Cash in hand', '', (a) => a.pay_method !== 'balance' && a.paid && via(a) === 'cash'],
+      ['In your bank', '', (a) => a.pay_method !== 'balance' && a.paid && via(a) === 'bank'],
+      ['Still to come', 'to chase', (a) => a.pay_method !== 'balance' && !a.paid],
+    ];
+
+    const groups = defs.map(([title, note, pick]) => {
+      const rows = attendees.filter(pick)
+        .sort((x, y) => String(x.player_name || x.guest_name)
+          .localeCompare(String(y.player_name || y.guest_name)))
+        .map(a => ({
+          name: a.player_name || a.guest_name,
+          guest: !a.player_id,
+          amount: round2(a.amount_due),
+          note: a.notes || '',
+          // What this did to the balance it came off, for the people whose
+          // balance it came off. They handed over nothing, so the only sign
+          // of it is a number on their ledger that is lower than it was —
+          // and a figure that moves with no explanation beside it is the
+          // thing that gets argued about weeks later. Said once, here, so
+          // the sheet and the picture both carry it.
+          ...(a.pay_method === 'balance' && a.player_id
+            ? balanceEffect(a.player_id, event.contract_id, round2(a.amount_due))
+            : {}),
+        }));
+      return { title, note, count: rows.length, total: round2(rows.reduce((t, r) => t + r.amount, 0)), rows };
+    }).filter(g => g.count);
+
+    return {
+      generated_at: new Date().toISOString().slice(0, 10),
+      title: event.title,
+      date: event.event_date,
+      headcount: s.headcount,
+      total: s.due_total,
+      settled: round2(s.due_total - s.cash_outstanding),
+      outstanding: s.cash_outstanding,
+      club_supplies: s.club_supplies,
+      groups,
     };
   },
 };

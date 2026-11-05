@@ -580,6 +580,94 @@ async function deliver(canvas, filename, title) {
 
 const said = { shared: 'Sent', cancelled: 'Cancelled', downloaded: 'Saved to your downloads' };
 
+/**
+ * One collection, as a picture for the group chat.
+ *
+ * Grouped by where the money is, because the groups are four different things
+ * to do: nothing, nothing, nothing, and chase. The chasing group is last and
+ * in the warning colour, since it is the only part anybody has to act on.
+ *
+ * The balance group carries a line of its own. Those people handed over
+ * nothing, so the only trace of their share is a ledger figure lower than it
+ * was — and a figure that moves with no explanation beside it is what gets
+ * argued about weeks later. Each row says what came off and what the balance
+ * reads now, in the picture that actually reaches them.
+ */
+function paintCollection(pen, d, ctx) {
+  const x = PAD;
+  const w = W - PAD * 2;
+
+  pen.gap(PAD);
+  pen.row([
+    { str: 'FMSS FOOTBALL CLUB', x, size: 38, weight: 700, color: C.gold },
+    { str: longDate(d.date), x: x + w, size: 22, color: C.muted,
+      align: 'right', dy: (38 - 22) * 0.82 },
+  ], 48);
+  pen.text(d.title, x, { size: 30, weight: 700, lead: 42 });
+  inline(pen, ctx, x, [
+    { str: `${d.headcount} people  ·  ` },
+    { str: `${money(d.total)} in total`, weight: 600, color: C.text },
+    { str: '  ·  ' },
+    { str: `${money(d.settled)} settled`, weight: 600, color: C.good },
+    ...(d.outstanding ? [{ str: '  ·  ' },
+      { str: `${money(d.outstanding)} to come`, weight: 600, color: C.warn }] : []),
+  ], { size: 22, lead: 40 });
+
+  for (const g of d.groups) {
+    const chase = g.title === 'Still to come';
+    pen.rect(x, w, 4, chase ? C.warn : C.gold, 2);
+    pen.gap(18);
+    pen.row([
+      { str: g.title, x, size: 27, weight: 700, color: chase ? C.warn : C.text },
+      { str: `${money(g.total)} from ${g.count}`, x: x + w, size: 23, weight: 600,
+        color: C.muted, align: 'right', dy: (27 - 23) * 0.82 },
+    ], 38);
+
+    if (g.rows.some(r => r.balance_now !== undefined)) {
+      pen.text('No cash from these — it came off the contract balance they had already paid in.',
+        x, { size: 19, color: C.faint, lead: 30 });
+    }
+
+    for (const r of g.rows) {
+      const amount = money(r.amount);
+      const amountW = widthOf(ctx, amount, 24, 600);
+      const effect = r.balance_now !== undefined && r.amount
+        ? `${money(r.amount)} off ${r.contract_name} · now ${money(r.balance_now)}`
+        : (r.note || '');
+      // The name column stops where the amount begins, so a long name can
+      // never run under the digits and leave them attached to nobody.
+      const nameMax = w - amountW - 30 - (effect ? widthOf(ctx, effect, 19) + 24 : 0);
+      pen.row([
+        { str: fit(ctx, r.name + (r.guest ? ' (guest)' : ''), 24, nameMax), x, size: 24 },
+        ...(effect ? [{ str: effect, x: x + w - amountW - 24, size: 19, color: C.faint,
+          align: 'right', dy: (24 - 19) * 0.82 }] : []),
+        { str: amount, x: x + w, size: 24, weight: 600,
+          color: chase ? C.warn : C.text, align: 'right' },
+      ], 36);
+    }
+    pen.gap(14);
+  }
+
+  pen.hr(x, w);
+  pen.gap(16);
+  pen.text('Sent from the FMSS contract manager', x,
+    { size: 19, color: C.faint, lead: 26 });
+  pen.gap(PAD);
+}
+
+/** One collection as a picture — the sheet, ready to send. */
+export async function shareCollection(eventId) {
+  try {
+    toast('Building the picture…');
+    const data = await api.get(`/share/event/${encodeURIComponent(eventId)}`);
+    const { canvas } = render(paintCollection, data);
+    const slug = String(data.title).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'collection';
+    const how = await deliver(canvas, `fmss-${slug}-${data.generated_at}.png`, data.title);
+    toast(said[how]);
+  } catch (e) { toast(e.message, true); }
+}
+
 /** One picture of the whole club, both contracts, ready for the group chat. */
 export async function shareClubSnapshot({ weeks = 3 } = {}) {
   try {

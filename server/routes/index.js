@@ -397,6 +397,14 @@ r.get('/share/club', wrap((req) => {
   return shareRepo.club({ weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)) });
 }));
 
+// One collection as a picture. Admin only: a collection names who has not
+// paid yet, which is the club's business and not a thing to hand to anybody
+// holding a player token.
+r.get('/share/event/:id', wrap((req) => {
+  requireAdmin(req);
+  return shareRepo.collection(req.params.id);
+}));
+
 // A player may fetch their own; an admin may fetch anyone's. Without the first
 // half of that, the one snapshot a player would actually want — where do I
 // stand across both contracts — would be admin-only.
@@ -1623,9 +1631,23 @@ r.get('/admin/events/:eventId', wrap((req) => {
   requireAdmin(req);
   const event = externalEventsRepo.getEvent(db, req.params.eventId);
   if (!event) throw new Error('Event not found');
+  // A balance-funded attendee hands over nothing, so the only trace of their
+  // share is a ledger figure lower than it was. The screen has to be able to
+  // say which balance and what it now reads, or the first anyone hears of it
+  // is an argument weeks later. Enriched here rather than inside the repo,
+  // which takes its db as an argument and owns no ledger of its own.
+  const contract = contractsRepo.all().find(c => c.id === event.contract_id);
+  const attendees = externalEventsRepo.listAttendees(db, req.params.eventId).map((a) => {
+    if (a.pay_method !== 'balance' || !a.player_id) return a;
+    const row = (ledgersRepo.forPlayer(a.player_id) || [])
+      .find(l => l.contract_id === event.contract_id);
+    if (!row) return a;
+    return { ...a, contract_name: contract?.name || event.contract_id,
+      balance_now: row.present_balance };
+  });
   return {
     event,
-    attendees: externalEventsRepo.listAttendees(db, req.params.eventId),
+    attendees,
     summary: externalEventsRepo.summary(db, req.params.eventId),
     transactions: externalEventsRepo.getEventTransactions(db, req.params.eventId),
   };
