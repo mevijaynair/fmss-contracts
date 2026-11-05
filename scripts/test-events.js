@@ -181,6 +181,30 @@ test('a collection cannot be closed while money is still out', () => {
   assert.equal(ev.getEvent(db, id).status, 'closed');
 });
 
+test('the deduction is dated the day of the collection, and stays there', () => {
+  // These rows are rewritten in place whenever an attendee is touched, and the
+  // statement sorts and prints by created_at. Stamping it with the write time
+  // meant editing somebody's note moved their deduction days down their own
+  // statement, and one collection appeared on three different dates depending
+  // on who had been edited last.
+  const id = sendOff();
+  const dayOf = (pid) => db.prepare(
+    'SELECT created_at FROM transactions WHERE player_id = ? AND event_id = ?')
+    .get(pid, id)?.created_at?.slice(0, 10);
+
+  assert.equal(dayOf('alfa'), '2026-10-31', 'the day the collection happened');
+
+  // Touch the row for something that has nothing to do with the money.
+  const alfa = ev.listAttendees(db, id).find(a => a.player_id === 'alfa');
+  ev.updateAttendee(db, alfa.id, { notes: 'changed my mind about the wording' });
+  assert.equal(dayOf('alfa'), '2026-10-31', 'and it does not move when the row is edited');
+
+  // Every balance payer on the same day as each other, which is the thing a
+  // reader of the sheet actually relies on.
+  const days = new Set(['alfa', 'bravo', 'charlie', 'delta'].map(dayOf));
+  assert.deepEqual([...days], ['2026-10-31'], 'all of them, one day');
+});
+
 test('deleting a collection puts every balance back', () => {
   const before = SQUAD.map(([id]) => balanceOf(id));
   const id = sendOff();

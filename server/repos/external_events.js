@@ -45,12 +45,30 @@ function billedPlayer(att) {
  */
 const viaOf = (v) => (String(v || '').toLowerCase() === 'bank' ? 'bank' : 'cash');
 
-function writeTxn(db, { id, playerId, contractId, amount, description, eventId, createdBy }) {
+/**
+ * The day a programme's money moved is the day the programme happened.
+ *
+ * These rows are rewritten in place every time an attendee is touched —
+ * delete then insert, so the debit can never be stale — and created_at is
+ * what the statement sorts and prints by. Stamping it with the write time
+ * meant editing a note moved somebody's deduction five days down their own
+ * statement, and the same collection showed up on three different dates
+ * depending on who had been edited last.
+ *
+ * Midday rather than midnight: a date rendered in a timezone behind UTC
+ * would otherwise fall back onto the day before.
+ */
+const onEventDay = (date) => (/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))
+  ? `${date}T12:00:00.000Z`
+  : new Date().toISOString());
+
+function writeTxn(db, { id, playerId, contractId, amount, description, eventId, createdBy, on }) {
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO transactions (id, player_id, contract_id, type, amount, description, event_id, status, created_by, created_at, updated_at)
      VALUES (?, ?, ?, 'event_deduction', ?, ?, ?, 'approved', ?, ?, ?)`
-  ).run(id, playerId, contractId, amount, description ?? null, eventId, createdBy ?? null, now, now);
+  ).run(id, playerId, contractId, amount, description ?? null, eventId, createdBy ?? null,
+    onEventDay(on), now);
 }
 
 export const externalEventsRepo = {
@@ -296,7 +314,7 @@ export const externalEventsRepo = {
       id: txnId, playerId, contractId: event.contract_id,
       amount: -Math.abs(amount),
       description: `${event.title} — ${who}`,
-      eventId, createdBy: event.created_by,
+      eventId, createdBy: event.created_by, on: event.event_date,
     });
   },
 
@@ -314,7 +332,7 @@ export const externalEventsRepo = {
       id: txnId, playerId: event.paid_by_player_id, contractId: event.contract_id,
       amount: Math.abs(amount),
       description: `Paid for ${event.title}`,
-      eventId, createdBy: event.created_by,
+      eventId, createdBy: event.created_by, on: event.event_date,
     });
   },
 
