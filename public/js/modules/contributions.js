@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, money, balCell, fmtDate, today, rosterOptions, viewEl,
   openModal, closeModal } from '../util.js';
+import { shareContributions } from './share.js';
 import { allocRowsHtml, allocRowHtml, refreshAllocs, readAllocs,
   splitGroupFor } from './split_panel.js';
 
@@ -73,6 +74,151 @@ function movementWho(c) {
   const arrow = c.direction === 'out' ? '→' : '←';
   return `${esc(c.player_name || '—')} <span class="mv-other">${arrow} ${
     esc(c.counterparty || '—')}</span>`;
+}
+
+// Two shapes of the same money. The log is the working surface — a filter, a
+// ✕ on every row. The sheet is what goes beside the standing sheet when it is
+// sent round, and controls all over it make it useless for that.
+let shape = 'log';            // 'log' | 'sheet'
+let sheetWeeks = 4;
+
+/**
+ * What came in, laid out as the standing sheet's supporting page.
+ *
+ * The standing says where everybody stands and cannot say how they got there,
+ * so the first reply to it is always "but I paid". This is that answer, for
+ * the same period, in the same clothes — the rep-* classes the standing sheet
+ * uses, so the two cannot drift apart visually either.
+ */
+function sheetGroupHtml(g) {
+  return `
+    <div class="rep-collect-head" style="margin-top:1rem;">
+      ${esc(g.title)} — <strong>${money(g.total)}</strong>
+      <span class="hint">· ${g.count} entr${g.count === 1 ? 'y' : 'ies'}</span>
+    </div>
+    <div class="table-scroll">
+      <table class="sams-table rep-table">
+        <tbody>${g.rows.map(r => `
+          <tr>
+            <td class="num hint">${esc(fmtDate(r.date))}</td>
+            <td>${esc(r.name)}${r.other
+    ? ` <span class="mv-other">→ ${esc(r.other)}</span>` : ''}</td>
+            <td class="hint">${esc(r.contract || '')}</td>
+            <td class="num rep-bal ${r.amount < 0 ? 'rep-out' : 'rep-in'}">${money(r.amount)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function renderSheet() {
+  const host = $('contribSheet');
+  if (!host) return;
+  host.innerHTML = '<p class="hint">Loading…</p>';
+  let d;
+  try { d = await api.get(`/share/contributions?weeks=${sheetWeeks}`); }
+  catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
+
+  // Biggest mover first. Named "net change" rather than "paid in", because a
+  // programme share and a movement are in here too — calling Joe a 610 payer
+  // when he paid 710 and had 100 taken off would be the sheet's one lie.
+  const people = d.people.map(p => `
+    <tr><td>${esc(p.name)}</td>
+      <td class="num rep-bal ${p.total < 0 ? 'rep-out' : 'rep-in'}">${money(p.total)}</td></tr>`).join('');
+
+  host.innerHTML = `
+    <p class="hint">Everything that touched a balance since ${esc(fmtDate(d.since))} —
+      money in, credit moved between people, and programme shares taken off.
+      Send it beside the standing sheet: that one says where everybody stands,
+      this one says how they got there.</p>
+
+    <div class="rep-summary">
+      <span><strong>${d.totals.rows}</strong> entries</span>
+      <span><strong>${d.totals.people}</strong> people</span>
+      <span class="rep-in"><strong>${money(d.totals.in)}</strong> in</span>
+      ${d.totals.out ? `<span class="rep-out"><strong>${money(d.totals.out)}</strong> out</span>` : ''}
+      <span><strong>${money(d.totals.net)}</strong> net</span>
+    </div>
+
+    <div class="rep-collect-head" style="margin-top:1rem;">Net change per person</div>
+    <div class="table-scroll">
+      <table class="sams-table rep-table"><tbody>${people
+    || '<tr><td class="hint">Nothing in this period.</td></tr>'}</tbody></table>
+    </div>
+
+    ${d.groups.map(sheetGroupHtml).join('')}
+
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:1rem;">
+      <button class="btn btn-sm" data-share-contrib>Send as picture</button>
+      <button class="btn btn-sm btn-secondary" data-copy-contrib>Copy as text</button>
+      <select id="contribWeeks" style="width:auto;">
+        ${[2, 4, 8, 12].map(w => `<option value="${w}"${w === sheetWeeks ? ' selected' : ''}>last ${w} weeks</option>`).join('')}
+      </select>
+    </div>`;
+
+  $('contribWeeks').addEventListener('change', (e) => {
+    sheetWeeks = Number(e.target.value) || 4;
+    renderSheet();
+  });
+  host.querySelector('[data-share-contrib]').addEventListener('click',
+    () => shareContributions(sheetWeeks));
+  host.querySelector('[data-copy-contrib]').addEventListener('click', async (e) => {
+    const text = contribSheetText(d);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Sheet copied — paste it into the group');
+    } catch {
+      const box = document.createElement('textarea');
+      box.className = 'st-fallback';
+      box.value = text;
+      e.target.after(box);
+      box.select();
+      toast('Copy did not work here — the text is selected, copy it by hand', true);
+    }
+  });
+}
+
+/** The same sheet as plain text, because where it is going is WhatsApp. */
+function contribSheetText(d) {
+  const out = [`FMSS — what came in since ${fmtDate(d.since)}`,
+    `${d.totals.rows} entries · ${d.totals.people} people · ${money(d.totals.net)} net`];
+  for (const g of d.groups) {
+    out.push('', `${g.title} — ${money(g.total)}`);
+    for (const r of g.rows) {
+      out.push(`  ${fmtDate(r.date)}  ${r.name}${r.other ? ' -> ' + r.other : ''}`
+        + `  ${money(r.amount)}${r.contract ? '  (' + r.contract + ')' : ''}`);
+    }
+  }
+  return out.join('\n');
+}
+
+function applyShape() {
+  $('contribSheet').hidden = shape !== 'sheet';
+  $('contribLogWrap').hidden = shape === 'sheet';
+  // The filter and the ✕ belong to the working list; on the sheet they are
+  // controls over something nobody is editing.
+  const filter = $('contribFilter');
+  if (filter) filter.hidden = shape === 'sheet';
+  document.querySelectorAll('[data-contrib-shape]').forEach(b =>
+    b.classList.toggle('active', b.dataset.contribShape === shape));
+  if (shape === 'sheet') renderSheet();
+}
+
+function wireShape() {
+  const seg = $('contribShape');
+  if (!seg) return;
+  seg.innerHTML = [['log', 'Log', 'Every entry, with the filter and the controls'],
+    ['sheet', 'Sheet', 'The same money laid out to send beside the standing sheet']]
+    .map(([id, label, why]) =>
+      `<button data-contrib-shape="${id}" class="${shape === id ? 'active' : ''}"
+        title="${esc(why)}">${label}</button>`).join('');
+  seg.querySelectorAll('[data-contrib-shape]').forEach(b =>
+    b.addEventListener('click', () => {
+      if (shape === b.dataset.contribShape) return;
+      shape = b.dataset.contribShape;
+      applyShape();
+    }));
+  applyShape();
 }
 
 async function renderLog() {
@@ -1003,5 +1149,6 @@ export function loadContributions() {
     return renderMyContributions();
   }
   fillSelects();
+  wireShape();
   return Promise.all([renderPendingApprovals(), renderLog(), renderRemoved()]);
 }

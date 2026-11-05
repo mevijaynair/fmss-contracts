@@ -385,7 +385,12 @@
           </div>
           <div class="sams-card">
             <div class="card-header"><h3 class="card-title">Contributions log</h3>
-              <div style="display:flex; gap:0.5rem; align-items:center;">
+              <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <!-- Two shapes of the same money. The log is the working
+                     surface, with a filter and a ✕ on every row; the sheet is
+                     what goes beside the standing sheet when it is sent
+                     round, which is no use with controls all over it. -->
+                <div class="seg" id="contribShape"></div>
                 <select id="contribFilter" style="width:auto;"><option value="">All players</option></select>
                 <!-- Behind a button: one movement has been recorded in the
                      club history against thirty-five payments, and its form
@@ -393,7 +398,8 @@
                 <button class="btn btn-secondary btn-sm role-admin-only" id="openMoveMoney"
                   title="Between a player and the kitty, or between two players">⇄ Move money</button>
               </div></div>
-            <div class="table-scroll">
+            <div id="contribSheet" hidden></div>
+            <div class="table-scroll" id="contribLogWrap">
               <table class="sams-table" id="contribTable">
                 <thead><tr><th>Date</th><th>Player</th><th>Contract</th><th class="num">Amount</th><th>Comments</th><th></th></tr></thead>
                 <tbody></tbody>

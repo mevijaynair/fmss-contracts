@@ -397,6 +397,16 @@ r.get('/share/club', wrap((req) => {
   return shareRepo.club({ weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)) });
 }));
 
+// What came in, as a sheet — the page that goes beside the standing one.
+// Admin only: it names every payment and every balance moved, which is more
+// than the standing sheet publishes about any one person.
+r.get('/share/contributions', wrap((req) => {
+  requireAdmin(req);
+  return shareRepo.contributions({
+    weeks: Math.min(52, Math.max(1, Number(req.query.weeks) || 4)),
+  });
+}));
+
 // One collection as a picture. Admin only: a collection names who has not
 // paid yet, which is the club's business and not a thing to hand to anybody
 // holding a player token.

@@ -660,6 +660,103 @@ function paintCollection(pen, d, ctx) {
   pen.gap(PAD);
 }
 
+/**
+ * What came in, as a picture — the page that goes beside the standing one.
+ *
+ * The standing sheet says where everybody stands and cannot say how they got
+ * there, so the first reply to it in the group is always "but I paid". This
+ * is that answer, drawn the same way and sent in the same breath.
+ *
+ * Net change per person leads, because that is the line that answers the
+ * reply. The entries follow for anybody who wants to check it.
+ */
+function paintContributions(pen, d, ctx) {
+  const x = PAD;
+  const w = W - PAD * 2;
+
+  pen.gap(PAD);
+  pen.row([
+    { str: 'FMSS FOOTBALL CLUB', x, size: 38, weight: 700, color: C.gold },
+    { str: longDate(d.generated_at), x: x + w, size: 22, color: C.muted,
+      align: 'right', dy: (38 - 22) * 0.82 },
+  ], 48);
+  pen.text('What came in, and what moved', x, { size: 30, weight: 700, lead: 40 });
+  inline(pen, ctx, x, [
+    { str: `since ${longDate(d.since)}  ·  ` },
+    { str: `${d.totals.rows} entries  ·  ` },
+    { str: `${money(d.totals.in)} in`, weight: 600, color: C.good },
+    ...(d.totals.out ? [{ str: '  ·  ' },
+      { str: `${money(d.totals.out)} out`, weight: 600, color: C.bad }] : []),
+  ], { size: 22, lead: 40 });
+
+  // ---- net change per person, biggest first
+  pen.rect(x, w, 4, C.gold, 2);
+  pen.gap(18);
+  pen.text('Net change per person', x, { size: 27, weight: 700, lead: 38 });
+  const colW = (w - 28) / 2;
+  const half = Math.ceil(d.people.length / 2);
+  const cols = [d.people.slice(0, half), d.people.slice(half)];
+  const rowH = 38;
+  const top = pen.y;
+  cols.forEach((col, ci) => {
+    pen.y = top;
+    const cx = x + ci * (colW + 28);
+    for (const p of col) {
+      const amount = signed(p.total);
+      const aw = widthOf(ctx, amount, 23, 600);
+      pen.row([
+        { str: fit(ctx, p.name, 23, colW - aw - 24), x: cx, size: 23 },
+        { str: amount, x: cx + colW, size: 23, weight: 600,
+          color: p.total < 0 ? C.bad : C.good, align: 'right' },
+      ], rowH);
+    }
+  });
+  pen.y = top + Math.max(cols[0].length, cols[1].length) * rowH;
+  pen.gap(16);
+
+  // ---- the entries behind it
+  for (const g of d.groups) {
+    pen.hr(x, w);
+    pen.gap(16);
+    pen.row([
+      { str: g.title, x, size: 25, weight: 700, color: C.text },
+      { str: money(g.total), x: x + w, size: 23, weight: 600, color: C.muted,
+        align: 'right', dy: (25 - 23) * 0.82 },
+    ], 36);
+    for (const r of g.rows) {
+      const amount = money(r.amount);
+      const aw = widthOf(ctx, amount, 22, 600);
+      const when = shortDate(r.date);
+      const whenW = widthOf(ctx, when, 19);
+      const who = r.name + (r.other ? ` → ${r.other}` : '');
+      pen.row([
+        { str: when, x, size: 19, color: C.faint, dy: (22 - 19) * 0.82 },
+        { str: fit(ctx, who, 22, w - whenW - aw - 60), x: x + whenW + 18, size: 22 },
+        { str: amount, x: x + w, size: 22, weight: 600,
+          color: r.amount < 0 ? C.bad : C.text, align: 'right' },
+      ], 32);
+    }
+    pen.gap(12);
+  }
+
+  pen.hr(x, w);
+  pen.gap(16);
+  pen.text('Sent from the FMSS contract manager', x, { size: 19, color: C.faint, lead: 26 });
+  pen.gap(PAD);
+}
+
+/** The supporting page to the standing sheet, ready to send. */
+export async function shareContributions(weeks = 4) {
+  try {
+    toast('Building the picture…');
+    const data = await api.get(`/share/contributions?weeks=${weeks}`);
+    const { canvas } = render(paintContributions, data);
+    const how = await deliver(canvas, `fmss-contributions-${data.generated_at}.png`,
+      'FMSS — what came in');
+    toast(said[how]);
+  } catch (e) { toast(e.message, true); }
+}
+
 /** One collection as a picture — the sheet, ready to send. */
 export async function shareCollection(eventId) {
   try {

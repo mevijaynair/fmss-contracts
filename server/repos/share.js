@@ -33,6 +33,7 @@ import { ledgersRepo } from './ledgers.js';
 import { periodReportRepo } from './period_report.js';
 import { statsRepo } from './stats.js';
 import { externalEventsRepo } from './external_events.js';
+import { contributionsRepo } from './contributions.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -367,6 +368,83 @@ export const shareRepo = {
       club_supplies: s.club_supplies,
       kitty_funded: s.kitty_funded,
       groups,
+    };
+  },
+  /**
+   * What came in, as a sheet — the standing sheet's supporting page.
+   *
+   * The standing says where everybody stands. It cannot say how they got
+   * there, so the first reply to it is always "but I paid". This is that
+   * answer, for the same period and sent beside it: every movement that
+   * touched a balance, by person, newest first.
+   *
+   * All three kinds, because all three move a balance and a sheet that shows
+   * only payments is the same half-truth the log had before they were merged
+   * into it:
+   *
+   *   paid       money handed to the club
+   *   moved      credit shifted between two people
+   *   programme  a share taken off for a send-off, a dinner, a tour
+   */
+  contributions({ weeks = 4 } = {}) {
+    const from = since(weeks);
+    const byId = Object.fromEntries(contractsRepo.all().map(c => [c.id, c.name]));
+
+    const rows = contributionsRepo.log({})
+      .filter(r => String(r.date) >= from && !r.historical);
+
+    const KINDS = [
+      ['paid', 'Money in', r => r.kind !== 'movement' && r.kind !== 'programme'],
+      ['moved', 'Moved between balances', r => r.kind === 'movement'],
+      ['programme', 'Programmes', r => r.kind === 'programme'],
+    ];
+
+    const groups = KINDS.map(([key, title, pick]) => {
+      const mine = rows.filter(pick);
+      return {
+        key,
+        title,
+        count: mine.length,
+        total: round2(mine.reduce((t, r) => t + Number(r.amount || 0), 0)),
+        rows: mine.map(r => ({
+          date: r.date,
+          name: r.player_name || r.name_raw || '—',
+          amount: round2(r.amount),
+          contract: byId[r.contract_id] || '',
+          // The second name, where there is one: who it moved to or from,
+          // which programme took it, or whose hand the money came out of.
+          other: r.counterparty || r.paid_by_name || '',
+          note: r.comments || '',
+        })),
+      };
+    }).filter(g => g.count);
+
+    // Who put money in, biggest first. The question a reader actually has
+    // about a list of forty payments is whose, not when.
+    const perPerson = {};
+    for (const r of rows) {
+      const who = r.player_name || r.name_raw || '—';
+      perPerson[who] = round2((perPerson[who] || 0) + Number(r.amount || 0));
+    }
+    const people = Object.entries(perPerson)
+      .map(([name, total]) => ({ name, total }))
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+
+    return {
+      generated_at: new Date().toISOString().slice(0, 10),
+      since: from,
+      weeks,
+      groups,
+      people,
+      totals: {
+        rows: rows.length,
+        people: people.length,
+        net: round2(rows.reduce((t, r) => t + Number(r.amount || 0), 0)),
+        in: round2(rows.filter(r => Number(r.amount) > 0)
+          .reduce((t, r) => t + Number(r.amount), 0)),
+        out: round2(rows.filter(r => Number(r.amount) < 0)
+          .reduce((t, r) => t + Number(r.amount), 0)),
+      },
     };
   },
 };
