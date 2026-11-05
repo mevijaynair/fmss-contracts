@@ -1023,8 +1023,8 @@ export const gameweeksRepo = {
 
       const insCharge = db.prepare(`INSERT INTO charges
         (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid,settles_cash,
-         settle_contract_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+         settle_contract_id,settled_from_kitty)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
       charges.forEach((ch, i) => {
         const settledBy = ch.charged_to || ch.player_id;
         // Whether this charge is cash is a fact about the night, not about the
@@ -1055,7 +1055,25 @@ export const gameweeksRepo = {
         // member rates are what prepaying into THIS contract buys — but it
         // comes off a real balance, and filing it as cash would leave the money
         // sitting in their Saturdays credit and the club chasing them for it.
-        const cash = ch.settles_cash ? 1
+        /**
+         * The club pot carrying a place.
+         *
+         * Decided before anything else, because it is the answer to a
+         * different question: not whose balance pays, but that nobody is
+         * billed at all. The pot does not pay out an expense for it — it
+         * simply collects nothing for that player, which is what excluding
+         * the charge from the game's income already does.
+         *
+         * Settling it later from the Season panel has always worked
+         * (setChargeSettlement takes mode 'kitty'). It could not be said on
+         * the night, which is when it is actually decided — so a sponsored
+         * place had to be entered as a debt and corrected afterwards, and an
+         * uncorrected one is a player chased for money nobody meant to ask
+         * for.
+         */
+        const fromKitty = ch.settled_from_kitty ? 1 : 0;
+        const cash = fromKitty ? 0
+          : ch.settles_cash ? 1
           : (settlerType === 'outside'
             || (!asked
               && (ch.player_type === 'outside' || ch.rate_type === 'noncontract')
@@ -1065,17 +1083,20 @@ export const gameweeksRepo = {
         // groups by it, so the debt would be chased on a contract that has
         // nothing to do with the game. A guest settles for cash however they
         // were entered, so this is the common way to reach that state.
-        const settleOn = cash ? null : asked;
+        // The two things the audit refuses outright: a charge that is both
+        // cash and kitty-funded, and a kitty-funded charge that still names a
+        // contract to settle from. Nobody is billed, so there is no contract.
+        const settleOn = (cash || fromKitty) ? null : asked;
         // Only somebody whose balance this actually touches gets an account.
         // Every charged player used to get a ledger row, so a guest paying cash
         // once was handed a balance they will never use, on every contract, and
         // then appeared in every list built from ledgers. What they owe is read
         // from the charges instead, so nothing is lost by leaving them out.
         // The account has to be on whichever contract actually pays.
-        if (!cash) ledgersRepo.ensure(settledBy, settleOn || gw.contract_id);
+        if (!cash && !fromKitty) ledgersRepo.ensure(settledBy, settleOn || gw.contract_id);
         insCharge.run(`c_live_${Date.now()}_${i}`, id, ch.player_id, ch.team || '',
           ch.is_captain ? 1 : 0, ch.rate_type || '', Number(ch.amount),
-          settledBy, ch.paid ? 1 : 0, cash, settleOn);
+          settledBy, fromKitty ? 0 : (ch.paid ? 1 : 0), cash, settleOn, fromKitty);
 
         // Remember who covered a guest, so the next game can suggest them
         // rather than asking again — losing that link is losing who came from

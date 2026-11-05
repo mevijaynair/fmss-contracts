@@ -285,6 +285,59 @@ test('a game that loses money is an expense, not a negative income', () => {
   assert.equal(row.amount, 60, 'magnitude only — the sign lives in kind');
 });
 
+test('a place the club carries can be said on the night, not only fixed after', () => {
+  // setChargeSettlement has always taken mode 'kitty', so this could be
+  // corrected from the Season panel. It could not be SAID at entry, which is
+  // when it is actually decided — so a sponsored place had to be entered as a
+  // debt, and an uncorrected one is a player chased for money nobody meant to
+  // ask for.
+  // The real case is a guest — a regular's plus-one, or somebody up for one
+  // odd night. A guest is the hardest version too: every other rule here
+  // would file them as cash to chase, so "the club carries it" has to beat
+  // all of them.
+  db.prepare(`INSERT OR IGNORE INTO contracts (id,name,rates,cost_per_gw,sort)
+              VALUES ('testc_carry','Carried night','{}',0,99)`).run();
+  const paying = player('Pays own way');
+  const carried = player('Club carries'); makeOutside(carried);
+  // A guest keeps no balance anywhere, which is the state this has to leave
+  // alone. The helper opens one for every player it makes, so it goes — then
+  // "no ledger" is a fact about the code under test rather than about the
+  // helper that built the fixture.
+  db.prepare('DELETE FROM ledgers WHERE player_id = ?').run(carried);
+  const gw = playGame({ pitch: 50, players: [
+    { player_id: paying, amount: 40 },
+    // Named a contract to settle from as well, to prove it is ignored: with
+    // nobody billed there is no balance for it to mean anything against.
+    { player_id: carried, amount: 40, settled_from_kitty: 1,
+      settle_contract_id: 'testc_carry' },
+  ] });
+
+  const row = (pid) => db.prepare(
+    'SELECT * FROM charges WHERE gameweek_id = ? AND player_id = ?').get(gw.id, pid);
+  assert.equal(row(carried).settled_from_kitty, 1);
+  assert.equal(row(paying).settled_from_kitty, 0);
+
+  // The pot collects nothing for that place. 40 in, not 80.
+  assert.equal(kittyOf(gw.id), 40 - 50, 'only the one who pays counts as income');
+
+  // Nobody is billed and nobody owes it. Their balance is not asserted to be
+  // zero — they have no balance at all, which is the stronger statement and
+  // the one checked at the foot of this test.
+  assert.equal(row(carried).settles_cash, 0, 'not cash to chase either');
+  assert.equal(row(carried).paid, 0);
+
+  // The two states the audit refuses outright.
+  assert.ok(!(row(carried).settles_cash === 1 && row(carried).settled_from_kitty === 1),
+    'never both cash and kitty-funded');
+  assert.equal(row(carried).settle_contract_id, null,
+    'nobody is billed, so no contract is named to bill');
+
+  // And no account is opened for them. Every charged player used to get one,
+  // which handed a balance to people who will never use it.
+  assert.equal(db.prepare('SELECT 1 x FROM ledgers WHERE player_id = ?').get(carried),
+    undefined, 'a carried place opens no ledger, on this contract or the named one');
+});
+
 test("a guest's cash reaches the kitty when it is collected, not before", () => {
   const host = player('Host'); const guest = player('Guest'); makeOutside(guest);
   const gw = playGame({ pitch: 50, players: [

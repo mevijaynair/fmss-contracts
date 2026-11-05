@@ -437,6 +437,18 @@ async function renderFixture() {
  * than money taken.
  */
 function settlementOf(r) {
+  // Nobody is billed at all. Answered first because it is a different
+  // question from whose balance pays, and it overrides every other rule
+  // below — a sponsored place is not cash to collect and not a debit.
+  if (r.settled_from_kitty) {
+    return { cls: 'is-kitty', label: 'kitty covers it', cash: false, collected: false,
+      // A third fate. Everything downstream splits charges into "cash" and
+      // "not cash", and "not cash" has always meant money the club already
+      // holds — so without this flag a sponsored place is counted as income
+      // and inflates the night's profit by exactly what it cost.
+      kitty: true,
+      why: 'The club pot carries this place: nobody is billed and nobody owes it.' };
+  }
   const payerId = r.charged_to || r.player_id;
   const payer = rows.find(x => x.player_id === payerId)
     || (store.players || []).find(p => p.id === payerId);
@@ -672,13 +684,29 @@ function renderPreview(meta) {
     // that member's credit, so the control belongs on that row too.
     const settler = (store.players || []).find(p => p.id === settlesId);
     const settlerHasNoBalance = !settlesId || settler?.player_type === 'outside';
-    const fundControl = settlerHasNoBalance
-      ? '<span class="hint" title="A guest keeps no balance on any contract — they pay cash on the day">cash on the day</span>'
-      : `
+    // Who pays for the place, including the answer "nobody does". The club
+    // carrying somebody is decided on the night — a Mon/Thu regular turning
+    // up one odd Saturday, or a plus-one — and until now it could only be
+    // said afterwards from the Season panel. A sponsored place entered as a
+    // debt and never corrected is a player chased for money nobody meant to
+    // ask for.
+    const fundControl = r.settled_from_kitty
+      ? `<select class="fund-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;">
+          <option value="__kitty" selected>kitty covers it</option>
+          ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}">from ${esc(ct.name)}</option>`).join('')}
+        </select>`
+      : settlerHasNoBalance
+        ? `<select class="fund-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;"
+            title="A guest keeps no balance on any contract, so they pay cash — unless the club carries the place.">
+            <option value="" selected>cash on the day</option>
+            <option value="__kitty">kitty covers it</option>
+          </select>`
+        : `
       <select class="fund-select" data-i="${i}" style="padding:0.3rem; font-size:0.85rem; width:150px;"
-        title="Which balance this comes off. Paying from another contract means they have not prepaid into this one, so the place is priced at the out-of-contract rate — you can still type over the amount.">
+        title="Which balance this comes off, or nobody at all. Paying from another contract means they have not prepaid into this one, so the place is priced at the out-of-contract rate — you can still type over the amount.">
         ${(store.contracts || []).map(ct => `<option value="${esc(ct.id)}"${
   (r.settle_contract_id || contractId) === ct.id ? ' selected' : ''}>from ${esc(ct.name)}</option>`).join('')}
+        <option value="__kitty">kitty covers it</option>
       </select>`;
 
     const s = settlementOf(r);
@@ -720,9 +748,17 @@ function renderPreview(meta) {
   $('gdTable').querySelectorAll('.fund-select').forEach(sel =>
     sel.addEventListener('change', () => {
       const row = rows[sel.dataset.i];
-      row.settle_contract_id = sel.value === contractId ? null : sel.value;
+      const toKitty = sel.value === '__kitty';
+      row.settled_from_kitty = toKitty;
+      // Nobody is billed, so there is no contract to settle from. The audit
+      // refuses a kitty-funded charge that still names one.
+      row.settle_contract_id = toKitty || sel.value === contractId ? null : (sel.value || null);
       applyRate(row, meta);
       renderPreview(meta);
+      if (toKitty) {
+        toast(`${row.display_name}: the club pot carries this place — nobody is billed`);
+        return;
+      }
       const other = (store.contracts || []).find(c => c.id === row.settle_contract_id);
       if (other) toast(`${row.display_name}: ${other.name} balance, at the out-of-contract rate`);
     }));
@@ -809,7 +845,12 @@ function recalcTotal() {
   $('gdTotal').textContent = money(tot);
   const c = store.contracts.find(x => x.id === contractId);
   const cost = c?.cost_per_gw || 0;
-  const diff = tot - cost;
+  // Against what the night actually brings in. A place the pot carries is
+  // charged but never collected, so counting it here would say the game paid
+  // for itself on money the club chose not to ask anybody for.
+  const income = rows.reduce((s, r) =>
+    s + (settlementOf(r).kitty ? 0 : (Number(r.amount) || 0)), 0);
+  const diff = income - cost;
   $('gdVsCost').textContent = cost
     ? `pitch cost ${money(cost)} · ${diff >= 0 ? 'surplus' : 'short'} ${money(Math.abs(diff))}`
     : '';
@@ -823,9 +864,10 @@ function recalcTotal() {
     // and chase money that was already in your pocket.
     const fates = rows.map(r => ({ r, s: settlementOf(r) }));
     const sum = (f) => f.reduce((s, x) => s + (Number(x.r.amount) || 0), 0);
-    const onBalance = fates.filter(f => !f.s.cash);
+    const onBalance = fates.filter(f => !f.s.cash && !f.s.kitty);
     const inHand = fates.filter(f => f.s.cash && f.s.collected);
     const owed = fates.filter(f => f.s.cash && !f.s.collected);
+    const carried = fates.filter(f => f.s.kitty);
 
     summary.innerHTML = rows.length ? `
       <span><strong>${money(sum(onBalance))}</strong> off balances now
@@ -834,6 +876,8 @@ function recalcTotal() {
         <span class="hint">(${inHand.map(f => f.r.display_name).join(', ')})</span></span>` : ''}
       ${owed.length ? `<span><strong>${money(sum(owed))}</strong> still to collect
         <span class="hint">(${owed.map(f => f.r.display_name).join(', ')})</span></span>` : ''}
+      ${carried.length ? `<span><strong>${money(sum(carried))}</strong> the club covers
+        <span class="hint">(${carried.map(f => f.r.display_name).join(', ')} — nobody is billed)</span></span>` : ''}
       <span>Total charged <strong>${money(tot)}</strong></span>` : '';
   }
 
@@ -935,7 +979,10 @@ function recomputeKitty() {
   const amount = (r) => Number(r.amount) || 0;
   const fates = rows.map(r => ({ r, s: settlementOf(r) }));
   const sum = (f) => f.reduce((s, x) => s + amount(x.r), 0);
-  const collected = sum(fates.filter(f => !f.s.cash || f.s.collected));
+  // A place the pot carries brings in nothing — that is the whole of what
+  // "the kitty covers it" means. Counting it would credit the club with money
+  // it decided not to ask anybody for.
+  const collected = sum(fates.filter(f => !f.s.kitty && (!f.s.cash || f.s.collected)));
   const pending = sum(fates.filter(f => f.s.cash && !f.s.collected));
 
   const c = store.contracts.find(x => x.id === contractId);
@@ -1121,6 +1168,8 @@ async function doConfirm() {
     charged_to: r.charged_to || r.player_id,
     // Which of their balances pays, when it is not this game's own contract.
     settle_contract_id: r.settle_contract_id || null,
+    // Nobody is billed for this place at all — the club pot carries it.
+    settled_from_kitty: r.settled_from_kitty ? 1 : 0,
     // Whether this one is cash is decided here, on the night, and must travel
     // with the charge. It used to be inferred server-side from the player's
     // permanent record, so marking a regular player as a cash guest for one game

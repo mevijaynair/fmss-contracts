@@ -1087,6 +1087,10 @@ body.role-admin .role-player-only { display: none !important; }
 /* Cash already in hand — same money as "to collect", a different half of it. */
 .settle-badge.is-collected { color: var(--success);
   background: color-mix(in srgb, var(--success) 18%, transparent); }
+/* Nobody is billed. Its own colour because it is a third fate, not a quieter
+   version of either of the other two. */
+.settle-badge.is-kitty { color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent); }
 .settle-badge.is-toggle { cursor: pointer; }
 .settle-badge.is-toggle:hover { filter: brightness(1.25); }
 .settle-badge.is-toggle:focus-visible { outline: 2px solid var(--sport); outline-offset: 2px; }
