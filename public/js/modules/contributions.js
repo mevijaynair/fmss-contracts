@@ -119,18 +119,15 @@ async function renderSheet() {
   try { d = await api.get(`/share/contributions?weeks=${sheetWeeks}`); }
   catch (e) { host.innerHTML = `<p class="hint">${esc(e.message)}</p>`; return; }
 
-  // Biggest mover first. Named "net change" rather than "paid in", because a
-  // programme share and a movement are in here too — calling Joe a 610 payer
-  // when he paid 710 and had 100 taken off would be the sheet's one lie.
-  const people = d.people.map(p => `
-    <tr><td>${esc(p.name)}</td>
-      <td class="num rep-bal ${p.total < 0 ? 'rep-out' : 'rep-in'}">${money(p.total)}</td></tr>`).join('');
-
   host.innerHTML = `
-    <p class="hint">Everything that touched a balance since ${esc(fmtDate(d.since))} —
-      money in, credit moved between people, and programme shares taken off.
-      Send it beside the standing sheet: that one says where everybody stands,
-      this one says how they got there.</p>
+    <p class="hint">A supporting record of every transaction since
+      ${esc(fmtDate(d.since))} — money in, credit moved between people, and
+      programme shares taken off. It goes beside the standing sheet: that one
+      says where everybody stands, this one is the list of what happened.
+      <strong>It totals nothing per person and ranks nobody.</strong> Balances
+      are topped up in lumps whenever they run low, so a big figure means
+      somebody paid for six months on Tuesday and a small one means they were
+      already paid up — neither says anything about the person.</p>
 
     <div class="rep-summary">
       <span><strong>${d.totals.rows}</strong> entries</span>
@@ -140,13 +137,8 @@ async function renderSheet() {
       <span><strong>${money(d.totals.net)}</strong> net</span>
     </div>
 
-    <div class="rep-collect-head" style="margin-top:1rem;">Net change per person</div>
-    <div class="table-scroll">
-      <table class="sams-table rep-table"><tbody>${people
-    || '<tr><td class="hint">Nothing in this period.</td></tr>'}</tbody></table>
-    </div>
-
-    ${d.groups.map(sheetGroupHtml).join('')}
+    ${d.groups.map(sheetGroupHtml).join('')
+    || '<p class="hint">Nothing moved in this period.</p>'}
 
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:1rem;">
       <button class="btn btn-sm" data-share-contrib>Send as picture</button>
@@ -180,8 +172,9 @@ async function renderSheet() {
 
 /** The same sheet as plain text, because where it is going is WhatsApp. */
 function contribSheetText(d) {
-  const out = [`FMSS — what came in since ${fmtDate(d.since)}`,
-    `${d.totals.rows} entries · ${d.totals.people} people · ${money(d.totals.net)} net`];
+  const out = [`FMSS — every transaction since ${fmtDate(d.since)}`,
+    `${d.totals.rows} entries · ${d.totals.people} people · ${money(d.totals.net)} net`,
+    '(a record of what happened — it totals nothing per person and ranks nobody)'];
   for (const g of d.groups) {
     out.push('', `${g.title} — ${money(g.total)}`);
     for (const r of g.rows) {

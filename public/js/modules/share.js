@@ -667,8 +667,12 @@ function paintCollection(pen, d, ctx) {
  * there, so the first reply to it in the group is always "but I paid". This
  * is that answer, drawn the same way and sent in the same breath.
  *
- * Net change per person leads, because that is the line that answers the
- * reply. The entries follow for anybody who wants to check it.
+ * A record of what happened, and nothing more. There is no total per person
+ * and no ranking: a column of names ordered by how much each one moved reads
+ * as a table of who is pulling their weight, and these figures cannot carry
+ * that. Balances are topped up in lumps, so the name at the top may just have
+ * paid for six months on Tuesday. The list can be checked; a league table
+ * made from it could not.
  */
 function paintContributions(pen, d, ctx) {
   const x = PAD;
@@ -680,7 +684,9 @@ function paintContributions(pen, d, ctx) {
     { str: longDate(d.generated_at), x: x + w, size: 22, color: C.muted,
       align: 'right', dy: (38 - 22) * 0.82 },
   ], 48);
-  pen.text('What came in, and what moved', x, { size: 30, weight: 700, lead: 40 });
+  pen.text('Every transaction', x, { size: 30, weight: 700, lead: 38 });
+  pen.text('A record of what happened — not a total or a ranking of anybody.', x,
+    { size: 20, color: C.faint, lead: 32 });
   inline(pen, ctx, x, [
     { str: `since ${longDate(d.since)}  ·  ` },
     { str: `${d.totals.rows} entries  ·  ` },
@@ -688,31 +694,6 @@ function paintContributions(pen, d, ctx) {
     ...(d.totals.out ? [{ str: '  ·  ' },
       { str: `${money(d.totals.out)} out`, weight: 600, color: C.bad }] : []),
   ], { size: 22, lead: 40 });
-
-  // ---- net change per person, biggest first
-  pen.rect(x, w, 4, C.gold, 2);
-  pen.gap(18);
-  pen.text('Net change per person', x, { size: 27, weight: 700, lead: 38 });
-  const colW = (w - 28) / 2;
-  const half = Math.ceil(d.people.length / 2);
-  const cols = [d.people.slice(0, half), d.people.slice(half)];
-  const rowH = 38;
-  const top = pen.y;
-  cols.forEach((col, ci) => {
-    pen.y = top;
-    const cx = x + ci * (colW + 28);
-    for (const p of col) {
-      const amount = signed(p.total);
-      const aw = widthOf(ctx, amount, 23, 600);
-      pen.row([
-        { str: fit(ctx, p.name, 23, colW - aw - 24), x: cx, size: 23 },
-        { str: amount, x: cx + colW, size: 23, weight: 600,
-          color: p.total < 0 ? C.bad : C.good, align: 'right' },
-      ], rowH);
-    }
-  });
-  pen.y = top + Math.max(cols[0].length, cols[1].length) * rowH;
-  pen.gap(16);
 
   // ---- the entries behind it
   for (const g of d.groups) {

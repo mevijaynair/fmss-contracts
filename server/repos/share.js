@@ -419,26 +419,32 @@ export const shareRepo = {
       };
     }).filter(g => g.count);
 
-    // Who put money in, biggest first. The question a reader actually has
-    // about a list of forty payments is whose, not when.
-    const perPerson = {};
-    for (const r of rows) {
-      const who = r.player_name || r.name_raw || '—';
-      perPerson[who] = round2((perPerson[who] || 0) + Number(r.amount || 0));
-    }
-    const people = Object.entries(perPerson)
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    /**
+     * Deliberately NOT a total per person, and deliberately not ranked.
+     *
+     * A column of names ordered by how much each one moved reads as a table
+     * of who is pulling their weight, and the figures cannot carry that. A
+     * balance is topped up in lumps whenever it runs low, so the person at
+     * the top may simply have paid for six months last Tuesday and the one
+     * at the bottom may be fully paid up from August. Someone who had a
+     * programme share taken off appears to have contributed less than they
+     * did. None of that is visible in a total, and all of it is read into
+     * one the moment it is sorted.
+     *
+     * This sheet is a record of what happened, which is a thing that can be
+     * checked. Anything summarising people from it would be a judgement
+     * about them that the numbers do not support — so there is none here,
+     * and this comment is the reason not to add one back.
+     */
 
     return {
       generated_at: new Date().toISOString().slice(0, 10),
       since: from,
       weeks,
       groups,
-      people,
       totals: {
         rows: rows.length,
-        people: people.length,
+        people: new Set(rows.map(r => r.player_name || r.name_raw)).size,
         net: round2(rows.reduce((t, r) => t + Number(r.amount || 0), 0)),
         in: round2(rows.filter(r => Number(r.amount) > 0)
           .reduce((t, r) => t + Number(r.amount), 0)),
