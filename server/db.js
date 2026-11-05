@@ -1086,7 +1086,7 @@ export function initSchema() {
           host_player_id TEXT REFERENCES players(id),
           tier TEXT NOT NULL DEFAULT 'adult',
           amount_due REAL NOT NULL DEFAULT 0,
-          pay_method TEXT NOT NULL DEFAULT 'cash' CHECK(pay_method IN ('cash', 'balance')),
+          pay_method TEXT NOT NULL DEFAULT 'cash' CHECK(pay_method IN ('cash', 'balance', 'kitty')),
           paid INTEGER NOT NULL DEFAULT 0,
           paid_at TEXT,
           notes TEXT,
@@ -1160,6 +1160,59 @@ export function initSchema() {
       const cols = db.prepare('PRAGMA table_info(event_attendees)').all();
       if (cols.length && !cols.some(c => c.name === 'received_via')) {
         db.exec("ALTER TABLE event_attendees ADD COLUMN received_via TEXT NOT NULL DEFAULT 'cash'");
+      }
+    },
+    /**
+     * event_attendees: the club pot can carry somebody's share.
+     *
+     * A third answer to "whose money is this", and the only one that costs
+     * the club anything. A balance payer spends money the club already holds,
+     * so the pot does not move. A sponsored player spends money the pot has —
+     * which is a real expense and the one case here that must reduce it.
+     *
+     * CHECK constraints cannot be widened in place, so the table is rebuilt.
+     * Same recipe as the external_events rebuild above, including leaving the
+     * old shape alone and saying so if the rename fails: a database that
+     * cannot take the new value still runs, it just cannot record a
+     * sponsorship until it is repaired.
+     */
+    () => {
+      const sql = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='event_attendees'").get()?.sql;
+      if (!sql || sql.includes("'kitty'")) return;
+      try {
+        db.exec('PRAGMA foreign_keys = OFF;');
+        db.exec(`CREATE TABLE event_attendees_new (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL REFERENCES external_events(id) ON DELETE CASCADE,
+          player_id TEXT REFERENCES players(id),
+          guest_name TEXT,
+          host_player_id TEXT REFERENCES players(id),
+          tier TEXT NOT NULL DEFAULT 'adult',
+          amount_due REAL NOT NULL DEFAULT 0,
+          pay_method TEXT NOT NULL DEFAULT 'cash'
+            CHECK(pay_method IN ('cash', 'balance', 'kitty')),
+          received_via TEXT NOT NULL DEFAULT 'cash',
+          paid INTEGER NOT NULL DEFAULT 0,
+          paid_at TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL)`);
+        db.exec(`INSERT INTO event_attendees_new
+          (id, event_id, player_id, guest_name, host_player_id, tier, amount_due,
+           pay_method, received_via, paid, paid_at, notes, created_at)
+          SELECT id, event_id, player_id, guest_name, host_player_id, tier, amount_due,
+                 pay_method, COALESCE(received_via, 'cash'), paid, paid_at, notes, created_at
+          FROM event_attendees`);
+        db.exec('DROP TABLE event_attendees;');
+        db.exec('ALTER TABLE event_attendees_new RENAME TO event_attendees;');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_event ON event_attendees(event_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_player ON event_attendees(player_id)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_att_host ON event_attendees(host_player_id)');
+      } catch (e) {
+        console.warn('[migrate] could not widen event_attendees.pay_method:', e.message);
+        try { db.exec('DROP TABLE IF EXISTS event_attendees_new;'); } catch { /* nothing to undo */ }
+      } finally {
+        db.exec('PRAGMA foreign_keys = ON;');
       }
     },
   ];

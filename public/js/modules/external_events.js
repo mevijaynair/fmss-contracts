@@ -220,10 +220,18 @@ function moneyPanel(s, attendees) {
       ${cell('In your bank', money(s.in_bank))}
       ${cell('Off balances', money(s.balance_charged), null,
     s.balance_charged ? 'nobody hands this over' : '')}
+      ${s.kitty_funded ? cell('Club paid', money(s.kitty_funded), 'var(--warning)',
+    'out of the kitty') : ''}
       ${cell('Still to come', money(s.cash_outstanding),
     s.cash_outstanding ? 'var(--warning)' : null, owingNote)}
     </div>
 
+    ${s.kitty_funded ? `
+      <p class="hint" style="margin:0 0 0.6rem;">
+        The club pot is carrying <strong>${money(s.kitty_funded)}</strong> of this. That one IS an
+        expense — unlike the balances above, it is money the club did not already hold — so the
+        kitty is reduced by it, and follows the guest list if you change who is covered.
+      </p>` : ''}
     ${s.club_supplies ? `
       <p class="hint" style="margin:0 0 1rem;">
         <strong>${money(s.club_supplies)}</strong> of this was settled off contract balances, so nobody
@@ -250,11 +258,13 @@ function moneyPanel(s, attendees) {
  * anybody says out loud, so the screen asks the question the collector
  * actually asks and splits the answer itself.
  */
-const METHODS = [['balance', 'Their balance'], ['cash', 'Cash'], ['bank', 'Bank transfer']];
-const methodOf = (a) => (a.pay_method === 'balance' ? 'balance'
+const METHODS = [['balance', 'Their balance'], ['cash', 'Cash'],
+  ['bank', 'Bank transfer'], ['kitty', 'Club pays (kitty)']];
+const methodOf = (a) => (a.pay_method === 'balance' || a.pay_method === 'kitty'
+  ? a.pay_method
   : (a.received_via === 'bank' ? 'bank' : 'cash'));
-const methodPatch = (v) => (v === 'balance'
-  ? { pay_method: 'balance' }
+const methodPatch = (v) => (v === 'balance' || v === 'kitty'
+  ? { pay_method: v }
   : { pay_method: 'cash', received_via: v });
 
 function attendeeRow(a, ev) {
@@ -282,8 +292,10 @@ function attendeeRow(a, ev) {
         </select>
       </td>
       <td style="text-align:center;">
-        ${method === 'balance'
-      ? '<span class="hint" title="Already taken from their contract balance">settled</span>'
+        ${method === 'kitty'
+      ? '<span class="hint" title="The club pot is carrying this place — nothing to collect">club pays</span>'
+      : method === 'balance'
+        ? '<span class="hint" title="Already taken from their contract balance">settled</span>'
       // Once closed the checkbox is dead weight, but whether they actually paid
       // is exactly what you come back to a closed programme to find out.
       : locked
@@ -334,12 +346,15 @@ const SHEET_GROUPS = [
     note: 'nobody hands this over — the club puts the cash in',
     pick: (a) => a.pay_method === 'balance' },
   { key: 'pocket', title: 'Cash in hand', cls: 'rep-in',
-    pick: (a) => a.pay_method !== 'balance' && a.paid && (a.received_via || 'cash') !== 'bank' },
+    pick: (a) => a.pay_method === 'cash' && a.paid && (a.received_via || 'cash') !== 'bank' },
   { key: 'bank', title: 'In your bank', cls: 'rep-in',
-    pick: (a) => a.pay_method !== 'balance' && a.paid && (a.received_via || 'cash') === 'bank' },
+    pick: (a) => a.pay_method === 'cash' && a.paid && (a.received_via || 'cash') === 'bank' },
+  { key: 'kitty', title: 'Club paid', cls: 'rep-refill',
+    note: 'the pot carried these — the one part that costs the club',
+    pick: (a) => a.pay_method === 'kitty' },
   { key: 'owing', title: 'Still to come', cls: 'rep-out',
     note: 'these are the people to chase',
-    pick: (a) => a.pay_method !== 'balance' && !a.paid },
+    pick: (a) => a.pay_method !== 'balance' && a.pay_method !== 'kitty' && !a.paid },
 ];
 
 const sheetRows = (attendees, g) => attendees.filter(g.pick)

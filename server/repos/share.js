@@ -328,9 +328,10 @@ export const shareRepo = {
     const defs = [
       ['Off contract balance', 'nobody hands this over',
         (a) => a.pay_method === 'balance'],
-      ['Cash in hand', '', (a) => a.pay_method !== 'balance' && a.paid && via(a) === 'cash'],
-      ['In your bank', '', (a) => a.pay_method !== 'balance' && a.paid && via(a) === 'bank'],
-      ['Still to come', 'to chase', (a) => a.pay_method !== 'balance' && !a.paid],
+      ['Cash in hand', '', (a) => a.pay_method === 'cash' && a.paid && via(a) === 'cash'],
+      ['In your bank', '', (a) => a.pay_method === 'cash' && a.paid && via(a) === 'bank'],
+      ['Club paid', 'out of the kitty', (a) => a.pay_method === 'kitty'],
+      ['Still to come', 'to chase', (a) => a.pay_method === 'cash' && !a.paid],
     ];
 
     const groups = defs.map(([title, note, pick]) => {
@@ -364,6 +365,7 @@ export const shareRepo = {
       settled: round2(s.due_total - s.cash_outstanding),
       outstanding: s.cash_outstanding,
       club_supplies: s.club_supplies,
+      kitty_funded: s.kitty_funded,
       groups,
     };
   },

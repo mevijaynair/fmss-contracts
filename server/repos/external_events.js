@@ -147,6 +147,7 @@ export const externalEventsRepo = {
     // The reimbursement depends on actual_amount and on who fronted it, so any
     // edit to either has to redraw it.
     this.syncFrontedCredit(db, eventId);
+    this.syncSponsorship(db, eventId);
     this.repostIfBanked(db, eventId);
     return this.getEvent(db, eventId);
   },
@@ -227,6 +228,7 @@ export const externalEventsRepo = {
       pay_method, viaOf(received_via), notes, new Date().toISOString());
 
     this.syncAttendeeTxn(db, eventId, id);
+    this.syncSponsorship(db, eventId);
     this.repostIfBanked(db, eventId);
     return db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(id);
   },
@@ -262,6 +264,7 @@ export const externalEventsRepo = {
 
     // Switching to cash must clear a debit that is no longer owed.
     this.syncAttendeeTxn(db, att.event_id, attendeeId);
+    this.syncSponsorship(db, att.event_id);
     this.repostIfBanked(db, att.event_id);
     return db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(attendeeId);
   },
@@ -275,6 +278,7 @@ export const externalEventsRepo = {
     // longer attending.
     db.prepare('DELETE FROM transactions WHERE id = ?').run(attendeeTxnId(attendeeId));
     db.prepare('DELETE FROM event_attendees WHERE id = ?').run(attendeeId);
+    this.syncSponsorship(db, att.event_id);
     this.repostIfBanked(db, att.event_id);
   },
 
@@ -283,8 +287,11 @@ export const externalEventsRepo = {
   setAttendeePaid(db, attendeeId, paid) {
     const att = db.prepare('SELECT * FROM event_attendees WHERE id = ?').get(attendeeId);
     if (!att) throw new Error('Attendee not found');
-    if (att.pay_method !== 'cash') {
+    if (att.pay_method === 'balance') {
       throw new Error('This attendee pays from their balance, which is already settled — nothing to mark.');
+    }
+    if (att.pay_method === 'kitty') {
+      throw new Error('The club is carrying this place — there is no payment to wait for.');
     }
     db.prepare('UPDATE event_attendees SET paid = ?, paid_at = ? WHERE id = ?')
       .run(paid ? 1 : 0, paid ? new Date().toISOString() : null, attendeeId);
@@ -336,6 +343,50 @@ export const externalEventsRepo = {
     });
   },
 
+  /**
+   * The club pot carrying somebody's share.
+   *
+   * This is the one kind of attendee that costs the club money, and it is
+   * worth saying why it differs from the other two:
+   *
+   *   cash     the person hands money over. The pot is not involved.
+   *   balance  they spend credit the club ALREADY HOLDS. Nothing is earned
+   *            or lost, so the pot must not move — booking it would show a
+   *            loss on a collection that broke even.
+   *   kitty    the club pays for them out of the pot. That is a real expense
+   *            and the pot genuinely drops.
+   *
+   * Unlike the surplus, this is not posted on request. A surplus is an
+   * accounting result you may or may not want to bank; a sponsorship is the
+   * decision itself — the moment you say the kitty is carrying Joe, the pot
+   * has spent that money. So the row is DERIVED and rewritten whenever the
+   * guest list changes, the same discipline the game lines needed: a kitty
+   * figure written once rather than derived is how 240 came to sit in a pot
+   * whose own summary said 120.
+   */
+  syncSponsorship(db, eventId) {
+    const kittyId = `k_evspon_${eventId}`;
+    db.prepare('DELETE FROM kitty WHERE id = ?').run(kittyId);
+    const event = this.getEvent(db, eventId);
+    if (!event) return;
+
+    const total = this.listAttendees(db, eventId)
+      .filter(a => a.pay_method === 'kitty')
+      .reduce((t, a) => t + (Number(a.amount_due) || 0), 0);
+    if (total <= 0) return;
+
+    const who = this.listAttendees(db, eventId)
+      .filter(a => a.pay_method === 'kitty')
+      .map(a => a.player_name || a.guest_name).join(', ');
+
+    db.prepare(
+      `INSERT INTO kitty (id, kind, label, amount, date, scope, contract_id, historical, created_at)
+       VALUES (?, 'expense', ?, ?, ?, '', ?, 0, ?)`
+    ).run(kittyId, `${event.title} — club paid for ${who}`,
+      Math.round(total * 100) / 100, event.event_date, event.contract_id,
+      new Date().toISOString());
+  },
+
   // ---- money picture ----------------------------------------------------
 
   summary(db, eventId) {
@@ -348,6 +399,9 @@ export const externalEventsRepo = {
     const cashCollected = sum(a => a.pay_method === 'cash' && a.paid);
     const cashOutstanding = sum(a => a.pay_method === 'cash' && !a.paid);
     const balanceCharged = sum(a => a.pay_method === 'balance');
+    // The club carrying somebody. Its own bucket, because it is neither money
+    // handed over nor credit already held — it is the pot being spent.
+    const kittyFunded = sum(a => a.pay_method === 'kitty');
 
     // Where the money that has arrived actually IS. "Cash collected" covered
     // notes in a pocket and a bank transfer equally, which is the one thing
@@ -400,6 +454,14 @@ export const externalEventsRepo = {
        * without the P&L being told a story that is not true.
        */
       club_supplies: round(balanceCharged),
+      /**
+       * What the collection cost the club, as opposed to what it handled.
+       *
+       * club_supplies above is cash produced against money already held — it
+       * costs nothing. This is the pot actually paying, and it is the only
+       * figure here that makes the club poorer.
+       */
+      kitty_funded: round(kittyFunded),
       // What the programme made or lost: everything owed against what it cost.
       // Against actual once it is known, against budget while still planning.
       net: round(dueTotal - (actual || budget)),
@@ -487,6 +549,7 @@ export const externalEventsRepo = {
   deleteEvent(db, eventId) {
     db.prepare('DELETE FROM transactions WHERE event_id = ?').run(eventId);
     db.prepare('DELETE FROM kitty WHERE id = ?').run(`k_event_${eventId}`);
+    db.prepare('DELETE FROM kitty WHERE id = ?').run(`k_evspon_${eventId}`);
     db.prepare('DELETE FROM event_attendees WHERE event_id = ?').run(eventId);
     db.prepare('DELETE FROM external_events WHERE id = ?').run(eventId);
   },

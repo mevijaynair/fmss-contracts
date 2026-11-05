@@ -615,16 +615,21 @@ function paintCollection(pen, d, ctx) {
 
   for (const g of d.groups) {
     const chase = g.title === 'Still to come';
-    pen.rect(x, w, 4, chase ? C.warn : C.gold, 2);
+    const potPaid = g.title === 'Club paid';
+    pen.rect(x, w, 4, chase || potPaid ? C.warn : C.gold, 2);
     pen.gap(18);
     pen.row([
-      { str: g.title, x, size: 27, weight: 700, color: chase ? C.warn : C.text },
+      { str: g.title, x, size: 27, weight: 700, color: chase || potPaid ? C.warn : C.text },
       { str: `${money(g.total)} from ${g.count}`, x: x + w, size: 23, weight: 600,
         color: C.muted, align: 'right', dy: (27 - 23) * 0.82 },
     ], 38);
 
     if (g.rows.some(r => r.balance_now !== undefined)) {
       pen.text('No cash from these — it came off the contract balance they had already paid in.',
+        x, { size: 19, color: C.faint, lead: 30 });
+    }
+    if (potPaid) {
+      pen.text('The club pot carried these. The one part of the night that cost the club.',
         x, { size: 19, color: C.faint, lead: 30 });
     }
 
@@ -642,7 +647,7 @@ function paintCollection(pen, d, ctx) {
         ...(effect ? [{ str: effect, x: x + w - amountW - 24, size: 19, color: C.faint,
           align: 'right', dy: (24 - 19) * 0.82 }] : []),
         { str: amount, x: x + w, size: 24, weight: 600,
-          color: chase ? C.warn : C.text, align: 'right' },
+          color: chase || potPaid ? C.warn : C.text, align: 'right' },
       ], 36);
     }
     pen.gap(14);

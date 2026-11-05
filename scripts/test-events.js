@@ -245,6 +245,74 @@ test('a share taken off a balance shows up in the contributions log', () => {
   db.prepare("DELETE FROM transactions WHERE id = 't_manual_1'").run();
 });
 
+test('the club carrying somebody is the one case that costs the pot', () => {
+  // Three kinds of attendee and only one of them makes the club poorer:
+  //   cash    - they hand money over, the pot is not involved
+  //   balance - they spend credit the club ALREADY holds, so nothing is
+  //             earned or lost and the pot must not move
+  //   kitty   - the club pays for them. A real expense.
+  const before = kittyRepo.balance().balance;
+  const id = sendOff();
+  assert.equal(kittyRepo.balance().balance, before,
+    'cash and balance attendees leave the pot alone');
+
+  // Put the club behind two of them.
+  for (const who of ['echo', 'hotel']) {
+    const a = ev.listAttendees(db, id).find(x => x.player_id === who);
+    ev.updateAttendee(db, a.id, { pay_method: 'kitty' });
+  }
+  const s = ev.summary(db, id);
+  assert.equal(s.kitty_funded, 200, 'two places at 100');
+  assert.equal(kittyRepo.balance().balance, before - 200, 'and the pot is 200 lighter');
+
+  // Not counted as money anybody handed over, or as credit spent.
+  assert.equal(s.in_pocket, 100, 'echo was notes in hand and no longer is');
+  assert.equal(s.cash_outstanding, 100, 'hotel was awaited and no longer is');
+  assert.equal(s.balance_charged, 400, 'untouched');
+  assert.equal(s.in_pocket + s.in_bank + s.balance_charged + s.cash_outstanding
+    + s.kitty_funded, s.due_total, 'the five parts are still the whole');
+
+  // No ledger anywhere was touched by a sponsorship.
+  assert.equal(balanceOf('echo'), 0);
+  assert.equal(balanceOf('hotel'), 0);
+
+  // The pot line is DERIVED: take one back off and it follows.
+  const echo = ev.listAttendees(db, id).find(x => x.player_id === 'echo');
+  ev.updateAttendee(db, echo.id, { pay_method: 'cash', received_via: 'cash' });
+  assert.equal(kittyRepo.balance().balance, before - 100, 'it keeps up with the guest list');
+  assert.equal(ev.summary(db, id).kitty_funded, 100);
+
+  // Taking a sponsored person off the list refunds the pot too. Without this
+  // the club goes on paying for somebody who is not coming.
+  const hotel = ev.listAttendees(db, id).find(x => x.player_id === 'hotel');
+  ev.removeAttendee(db, hotel.id);
+  assert.equal(kittyRepo.balance().balance, before,
+    'the pot stops carrying somebody who has left the list');
+  assert.equal(ev.summary(db, id).kitty_funded, 0);
+
+  // And a programme deleted while the club is still carrying somebody must
+  // give that back too — otherwise the pot goes on paying for an event that
+  // no longer exists.
+  const foxtrot = ev.listAttendees(db, id).find(x => x.player_id === 'foxtrot');
+  ev.updateAttendee(db, foxtrot.id, { pay_method: 'kitty' });
+  assert.equal(kittyRepo.balance().balance, before - 100, 'carrying one again');
+  ev.deleteEvent(db, id);
+  assert.equal(kittyRepo.balance().balance, before, 'the pot is made whole again');
+});
+
+test('a sponsored place has no payment to wait for', () => {
+  const id = sendOff();
+  const a = ev.listAttendees(db, id).find(x => x.player_id === 'hotel');
+  ev.updateAttendee(db, a.id, { pay_method: 'kitty' });
+  assert.throws(() => ev.setAttendeePaid(db, a.id, true), /club is carrying/);
+  // Hotel was the one holding the collection open; the club carrying him
+  // settles it rather than leaving it outstanding for ever.
+  const india = ev.listAttendees(db, id).find(x => x.player_id === 'india');
+  ev.setAttendeePaid(db, india.id, true);
+  ev.close(db, id);
+  assert.equal(ev.getEvent(db, id).status, 'closed');
+});
+
 test('deleting a collection puts every balance back', () => {
   const before = SQUAD.map(([id]) => balanceOf(id));
   const id = sendOff();
