@@ -300,6 +300,96 @@ function attendeeRow(a, ev) {
     </tr>`;
 }
 
+/**
+ * The collection sheet — the picture that gets posted in the group.
+ *
+ * The guest list above is a working surface: every row carries three controls
+ * because every row might need changing. That is the wrong shape for the one
+ * question everybody else asks, which is "has mine gone in yet". So this is
+ * the same money said once, read-only, grouped by where it is, with the
+ * people named — the standing sheet's job, for a collection.
+ *
+ * Grouped rather than sorted, because the four groups are four different
+ * things to do: nothing, nothing, nothing, and chase.
+ */
+const SHEET_GROUPS = [
+  { key: 'balance', title: 'Off contract balance', cls: 'rep-in',
+    note: 'nobody hands this over — the club puts the cash in',
+    pick: (a) => a.pay_method === 'balance' },
+  { key: 'pocket', title: 'Cash in hand', cls: 'rep-in',
+    pick: (a) => a.pay_method !== 'balance' && a.paid && (a.received_via || 'cash') !== 'bank' },
+  { key: 'bank', title: 'In your bank', cls: 'rep-in',
+    pick: (a) => a.pay_method !== 'balance' && a.paid && (a.received_via || 'cash') === 'bank' },
+  { key: 'owing', title: 'Still to come', cls: 'rep-out',
+    note: 'these are the people to chase',
+    pick: (a) => a.pay_method !== 'balance' && !a.paid },
+];
+
+const sheetRows = (attendees, g) => attendees.filter(g.pick)
+  .sort((a, b) => String(a.player_name || a.guest_name)
+    .localeCompare(String(b.player_name || b.guest_name)));
+
+const sheetTotal = (rows) => rows.reduce((t, a) => t + (Number(a.amount_due) || 0), 0);
+
+function collectionSheet(ev, attendees, s) {
+  const groups = SHEET_GROUPS.map(g => {
+    const rows = sheetRows(attendees, g);
+    return { ...g, rows, total: sheetTotal(rows) };
+  }).filter(g => g.rows.length);
+
+  const body = groups.map(g => `
+    <div class="rep-collect-head" style="margin-top:1rem;">
+      <span class="${g.cls}">${esc(g.title)}</span> —
+      <strong>${money(g.total)}</strong> from ${g.rows.length}
+      ${g.note ? `<span class="hint">· ${esc(g.note)}</span>` : ''}
+    </div>
+    <div class="table-scroll">
+      <table class="sams-table rep-table">
+        <tbody>${g.rows.map(a => `
+          <tr>
+            <td>${esc(a.player_name || a.guest_name)}${
+  a.player_id ? '' : ' <span class="hint">guest</span>'}</td>
+            <td class="num rep-bal">${money(a.amount_due)}</td>
+            <td class="hint">${esc(a.notes || '')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('');
+
+  return `
+    <div class="sams-card" style="margin-top:1.5rem;">
+      <div class="card-header">
+        <h3 class="card-title">Collection sheet</h3>
+        <button class="btn btn-sm btn-secondary" data-copy-sheet>Copy for WhatsApp</button>
+      </div>
+      <div class="rep-summary">
+        <span><strong>${s.headcount}</strong> people</span>
+        <span><strong>${money(s.due_total)}</strong> in total</span>
+        <span class="rep-in"><strong>${money(s.due_total - s.cash_outstanding)}</strong> settled</span>
+        <span class="${s.cash_outstanding ? 'rep-out' : 'rep-in'}">
+          <strong>${money(s.cash_outstanding)}</strong> still to come</span>
+      </div>
+      ${body || '<p class="hint">Nobody on the list yet.</p>'}
+    </div>`;
+}
+
+/** The same sheet as plain text, because where it is going is WhatsApp. */
+function sheetText(ev, attendees, s) {
+  const out = [`${ev.title} — ${ev.event_date}`,
+    `${s.headcount} people · ${money(s.due_total)} total`];
+  if (s.cash_outstanding) out.push(`${money(s.cash_outstanding)} still to come`);
+  for (const g of SHEET_GROUPS) {
+    const rows = sheetRows(attendees, g);
+    if (!rows.length) continue;
+    out.push('', `${g.title} — ${money(sheetTotal(rows))}`);
+    for (const a of rows) {
+      out.push(`  ${a.player_name || a.guest_name} ${money(a.amount_due)}`
+        + (a.notes ? ` (${a.notes})` : ''));
+    }
+  }
+  return out.join('\n');
+}
+
 function renderDetail() {
   const { event: ev, attendees, summary: s } = cache;
   const st = STATUS_STYLE[ev.status] || STATUS_STYLE.planning;
@@ -373,6 +463,8 @@ function renderDetail() {
           <p class="hint" style="margin:0.6rem 0 0;">A guest paying from a balance needs a host — they have no ledger of their own.</p>
         </div>`}
     </div>
+
+    ${collectionSheet(ev, attendees, s)}
 
     <div class="sams-card" style="margin-top:1.5rem;">
       <h4 class="card-title">Closing up</h4>
@@ -453,6 +545,24 @@ function wireDetail(ev, locked) {
       toast('Reopened');
     }));
   }
+
+  // Plain text, because where this is going is WhatsApp. The clipboard API
+  // needs a secure context and a gesture; this has the gesture, and the
+  // fallback selects the text so it can still be copied by hand.
+  root().querySelector('[data-copy-sheet]')?.addEventListener('click', async (e) => {
+    const text = sheetText(cache.event, cache.attendees, cache.summary);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Sheet copied — paste it into the group');
+    } catch {
+      const box = document.createElement('textarea');
+      box.className = 'st-fallback';
+      box.value = text;
+      e.target.after(box);
+      box.select();
+      toast('Copy did not work here — the text is selected, copy it by hand', true);
+    }
+  });
 
   $('evKitty').addEventListener('click', guard(async () => {
     const res = await api.postEventToKitty(openId);
