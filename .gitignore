@@ -15,3 +15,6 @@ data/backups/
 # Scratch auth tokens written by local test scripts. Never commit one.
 .tok
 *.token
+
+# Environment files hold passwords and keys. .env.example is the template.
+.env
