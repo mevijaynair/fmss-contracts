@@ -370,7 +370,13 @@ r.delete('/schedule/:contractId/no-game/:date', wrap((req) => {
 // ---- contract period report (the sheet that gets shared with players) ----
 r.get('/report/:contractId', wrap((req) => {
   requireAdmin(req);
-  return periodReportRepo.report(req.params.contractId, { since: req.query.since || null, includeDormant: req.query.all === '1' });
+  return periodReportRepo.report(req.params.contractId, {
+    since: req.query.since || null,
+    includeDormant: req.query.all === '1',
+    // How far back "lately" reaches on this sheet. The repo clamps it, and
+    // clamps it again to the contract period.
+    recentWeeks: req.query.recent ? Number(req.query.recent) : undefined,
+  });
 }));
 
 // ---- where the whole club stands ----
@@ -386,7 +392,11 @@ r.get('/report/:contractId', wrap((req) => {
 // payment history, stay where they were: behind the player's own id, or
 // behind admin.
 r.get('/standing', wrap((req) => shareRepo.club({
-  weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)),
+  weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 5)),
+  // Turnouts yes, payments no. Balances are public by the club's own
+  // decision; who paid what and when is history, and this screen was opened
+  // up on the understanding that it carries no history.
+  moneyIn: false,
 })));
 
 // ---- shareable snapshots (the images that get sent to WhatsApp) ----
@@ -394,7 +404,7 @@ r.get('/standing', wrap((req) => shareRepo.club({
 // server/repos/share.js for why that matters.
 r.get('/share/club', wrap((req) => {
   requireAdmin(req);
-  return shareRepo.club({ weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 3)) });
+  return shareRepo.club({ weeks: Math.min(12, Math.max(1, Number(req.query.weeks) || 5)) });
 }));
 
 // What came in, as a sheet — the page that goes beside the standing one.

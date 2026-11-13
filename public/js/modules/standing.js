@@ -34,13 +34,42 @@ const balCell = (v) => `<td class="num rep-bal ${v < 0 ? 'rep-out' : v > 0 ? 're
   + `${money(v)}</td>`;
 const youTag = ' <span class="rep-you">you</span>';
 
-function squadTable(c, me) {
+/**
+ * Lately, in one cell: turnouts above, money onto the balance below.
+ *
+ * The Games column is the whole contract period, which answers how the
+ * season has gone and not the question a reader has in front of this screen —
+ * who is actually playing now, and has anybody paid in since. Same shape and
+ * same window as the standing sheet, so the two screens agree.
+ */
+function recentCell(p, moneyIn) {
+  const r = p.recent || {};
+  const n = r.played || 0;
+  const games = n ? `<strong>${n}</strong> game${n === 1 ? '' : 's'}`
+    : '<span class="rep-na">none</span>';
+  // Without the money half this is one fact, so it is drawn as one: a second
+  // line reading "—" for everybody would say nobody has paid anything in,
+  // which is not what is being shown.
+  if (!moneyIn) return `<td class="rep-recent"><span>${games}</span></td>`;
+  const paid = r.paid_in || 0;
+  const out = r.taken_out || 0;
+  return `<td class="rep-recent">
+    <span class="rep-recent-g">${games}</span>
+    <span class="rep-recent-m">${paid > 0
+    ? `<span class="rep-in">+${money(paid)}</span>`
+    : '<span class="rep-na">—</span>'}${out > 0
+    ? ` <span class="rep-out">−${money(out)}</span>` : ''}</span>
+  </td>`;
+}
+
+function squadTable(c, me, moneyIn) {
   const rows = c.squad.map((p) => {
     const st = statusOf(p);
     const mine = me && p.name === me;
     return `<tr class="${mine ? 'rep-me' : ''}">
       <td>${esc(p.name)}${mine ? youTag : ''}</td>
       <td class="num">${p.played ?? ''}</td>
+      ${recentCell(p, moneyIn)}
       ${balCell(p.balance)}
       <td class="rep-status ${st.cls}">${st.word}</td>
     </tr>`;
@@ -58,12 +87,22 @@ function squadTable(c, me) {
         <span class="rep-in"><strong>${c.totals.in_contract}</strong> OK</span>
         <span class="rep-refill"><strong>${c.totals.refill}</strong> top up</span>
         <span class="rep-out"><strong>${c.totals.out}</strong> empty</span>
+        <span>·</span>
+        <!-- The club's own total stays whoever is reading. It is an
+             aggregate, not a history: what it says is how the night is
+             funded, and that figure goes out to the group anyway. What is
+             withheld from a member is the per-person column. -->
+        <span>last ${c.recent_weeks} weeks:
+          <strong>${c.totals.recent_played}</strong> turnouts,
+          <strong class="rep-in">${money(c.totals.recent_paid_in)}</strong> paid in</span>
       </div>
       <div class="table-scroll">
         <table class="sams-table rep-table">
           <thead><tr><th>Player</th><th class="num">Games</th>
+            <th>Last ${c.recent_weeks} weeks<br>
+              <span class="hint">${moneyIn ? 'games · paid in' : 'games played'}</span></th>
             <th class="num">Balance</th><th>Next game</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="4" class="hint">Nobody yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="5" class="hint">Nobody yet.</td></tr>'}</tbody>
         </table>
       </div>
     </div>`;
@@ -149,7 +188,7 @@ function recentGames(d) {
  * sheet, which is about people rather than accounts, and a guest brought by a
  * member has no account of their own to match against.
  */
-export async function renderClubStanding(host, { weeks = 3 } = {}) {
+export async function renderClubStanding(host, { weeks = 5 } = {}) {
   if (!host) return;
   host.innerHTML = '<p class="hint">Loading…</p>';
 
@@ -164,6 +203,6 @@ export async function renderClubStanding(host, { weeks = 3 } = {}) {
       already paid in; <span class="rep-out">empty</span> means the next game is not covered
       yet. Guests pay cash per game and keep no balance.</p>
     ${stillToPayTable(d, me)}
-    ${d.contracts.map(c => squadTable(c, me)).join('')}
+    ${d.contracts.map(c => squadTable(c, me, d.money_in)).join('')}
     ${recentGames(d)}`;
 }

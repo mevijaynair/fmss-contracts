@@ -1003,6 +1003,194 @@ test('the Standing sheet is a credit position, not an attendance record', () => 
   assert.ok(gw.id);
 });
 
+// --- what the sheet says about lately -------------------------------------
+//
+// The period columns answer "how has the season gone". Nobody reads them to
+// find out who is turning up now, and a player who played eight times in
+// September and nothing since reads exactly like a regular. These pin the
+// window: what is inside it, what is outside it, and what counts as money.
+
+const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+
+function gameOn(date, entries) {
+  const id = `rg${++seq}`;
+  db.prepare(`INSERT INTO gameweeks (id,contract_id,gw_number,contract_number,date,cost_per_gw,
+    num_players,teams_raw,captains_raw,score,comments,historical,created_at)
+    VALUES (?,?,?,0,?,0,0,'','','','',0,?)`)
+    .run(id, CONTRACT, ++seq, date, new Date().toISOString());
+  for (const e of entries) charge(id, e, 0);
+  return id;
+}
+const contributeOn = (pid, amount, date) =>
+  db.prepare(`INSERT INTO contributions (id,player_id,contract_id,amount,date,historical,created_at)
+              VALUES (?,?,?,?,?,0,?)`)
+    .run(`rc${++seq}`, pid, CONTRACT, amount, date, new Date().toISOString());
+
+const sheetRow = (pid, opts = {}) => periodReportRepo
+  .report(CONTRACT, { since: '2000-01-01', includeDormant: true, ...opts })
+  .rows.find(r => r.player_id === pid);
+
+test('the sheet counts games lately over a window, not over the whole period', () => {
+  const regular = player('Still turning up', 500);
+  const lapsed = player('Not seen since', 500);
+  gameOn(dayAgo(3), [regular]);
+  gameOn(dayAgo(20), [regular]);
+  gameOn(dayAgo(200), [regular, lapsed]);
+
+  const r = sheetRow(regular);
+  assert.equal(r.played, 3, 'the period column still counts the lot');
+  assert.equal(r.recent.played, 2, 'the window counts only what is inside it');
+  assert.equal(r.recent.last_game, dayAgo(3), 'and knows when they were last seen');
+
+  const l = sheetRow(lapsed);
+  assert.equal(l.played, 1, 'the lapsed player did play this period');
+  assert.equal(l.recent.played, 0, 'but not lately — which is the whole point');
+  assert.equal(l.recent.last_game, null);
+});
+
+test('money in lately is money in, from wherever it arrived', () => {
+  const a = player('Paid up lately', 0);
+  contributeOn(a, 200, dayAgo(4));
+  contributeOn(a, 150, dayAgo(10));
+  contributeOn(a, 999, dayAgo(120));            // outside the window
+  txn(a, 'transfer_in', 50);                     // today, and not a contribution
+  txn(a, 'adjustment', 25, 'pending');           // not signed off, so not money
+
+  const r = sheetRow(a);
+  assert.equal(r.recent.paid_in, 400, 'contributions and credits, nothing pending');
+  assert.equal(r.recent.payments, 3, 'counted as three arrivals');
+  assert.equal(r.recent.taken_out, 0, 'nothing came off');
+});
+
+test('what came off a balance lately is shown, and a game is not it', () => {
+  // A programme or a send-off settled from contract credit is exactly the
+  // movement people ask about afterwards. Games are not: they have their own
+  // column, and counting them here would describe every regular as having had
+  // money taken off them.
+  const a = player('Spent it on the send-off', 500);
+  const gw = gameOn(dayAgo(2), []);
+  charge(gw, a, 40);
+  txn(a, 'event_deduction', -100);
+
+  const r = sheetRow(a);
+  assert.equal(r.recent.taken_out, 100, 'the send-off is shown');
+  assert.equal(r.recent.deductions, 1);
+  assert.equal(r.recent.paid_in, 0, 'and it is not netted into money in');
+  assert.equal(r.recent.played, 1, 'the game is counted as a game');
+});
+
+test('the window never reaches back past the period it sits inside', () => {
+  // On a contract a fortnight old, "the last five weeks" would otherwise count
+  // games from the contract before it, and the recent column would be larger
+  // than the period one it sits next to.
+  const a = player('New contract', 100);
+  gameOn(dayAgo(30), [a]);
+  const start = dayAgo(10);
+  const rep = periodReportRepo.report(CONTRACT,
+    { since: start, includeDormant: true, recentWeeks: 5 });
+  assert.equal(rep.recent_from, start, 'clipped to the period start');
+  assert.equal(rep.recent_clipped, true, 'and it says so');
+  const r = rep.rows.find(x => x.player_id === a);
+  assert.equal(r.recent.played, 0, 'the older game is in neither count');
+  assert.equal(r.played, 0);
+
+  const wide = periodReportRepo.report(CONTRACT,
+    { since: '2000-01-01', includeDormant: true, recentWeeks: 5 });
+  assert.equal(wide.recent_clipped, false, 'a long period does not clip it');
+  assert.ok(wide.recent_from > '2000-01-01', 'and the window is still a window');
+});
+
+test('the member lookup gets the turnouts and not the payments', () => {
+  // Balances go to the whole group every week, so they are public by the
+  // club's own decision. A per-person record of payments arriving is payment
+  // history, and the screen a member can open carries none.
+  const a = player('Reads the standing', 300);
+  contributeOn(a, 250, dayAgo(3));
+  gameOn(dayAgo(3), [a]);
+
+  const open = shareRepo.club({ weeks: 5, moneyIn: false });
+  assert.equal(open.money_in, false, 'and it says it is withholding');
+  const seen = open.contracts.flatMap(c => c.squad).find(s => s.name === 'Reads the standing');
+  assert.deepEqual(Object.keys(seen.recent).sort(), ['played'],
+    'a member sees turnouts and nothing else');
+  assert.ok(seen.recent.played >= 1, 'which is a real figure, not an empty one');
+  // The club's own total survives: an aggregate over a squad is how the
+  // night is funded, not a record of who paid. What must not survive is the
+  // per-person key, anywhere in the payload.
+  assert.ok(!JSON.stringify(open).includes('"paid_in"'),
+    'a per-person paid_in reached the member payload');
+  assert.ok(JSON.stringify(open).includes('recent_paid_in'),
+    'the club total is still there');
+
+  const full = shareRepo.club({ weeks: 5 });
+  const mine = full.contracts.flatMap(c => c.squad).find(s => s.name === 'Reads the standing');
+  assert.equal(mine.recent.paid_in, 250, 'the admin sheet keeps both halves');
+  const line = full.combined.find(r => r.name === 'Reads the standing');
+  assert.equal(line.recent.paid_in, 250, 'and the combined line adds them across nights');
+});
+
+test('turning out lately is who was on the pitch, not whose money paid', () => {
+  // The balance counts a charge against whoever SETTLES it, because that is a
+  // money question. This column is not: it says whether somebody has been
+  // playing. A member who brings a guest pays for two places and played one
+  // game, and keying this the way the balance keys it would credit the host
+  // with their guest's turnout and leave the guest shown as never seen.
+  const host = player('Brings a friend', 500);
+  const friend = player('The friend', 0); makeOutside(friend);
+  const gw = gameOn(dayAgo(5), []);
+  charge(gw, friend, 40, { chargedTo: host });
+
+  assert.equal(sheetRow(host).recent.played, 0, 'the host did not play it');
+  // Who did play it is counted, so this cannot pass by counting nobody. The
+  // guest has no row of their own to check — the sheet is the squad, and a
+  // guest keeps no contract credit to stand on it.
+  const alsoThere = player('Was actually there', 100);
+  charge(gw, alsoThere, 40);
+  assert.equal(sheetRow(alsoThere).recent.played, 1, 'and whoever played it is');
+  assert.equal(sheetRow(host).recent.played, 0, 'still not the host');
+});
+
+test('lately adds up across both nights for one person', () => {
+  // The combined line is about a person, not an account: somebody who paid
+  // into Saturdays and into Mon/Thu in the same fortnight put in the sum of
+  // the two, and reading one of them is the arithmetic this line exists to
+  // do for the reader.
+  const SECOND = 'testc2';
+  db.prepare(`INSERT INTO contracts (id, name, rates, cost_per_gw, sort)
+              VALUES (?, 'Second night', '{}', 0, 2)`).run(SECOND);
+  const a = player('Plays both nights', 100);
+  db.prepare(`INSERT INTO ledgers (player_id, contract_id, opening_balance, status)
+              VALUES (?, ?, 0, '')`).run(a, SECOND);
+  contributeOn(a, 120, dayAgo(6));
+  db.prepare(`INSERT INTO contributions (id,player_id,contract_id,amount,date,historical,created_at)
+              VALUES (?,?,?,?,?,0,?)`)
+    .run(`x${++seq}`, a, SECOND, 80, dayAgo(6), new Date().toISOString());
+  const gwB = `xg${++seq}`;
+  db.prepare(`INSERT INTO gameweeks (id,contract_id,gw_number,contract_number,date,cost_per_gw,
+    num_players,teams_raw,captains_raw,score,comments,historical,created_at)
+    VALUES (?,?,?,0,?,0,0,'','','','',0,?)`)
+    .run(gwB, SECOND, ++seq, dayAgo(6), new Date().toISOString());
+  db.prepare(`INSERT INTO charges (id,gameweek_id,player_id,team,is_captain,rate_type,amount,charged_to,paid)
+              VALUES (?,?,?,'',0,'',0,?,0)`).run(`xc${++seq}`, gwB, a, a);
+  gameOn(dayAgo(6), [a]);
+
+  try {
+    const d = shareRepo.club({ weeks: 5 });
+    const line = d.combined.find(r => r.name === 'Plays both nights');
+    assert.ok(line, 'and they are on the combined line at all');
+    assert.equal(line.recent.paid_in, 200, '120 on one night and 80 on the other');
+    assert.equal(line.recent.played, 2, 'one turnout on each');
+  } finally {
+    // Put the scratch database back as it was: every later test that reads
+    // every contract would otherwise be reading this one too.
+    db.exec(`DELETE FROM charges WHERE gameweek_id = '${gwB}'`);
+    db.exec(`DELETE FROM gameweeks WHERE contract_id = '${SECOND}'`);
+    db.exec(`DELETE FROM contributions WHERE contract_id = '${SECOND}'`);
+    db.exec(`DELETE FROM ledgers WHERE contract_id = '${SECOND}'`);
+    db.exec(`DELETE FROM contracts WHERE id = '${SECOND}'`);
+  }
+});
+
 test('the Standing sheet is the squad, not every guest who turned up once', () => {
   const member = player('Squad member', 300);
   const guest = player('One-off guest'); makeOutside(guest);

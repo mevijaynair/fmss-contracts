@@ -1163,6 +1163,17 @@ body.role-admin .role-player-only { display: none !important; }
 .rep-idx { color: var(--text-faint); width: 2rem; }
 .rep-na { color: var(--text-faint); }
 .rep-last { font-size: 0.8rem; white-space: nowrap; }
+/* Lately: two facts stacked in one column — turnouts above, money below —
+   because the sheet is read as a picture and a column costs more than a
+   line. The keyline on the left ties the two together and says they are one
+   cell, not a gap where a number is missing. */
+.rep-recent { white-space: nowrap; font-size: 0.8rem; line-height: 1.3;
+  border-left: 1px solid var(--border-color); }
+.rep-recent-g, .rep-recent-m { display: block; }
+.rep-recent-m { color: var(--text-muted); }
+.rep-summary-recent { align-items: baseline; }
+.rep-summary-recent .rep-recent-k { font-weight: 600; color: var(--text-main);
+  letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.78rem; }
 .rep-bal, .rep-status { font-weight: 600; }
 .rep-status { white-space: nowrap; font-size: 0.8rem; }
 /* The three standings, coloured the way the sheet colours them: green settled,

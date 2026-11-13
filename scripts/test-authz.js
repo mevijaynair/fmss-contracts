@@ -273,8 +273,28 @@ test('a player can see where everyone stands, and no more than that', async () =
   // widening nobody decided on — a phone number, a PIN, an account id that
   // another endpoint would then accept.
   const fields = [...new Set(d.contracts.flatMap(c => c.squad.flatMap(r => Object.keys(r))))];
-  assert.deepEqual(fields.sort(), ['balance', 'games_left', 'name', 'played', 'status'],
+  assert.deepEqual(fields.sort(),
+    ['balance', 'games_left', 'name', 'played', 'recent', 'status'],
     `a squad row is no longer just a name, a balance and a status: ${fields.join(', ')}`);
+
+  // How many games somebody has played lately is not a secret — everyone at
+  // the pitch saw them. What they have paid in is payment history, and this
+  // screen carries none. The whole point of the recent column is that it
+  // arrives here with the money taken out of it.
+  assert.equal(d.money_in, false, 'the member view says it withholds the money');
+  const latelyFields = [...new Set(d.contracts
+    .flatMap(c => c.squad.flatMap(r => Object.keys(r.recent || {}))))];
+  assert.deepEqual(latelyFields.sort(), ['played'],
+    `the recent column leaks more than turnouts: ${latelyFields.join(', ')}`);
+  // Each one written as it would appear in the JSON. The per-person keys are
+  // matched whole, so the club's own recent_paid_in total is not caught by
+  // them; last_contribution is matched as a prefix, because every field that
+  // starts that way is a date or an amount from somebody's payment history.
+  for (const needle of ['"paid_in"', '"taken_out"', '"payments"',
+    '"deductions"', '"last_contribution']) {
+    assert.ok(!body.includes(needle),
+      `the standing carries a ${needle} field`);
+  }
 
   // Nothing about signing in, however the shape changes underneath.
   for (const needle of ['pin', 'password', 'hash', 'token', 'email', 'ip_address']) {

@@ -13,7 +13,25 @@ import { ledgersRepo } from './ledgers.js';
 // game they cannot cover the next fixture at all.
 const REFILL_BELOW_GAMES = 4;
 
+// "Lately" on this sheet, in weeks.
+//
+// The period figures answer "how has the season gone"; nobody reads them to
+// find out who is actually turning up now. A player who played eight games in
+// September and nothing since reads identically to a regular, and the only
+// number that separates them is a short window. Five weeks is long enough to
+// hold four or five Saturdays and a run of Mon/Thu, and short enough that a
+// month off shows up.
+const RECENT_WEEKS = 5;
+
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+const weeksAgo = (weeks) => new Date(Date.now() - weeks * 7 * 86400000)
+  .toISOString().slice(0, 10);
+
+// A contribution dated by hand can be blank; fall back to the day it was
+// written down rather than dropping it out of the window silently.
+const CONTRIB_DAY = "COALESCE(NULLIF(q.date, ''), substr(q.created_at, 1, 10))";
+const TXN_DAY = "substr(t.created_at, 1, 10)";
 
 function contractRate(contractId) {
   const c = db.prepare('SELECT rates FROM contracts WHERE id = ?').get(contractId);
@@ -54,11 +72,22 @@ export const periodReportRepo = {
    * a stake, most recently active first is NOT what the sheet does — it keeps a
    * stable roster order, so sort by name and let the reader scan.
    */
-  report(contractId, { since = null, includeDormant = false } = {}) {
+  report(contractId, {
+    since = null, includeDormant = false, recentWeeks = RECENT_WEEKS,
+  } = {}) {
     const c = db.prepare('SELECT id, name, season_start FROM contracts WHERE id = ?').get(contractId);
     if (!c) throw new Error('Contract not found');
     const from = since || c.season_start || '0000-01-01';
     const rate = effectiveRate(contractId, from);
+
+    // The recent window never reaches back past the period it sits inside. On
+    // a contract three weeks old, "the last five weeks" would otherwise count
+    // games from the previous contract and make the recent number larger than
+    // the period one — a sheet that contradicts itself in two adjacent
+    // columns.
+    const weeks = Math.min(52, Math.max(1, Number(recentWeeks) || RECENT_WEEKS));
+    const askedFrom = weeksAgo(weeks);
+    const recentFrom = askedFrom > from ? askedFrom : from;
 
     // Games, spend and captaincies for this period only.
     const activity = new Map(
@@ -84,6 +113,64 @@ export const periodReportRepo = {
              WHERE contract_id = ? AND historical = 0 AND amount > 0 GROUP BY player_id)`
       ).all(contractId, contractId).map(r => [r.player_id, r])
     );
+
+    // ---- what has happened lately, over the same window for everybody.
+    //
+    // Games first. Counted the way the balance counts them — on whoever
+    // SETTLES the charge — would answer a money question, and this column is
+    // not a money question: it is "has this person been turning up". So it
+    // keys on player_id, who was actually on the pitch, and a member who
+    // brought a guest is not credited with their game.
+    const recentPlayed = new Map(db.prepare(
+      `SELECT ch.player_id, COUNT(DISTINCT ch.gameweek_id) AS played,
+              MAX(g.date) AS last_game
+       FROM charges ch JOIN gameweeks g ON g.id = ch.gameweek_id
+       WHERE g.contract_id = ? AND g.date >= ? AND g.historical = 0
+       GROUP BY ch.player_id`
+    ).all(contractId, recentFrom).map(r => [r.player_id, r]));
+
+    // Then money in. Both places a top-up can land: the contributions table,
+    // and the transaction ledger for everything that has no home there — a
+    // transfer in from another player, an introducer credit, an adjustment.
+    // Leaving the second out would show "nothing paid in" against somebody
+    // whose balance plainly went up, which is exactly the surprise this
+    // column exists to prevent.
+    const recentIn = new Map();
+    const bump = (id, amount) => {
+      const e = recentIn.get(id)
+        || { paid_in: 0, payments: 0, taken_out: 0, deductions: 0 };
+      if (amount >= 0) { e.paid_in += amount; e.payments += 1; }
+      else { e.taken_out += -amount; e.deductions += 1; }
+      recentIn.set(id, e);
+    };
+    for (const r of db.prepare(
+      `SELECT q.player_id AS id, SUM(q.amount) AS inn,
+              SUM(CASE WHEN q.amount >= 0 THEN 1 ELSE 0 END) AS n_in,
+              SUM(CASE WHEN q.amount < 0 THEN 1 ELSE 0 END) AS n_out,
+              SUM(CASE WHEN q.amount >= 0 THEN q.amount ELSE 0 END) AS amt_in,
+              SUM(CASE WHEN q.amount < 0 THEN -q.amount ELSE 0 END) AS amt_out
+       FROM contributions q
+       WHERE q.contract_id = ? AND q.historical = 0 AND ${CONTRIB_DAY} >= ?
+       GROUP BY q.player_id`).all(contractId, recentFrom)) {
+      const e = recentIn.get(r.id)
+        || { paid_in: 0, payments: 0, taken_out: 0, deductions: 0 };
+      e.paid_in += Number(r.amt_in) || 0;
+      e.payments += Number(r.n_in) || 0;
+      e.taken_out += Number(r.amt_out) || 0;
+      e.deductions += Number(r.n_out) || 0;
+      recentIn.set(r.id, e);
+    }
+    // Charges are excluded here: games already have their own column, and
+    // counting them as "taken out" would list every regular as having had
+    // money removed from them lately.
+    for (const r of db.prepare(
+      `SELECT t.player_id AS id, t.amount AS amount
+       FROM transactions t
+       WHERE t.contract_id = ? AND t.status = 'approved'
+         AND t.type NOT IN ('contribution', 'charge')
+         AND ${TXN_DAY} >= ?`).all(contractId, recentFrom)) {
+      bump(r.id, Number(r.amount) || 0);
+    }
 
     const hiddenIds = new Set(db.prepare(
       'SELECT id FROM players WHERE hide_from_sheet = 1').all().map(p => p.id));
@@ -114,6 +201,20 @@ export const periodReportRepo = {
         played,
         last_contribution_date: last?.date || null,
         last_contribution_amount: last ? round2(last.amount) : null,
+        // Lately, as its own small object so no reader of a row can mistake a
+        // window figure for a period one.
+        recent: (() => {
+          const g = recentPlayed.get(l.player_id);
+          const m = recentIn.get(l.player_id);
+          return {
+            played: g?.played || 0,
+            last_game: g?.last_game || null,
+            paid_in: round2(m?.paid_in || 0),
+            payments: m?.payments || 0,
+            taken_out: round2(m?.taken_out || 0),
+            deductions: m?.deductions || 0,
+          };
+        })(),
       };
     });
 
@@ -202,6 +303,16 @@ export const periodReportRepo = {
       generated_at: new Date().toISOString().slice(0, 10),
       rate,
       refill_below_games: REFILL_BELOW_GAMES,
+      // The window is reported, not assumed: on a young contract it is
+      // shorter than the weeks asked for, and the sheet says so rather than
+      // labelling five weeks of nothing as five weeks.
+      recent_weeks: weeks,
+      recent_from: recentFrom,
+      recent_clipped: recentFrom !== askedFrom,
+      recent_gameweeks: db.prepare(
+        `SELECT COUNT(*) n FROM gameweeks
+         WHERE contract_id = ? AND date >= ? AND historical = 0`
+      ).get(contractId, recentFrom)?.n || 0,
       rows: squad,
       totals: {
         players: squad.length,
@@ -211,6 +322,13 @@ export const periodReportRepo = {
         in_contract: squad.filter(r => r.status === 'In contract').length,
         refill: squad.filter(r => r.status === 'Refill needed - No priority').length,
         out: squad.filter(r => r.status === 'Out of contract').length,
+        recent_played: squad.reduce((s, r) => s + r.recent.played, 0),
+        recent_paid_in: round2(squad.reduce((s, r) => s + r.recent.paid_in, 0)),
+        recent_payers: squad.filter(r => r.recent.paid_in > 0).length,
+        recent_taken_out: round2(squad.reduce((s, r) => s + r.recent.taken_out, 0)),
+        // Who has not been seen at all in the window — the one thing a
+        // period total cannot tell you.
+        recent_absent: squad.filter(r => r.recent.played === 0).length,
       },
     };
   },

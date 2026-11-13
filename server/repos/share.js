@@ -183,12 +183,35 @@ export const shareRepo = {
    * always as they stand right now; a balance as at three weeks ago would be
    * a different and much more confusing thing to publish.
    */
-  club({ weeks = 3 } = {}) {
+  /**
+   * `moneyIn` is a privacy switch, not a formatting one.
+   *
+   * How many games somebody has played lately is not a secret: everybody who
+   * was at the pitch saw them, and the picture has always listed the nights.
+   * What they have paid in is a different kind of fact. Balances go to the
+   * whole group every week and so are public by the club's own decision, but
+   * a per-person record of payments arriving is payment history, and the
+   * screen a member can open was deliberately built to carry balances and no
+   * history at all.
+   *
+   * So the admin's sheet and the picture it makes carry both; the member's
+   * lookup carries the turnouts and not the money. Redacted on the way out
+   * rather than filtered on the way in, so one shape of row feeds both and
+   * the sheet cannot drift from the picture.
+   */
+  club({ weeks = 5, moneyIn = true } = {}) {
     const from = since(weeks);
     const cashiers = cashierIds();
+    const lately = (r) => (moneyIn ? r : { played: r?.played || 0 });
     const contracts = contractsRepo.all().map((c) => {
       // The Standing sheet's own rows, so the image and the sheet cannot drift.
-      const sheet = periodReportRepo.report(c.id, { since: null, includeDormant: false });
+      // One window for the whole picture. The sheet has its own default for
+      // "lately" and this hands it the picture's, so the game list at the
+      // bottom and the per-player counts above it cover the same weeks —
+      // two different windows under two headings both saying "lately" is a
+      // picture that argues with itself.
+      const sheet = periodReportRepo.report(c.id,
+        { since: null, includeDormant: false, recentWeeks: weeks });
       const collect = ledgersRepo.cashOutstanding(c.id);
       return {
         id: c.id,
@@ -201,7 +224,13 @@ export const shareRepo = {
           games_left: r.games_left,
           status: r.status,
           played: r.played,
+          // Lately, over the sheet's own window rather than this picture's:
+          // the standing sheet and the picture of it must not disagree about
+          // what "recently" means, and the sheet owns that definition.
+          recent: lately(r.recent),
         })),
+        recent_weeks: sheet.recent_weeks,
+        recent_from: sheet.recent_from,
         totals: sheet.totals,
         left_out: {
           dormant: sheet.dormant_hidden,
@@ -235,6 +264,30 @@ export const shareRepo = {
      * people will check.
      */
     const onSheet = new Set(contracts.flatMap(c => c.squad.map(sq => sq.name)));
+
+    /**
+     * Lately, added up across both nights, by NAME.
+     *
+     * The combined line is about a person, not an account, and so is this:
+     * somebody who played twice on Mon/Thu and once on a Saturday turned out
+     * three times, and two separate counts in two columns is the same
+     * arithmetic a reader was being left to do with the balances.
+     *
+     * Keyed on name for the same reason the rest of this table is — the
+     * sheet rows come from the standing sheet, which is about people.
+     */
+    const recentBy = new Map();
+    for (const c of contracts) {
+      for (const sq of c.squad) {
+        const r = sq.recent || {};
+        const e = recentBy.get(sq.name) || { played: 0, paid_in: 0, taken_out: 0 };
+        e.played += r.played || 0;
+        e.paid_in += r.paid_in || 0;
+        e.taken_out += r.taken_out || 0;
+        recentBy.set(sq.name, e);
+      }
+    }
+
     const combined = ledgersRepo.allCombined()
       .filter(r => onSheet.has(r.player_name))
       .map(r => ({
@@ -249,6 +302,14 @@ export const shareRepo = {
           };
         }),
         total: round2(r.present_balance),
+        recent: lately((() => {
+          const e = recentBy.get(r.player_name) || {};
+          return {
+            played: e.played || 0,
+            paid_in: round2(e.paid_in || 0),
+            taken_out: round2(e.taken_out || 0),
+          };
+        })()),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -257,6 +318,9 @@ export const shareRepo = {
       since: from,
       weeks,
       combined,
+      // Stated, so a screen can tell "nobody paid in" from "you are not
+      // being shown what people paid in".
+      money_in: !!moneyIn,
       combined_total: round2(combined.reduce((t, r) => t + r.total, 0)),
       kitty_total: round2(db.prepare('SELECT SUM(amount) t FROM kitty').get()?.t || 0),
       contracts,

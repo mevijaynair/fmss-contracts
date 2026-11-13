@@ -269,7 +269,14 @@ function paintClub(pen, d, ctx) {
   const cellW = Math.min(190, Math.max(120,
     (w - 320 - 150) / Math.max(1, d.contracts.length)));
   const cellR = (i) => totalR - 150 - (d.contracts.length - 1 - i) * cellW;
-  const nameMax = cellR(0) - 80 - (x + 18);
+  // A column for what has happened lately, taken out of the name's slack
+  // rather than out of the figures: the names are short and the money
+  // columns are the ones that must not be squeezed. Only the squad table
+  // above uses it — the still-to-pay list below is about a single amount and
+  // has nothing recent to say.
+  const recentW = 180;
+  const nameMax = cellR(0) - 140 - (x + 18) - recentW;
+  const recentX = x + 18 + nameMax + 26;
 
   pen.rect(x, w, 4, C.gold, 2);
   pen.gap(20);
@@ -294,6 +301,7 @@ function paintClub(pen, d, ctx) {
   // Column headings, so three numbers in a row are three known things.
   pen.row([
     { str: 'Player', x: x + 18, size: 19, color: C.faint },
+    { str: `Last ${d.weeks} weeks`, x: recentX, size: 19, color: C.faint },
     ...d.contracts.map((c, i) => ({ str: fit(ctx, c.name, 19, cellW - 16), x: cellR(i),
       size: 19, color: C.faint, align: 'right' })),
     { str: 'Total', x: totalR, size: 19, weight: 600, color: C.muted, align: 'right' },
@@ -307,8 +315,27 @@ function paintClub(pen, d, ctx) {
     pen.y = top + 14;
     d.combined.forEach((r, ri) => {
       zebra(pen, ri, x + 8, w - 16, rowH, C.bg);
+      const lately = r.recent || {};
+      // "2 games", and a nought said in words. A blank here would read as a
+      // figure that failed to load; "none" is the thing this column is most
+      // often there to say.
+      const games = lately.played
+        ? `${lately.played} game${lately.played === 1 ? '' : 's'}`
+        : 'none';
+      // One figure for what went ON the balance in the window: payments in,
+      // less anything taken off it that was not a game — a programme, a
+      // send-off settled from credit. Netting them is deliberate at this
+      // size: the question a picture answers is "did my balance move, and
+      // which way", and the sheet shows the two halves apart for anyone who
+      // then wants to know why.
+      const moved = Math.round(((lately.paid_in || 0) - (lately.taken_out || 0)) * 100) / 100;
       pen.row([
         { str: fit(ctx, r.name, 23, nameMax), x: x + 18, size: 23, color: C.text },
+        { str: games, x: recentX, size: 20,
+          color: lately.played ? C.muted : C.faint },
+        { str: moved ? `${moved > 0 ? '+' : '−'}${money(Math.abs(moved))}` : '',
+          x: recentX + recentW, size: 20, align: 'right',
+          color: moved > 0 ? C.good : C.bad },
         ...r.parts.map((p, i) => (p.balance === null
           ? { str: '—', x: cellR(i), size: 21, color: C.faint, align: 'right', dy: 1 }
           : { str: money(p.balance), x: cellR(i), size: 22, align: 'right', dy: 1,
@@ -775,7 +802,7 @@ export async function shareCollection(eventId) {
 }
 
 /** One picture of the whole club, both contracts, ready for the group chat. */
-export async function shareClubSnapshot({ weeks = 3 } = {}) {
+export async function shareClubSnapshot({ weeks = 5 } = {}) {
   try {
     toast('Building the picture…');
     const data = await api.get(`/share/club?weeks=${weeks}`);

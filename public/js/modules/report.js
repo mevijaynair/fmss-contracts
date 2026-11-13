@@ -61,6 +61,40 @@ function collectBlock(data) {
   </div>`;
 }
 
+/**
+ * What has happened lately, in one column.
+ *
+ * Two things a reader actually wants and the period columns cannot answer:
+ * is this person still turning up, and have they put anything in. Both in one
+ * cell rather than two more columns, because this sheet is read as a picture
+ * and every column added is one fewer that fits on a phone.
+ *
+ * Nought games is stated as "none", not as a 0 — a blank or a nought in a
+ * column of numbers reads as missing data, and "not seen" is the single most
+ * useful thing this column says.
+ */
+function recentCell(r) {
+  const n = r.recent?.played || 0;
+  const paid = r.recent?.paid_in || 0;
+  const out = r.recent?.taken_out || 0;
+  const games = n
+    ? `<strong>${n}</strong> game${n === 1 ? '' : 's'}`
+    : '<span class="rep-na">none</span>';
+  const money_in = paid > 0
+    ? `<span class="rep-in">+${money(paid)}</span>`
+      + (r.recent.payments > 1 ? ` <span class="hint">×${r.recent.payments}</span>` : '')
+    : '<span class="rep-na">—</span>';
+  // A balance cut in the window — a send-off collected from balances, a
+  // transfer out — is shown beside the money in. Showing only what came in,
+  // on a sheet somebody reads to work out why their balance moved, is how a
+  // deduction becomes a surprise.
+  const money_out = out > 0 ? ` <span class="rep-out">−${money(out)}</span>` : '';
+  return `<td class="rep-recent">
+    <span class="rep-recent-g">${games}</span>
+    <span class="rep-recent-m">${money_in}${money_out}</span>
+  </td>`;
+}
+
 function balanceCell(v, gamesLeft) {
   const cls = v < 0 ? 'rep-out' : (gamesLeft !== null && gamesLeft < 4) ? 'rep-refill' : 'rep-in';
   return `<td class="num rep-bal ${cls}">${money(v)}</td>`;
@@ -89,6 +123,7 @@ export async function renderStandingSheet(host, contractId) {
       <td class="${STATUS_CLASS[r.status] || ''} rep-status">${esc(r.status)}</td>
       ${captCell(r.capt_subsidy_pct)}
       <td class="num">${r.played || '<span class="rep-na">0</span>'}</td>
+      ${recentCell(r)}
       <td class="num rep-last">${r.last_contribution_date
       ? `${fmtDate(r.last_contribution_date)} <span class="hint">(${money(r.last_contribution_amount)})</span>`
       : '<span class="rep-na">—</span>'}</td>
@@ -118,6 +153,24 @@ export async function renderStandingSheet(host, contractId) {
         <span><strong>${t.played}</strong> games played</span>
       </div>
 
+      <!-- The window, said once and in words, so the column heading can stay
+           short and nobody has to work out which five weeks are meant. -->
+      <div class="rep-summary rep-summary-recent">
+        <span class="rep-recent-k">Last ${data.recent_weeks} weeks</span>
+        <span>from ${fmtDate(data.recent_from)}</span>
+        <span><strong>${data.recent_gameweeks}</strong>
+          game${data.recent_gameweeks === 1 ? '' : 's'} played on this contract</span>
+        <span><strong>${t.recent_played}</strong> turnout${t.recent_played === 1 ? '' : 's'}
+          between them</span>
+        <span class="rep-in"><strong>${money(t.recent_paid_in)}</strong> paid in
+          by ${t.recent_payers}</span>
+        ${t.recent_taken_out
+      ? `<span class="rep-out"><strong>${money(t.recent_taken_out)}</strong> taken off
+            balances</span>` : ''}
+        ${t.recent_absent
+      ? `<span class="rep-na"><strong>${t.recent_absent}</strong> not seen</span>` : ''}
+      </div>
+
       ${collectBlock(data)}
 
       <div style="overflow-x:auto;">
@@ -130,14 +183,22 @@ export async function renderStandingSheet(host, contractId) {
               <th>Status<br>from balance</th>
               <th class="num">Games<br>captained</th>
               <th class="num">Games<br>played</th>
+              <th>Last ${data.recent_weeks} weeks<br>
+                <span class="hint">games · paid in</span></th>
               <th class="num">Last<br>Contribution</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="7" class="hint">Nobody on this contract yet.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="8" class="hint">Nobody on this contract yet.</td></tr>'}</tbody>
         </table>
       </div>
 
       <p class="hint rep-key">
+        Last ${data.recent_weeks} weeks counts games played since
+        ${fmtDate(data.recent_from)}${data.recent_clipped
+      ? ' — the start of this contract, so the window is shorter than that' : ''},
+        and money that went onto the balance in the same time: a top-up, a transfer in, an
+        adjustment. A figure in red beside it came off the balance in that window — a
+        programme or a send-off settled from contract credit, not a game.
         Games captained is the share of this period's games the player led — NA until they have played.
         Status is how many games the balance still covers at ${money(data.rate)} a game: under one
         game is out of contract, under ${data.refill_below_games} needs a refill.${data.dormant_hidden
