@@ -618,6 +618,7 @@ export const gameweeksRepo = {
              COALESCE(ch.charged_to, ch.player_id) AS charged_to,
              st.name AS settler_name,
              COALESCE(st.player_type, 'regular') AS settler_type,
+             COALESCE(pl.player_type, 'regular') AS player_type,
              ch.player_id, pl.name AS player_name,
              g.date, g.contract_id, g.historical, c.name AS contract_name
       FROM charges ch
@@ -642,13 +643,25 @@ export const gameweeksRepo = {
    * else the contract rate. Kept here so a correction lands on the same
    * figure the night would have produced, rather than a second opinion.
    */
-  cardRateFor(gameweekId, { isCaptain, settles, settlerType, fromOtherContract,
+  /**
+   * `playerType` is whoever was ON THE PITCH; `settlerType` is whoever pays.
+   *
+   * They are usually the same person and the distinction never came up. They
+   * are not the same for a guest whose host settles for them, and that case
+   * was priced at the member rate: the guest has not prepaid into anything,
+   * so the contract rate is not theirs to get, and their host picking up the
+   * bill does not change what the place costs. Game Day has always priced it
+   * off the player — which is why a guest added on the night cost 40 and the
+   * same guest added to the game afterwards cost 30.
+   */
+  cardRateFor(gameweekId, { isCaptain, settles, settlerType, playerType, fromOtherContract,
     outsideCost = null }) {
-    if (settles === 'cash' || settlerType === 'outside' || fromOtherContract) {
+    const guest = playerType === 'outside' || settlerType === 'outside';
+    if (settles === 'cash' || guest || fromOtherContract) {
       // A guest can have a rate agreed with them, which beats the card. Only
       // a real guest: outside_cost is a fact about a walk-up, not something
       // to apply to a member whose night happens to be priced as non-contract.
-      if (settlerType === 'outside' && Number(outsideCost) > 0) {
+      if (guest && Number(outsideCost) > 0) {
         return { rate_type: 'noncontract', amount: Number(outsideCost) };
       }
       return this.rateForCharge({ gameweekId, isCaptain, fromOtherContract: true });
@@ -668,15 +681,21 @@ export const gameweeksRepo = {
    * One function both sides can ask, so the answer cannot differ by route.
    */
   priceFor(gameweekId, playerId, { isCaptain = false, chargedTo = null } = {}) {
-    const settler = db.prepare(
+    const who = db.prepare(
       "SELECT COALESCE(player_type,'regular') t, outside_cost FROM players WHERE id = ?")
+      .get(playerId);
+    const settler = db.prepare(
+      "SELECT COALESCE(player_type,'regular') t FROM players WHERE id = ?")
       .get(chargedTo || playerId);
     return this.cardRateFor(gameweekId, {
       isCaptain,
       settles: 'balance',
       settlerType: settler?.t || 'regular',
+      playerType: who?.t || 'regular',
       fromOtherContract: false,
-      outsideCost: settler?.outside_cost ?? null,
+      // The agreed price belongs to the person who played, not to whoever
+      // happens to be settling for them.
+      outsideCost: who?.outside_cost ?? null,
     });
   },
 

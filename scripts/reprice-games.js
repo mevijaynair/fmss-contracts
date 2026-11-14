@@ -83,17 +83,25 @@ for (const g of games) {
   const targetPitch = r2((Number(card?.pitch_per_game) || 0) * (Number(g.hours) || 1));
   const lines = [];
   for (const ch of charges) {
-    // The guest's own agreed price is a fact about the person, not the card.
-    const agreed = db.prepare(
-      "SELECT outside_cost FROM players WHERE id = ?").get(ch.player_id)?.outside_cost;
-    const bespoke = ch.settler_type === 'outside' && Number(agreed) > 0;
-    const fromOther = ch.settler_type === 'outside'
-      || ch.settle_contract_id !== CONTRACT;
-    const priced = bespoke
-      ? { rate_type: 'noncontract', amount: Number(agreed) }
-      : gameweeksRepo.rateForCharge({
-        gameweekId: g.id, isCaptain: !!ch.is_captain, fromOtherContract: fromOther, players: n,
-      });
+    // Who PLAYED decides whether this is a guest's place; who pays only
+    // decides where the money comes from. A guest whose host settles for
+    // them has still not prepaid into anything, so they do not get the
+    // contract rate — which is how Sikku, brought by Toby on four
+    // Saturdays, would otherwise have been quietly moved from 40 to 30 and
+    // handed Toby thirty dirhams of the club's money.
+    const who = db.prepare(
+      "SELECT COALESCE(player_type,'regular') t, outside_cost FROM players WHERE id = ?")
+      .get(ch.player_id);
+    const priced = gameweeksRepo.cardRateFor(g.id, {
+      isCaptain: !!ch.is_captain,
+      settles: ch.settle_mode,
+      settlerType: ch.settler_type,
+      playerType: who?.t || 'regular',
+      fromOtherContract: ch.settle_contract_id !== CONTRACT,
+      outsideCost: who?.outside_cost ?? null,
+    });
+    const bespoke = (who?.t === 'outside' || ch.settler_type === 'outside')
+      && Number(who?.outside_cost) > 0;
     const blocked = PITCH_ONLY || (ch.is_cash && ch.paid && !ALLOW_PAID_CASH
       && r2(priced.amount) !== r2(ch.amount));
     lines.push({

@@ -820,6 +820,7 @@ r.post('/admin/players/:playerId/settlement', wrap((req) => {
           isCaptain: !!row.is_captain,
           settles: after.settles,
           settlerType: after.settler_type,
+          playerType: after.player_type,
           fromOtherContract: !!after.settle_contract_id
             && after.settle_contract_id !== row.contract_id,
         });

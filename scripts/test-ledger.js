@@ -2644,6 +2644,38 @@ test('splitting one record into two moves games without moving money', () => {
     'the two are now distinguishable in a team sheet');
 });
 
+test('a guest whose host pays is still a guest', () => {
+  // Being a guest is a fact about whoever was on the pitch. Their host
+  // picking up the bill settles the charge; it does not buy the guest a
+  // contract rate they never prepaid into. Game Day has always priced it
+  // off the player, so the same guest cost 40 on the night and 30 when the
+  // same charge was re-priced afterwards — two prices for one place.
+  db.prepare(`UPDATE contracts SET rates = '{"contracted_10":30,"contracted_12":27,
+    "captain_10":25,"captain_12":20,"noncontract":35}' WHERE id = ?`).run(CONTRACT);
+  const g = game();
+  const guest = player('Their guest'); makeOutside(guest);
+
+  const hostPays = gameweeksRepo.cardRateFor(g, {
+    isCaptain: false, settles: 'balance', settlerType: 'regular',
+    playerType: 'outside', fromOtherContract: false,
+  });
+  assert.equal(hostPays.amount, 35, 'the guest rate, although a member is paying');
+  assert.equal(hostPays.rate_type, 'noncontract');
+
+  // And the other way round: a member is a member, whoever hands the money
+  // over for them.
+  assert.equal(gameweeksRepo.cardRateFor(g, {
+    isCaptain: false, settles: 'balance', settlerType: 'regular',
+    playerType: 'regular', fromOtherContract: false,
+  }).amount, 30);
+
+  // A price agreed with that guest beats the card, and is read off the guest
+  // rather than off whoever is paying.
+  db.prepare('UPDATE players SET outside_cost = 25 WHERE id = ?').run(guest);
+  assert.equal(gameweeksRepo.priceFor(g, guest, { chargedTo: player('A host', 500) }).amount, 25);
+  db.prepare('UPDATE players SET outside_cost = NULL WHERE id = ?').run(guest);
+});
+
 test('a guest added to a recorded game is priced as a guest, not at nothing', () => {
   // Every other route works the rate out from the player — Game Day on the
   // night, the parser server-side. Adding somebody to a game already
