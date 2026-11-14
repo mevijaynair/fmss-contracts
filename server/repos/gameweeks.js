@@ -454,6 +454,11 @@ export const gameweeksRepo = {
         has_result: resultRows.has(g.id)
           || (sc.known && (sc.winner === 'draw' || !!winningTeam(sc.winner, teams))),
         has_teams: s.teams_count > 0,
+        // The message the game was built from. It is the only record of who
+        // actually played when a name failed to match, and the only thing that
+        // can rebuild the sides — a game without it cannot be checked against
+        // anything, so the list says which ones are missing it.
+        has_text: !!String(g.teams_raw || '').trim(),
         // Every side wants someone wearing the armband; one captain across two
         // teams is half a record.
         has_captains: s.teams_count > 0 && s.captained_teams >= s.teams_count,

@@ -120,6 +120,10 @@ const GAPS = [
   { key: 'score', label: 'No result', missing: g => !g.has_result },
   { key: 'captains', label: 'No captain', missing: g => !g.has_captains },
   { key: 'teams', label: 'No sides', missing: g => !g.has_teams },
+  // A fourth, because it is the one that cannot be reconstructed later. A
+  // missing captain can be remembered; the message that says who played is
+  // gone off somebody's phone within the week.
+  { key: 'text', label: 'No text', missing: g => !g.has_text },
 ];
 const gapsFor = (g) => GAPS.filter(f => f.missing(g));
 
@@ -182,7 +186,7 @@ function showGapBar(all, games) {
     <div class="hint" style="flex:1">
       ${incomplete.length
     ? `<strong>${incomplete.length}</strong> of ${games.length} games are missing something.`
-    : `All ${games.length} games have sides, captains and a result.`}
+    : `All ${games.length} games have sides, captains, a result and their original text.`}
     </div>
     ${days.length > 1 ? `<span class="seg" id="gwDaySeg">
       ${dayChip('all', 'Every night', all.length)}
@@ -580,7 +584,20 @@ async function detail(id) {
       </div>
       <div class="gw-brief-col">
         <h4 class="mini-h">Original text</h4>
-        <pre class="raw-block">${esc(g.teams_raw || '(none recorded)')}</pre>
+        <!-- Editable, because the message is the one thing here that gets lost:
+             a game entered in a hurry, or imported from a sheet, arrives with
+             nothing in it and the text is still sitting in the chat for a day
+             or two. Typing it in moves no money — it is the record of who was
+             there, and what the sides can be read back from. -->
+        <textarea id="gwRawText" class="raw-edit" rows="7" spellcheck="false"
+          placeholder="Paste the message from the group — the one with the sides in it."
+          >${esc(g.teams_raw || '')}</textarea>
+        <div class="quick-row" style="margin:.4rem 0 0">
+          <button type="button" class="btn btn-sm" id="gwRawSave" disabled
+            title="Saves the text only. Nobody is charged, nothing is re-split.">Save text</button>
+          <span class="hint" id="gwRawNote">${g.teams_raw
+    ? 'Saved with the game.' : 'No message recorded for this game yet.'}</span>
+        </div>
         ${g.captains_raw ? `<p class="hint">Captains column: ${esc(g.captains_raw)}</p>` : ''}
         <!-- The sides are twelve dropdowns to fix one at a time, and the
              message that says who was with whom is sitting right above. One
@@ -673,6 +690,52 @@ async function detail(id) {
     };
     scoreBox.addEventListener('change', saveScore);
     scoreBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') scoreBox.blur(); });
+  }
+
+  /**
+   * The message the game came from — add it, correct it, or paste it in late.
+   *
+   * Deliberately NOT auto-saved like the controls below it. A long block of
+   * text is edited in passes, and a save on every keystroke would store half a
+   * message; worse, this is the field a mis-click can empty, and the empty
+   * version is unrecoverable in a way a wrong score is not. So: an explicit
+   * button, live only once something has actually changed.
+   *
+   * Saving the text re-splits nobody and charges nobody. Reading the sides
+   * back out of it is the separate button underneath, which only appears once
+   * there is text to read — which is why this reopens the panel afterwards.
+   */
+  const rawBox = $('gwRawText');
+  if (rawBox) {
+    const rawNote = $('gwRawNote');
+    const rawSave = $('gwRawSave');
+    const dirty = () => rawBox.value.trim() !== String(g.teams_raw || '').trim();
+    rawBox.addEventListener('input', () => {
+      rawSave.disabled = !dirty();
+      if (rawNote) {
+        rawNote.textContent = dirty()
+          ? 'Not saved yet.'
+          : (g.teams_raw ? 'Saved with the game.' : 'No message recorded for this game yet.');
+      }
+    });
+    rawSave?.addEventListener('click', async () => {
+      const text = rawBox.value.trim();
+      // Clearing it throws away the only record of who played, and the button
+      // that does it looks exactly like the one that saves a correction.
+      if (!text && String(g.teams_raw || '').trim()
+          && !confirm('Remove the original message from this game? '
+            + 'It is the only record of who was named that night.')) return;
+      rawSave.disabled = true;
+      try {
+        await api.put(`/gameweeks/${id}`, { metadata: { teams_raw: text } });
+        toast(text ? 'Text saved ✓' : 'Text cleared');
+        render();
+        reopen();
+      } catch (e) {
+        rawSave.disabled = false;
+        toast(e.message, true);
+      }
+    });
   }
 
   /**

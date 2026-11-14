@@ -1265,6 +1265,18 @@ td.rep-out { background: color-mix(in srgb, var(--danger) 14%, transparent); }
   border: 1px solid var(--border-color); color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.5; }
 
+/* The same block, with a cursor in it. It reads as the record it is until you
+   click into it, which is the point: the message is normally something you
+   consult, and only occasionally something you fix. */
+.raw-edit { width: 100%; box-sizing: border-box; resize: vertical;
+  white-space: pre-wrap; word-break: break-word; min-height: 120px; max-height: 320px;
+  padding: 0.8rem; border-radius: 8px; background: var(--bg-inset);
+  border: 1px solid var(--border-color); color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; line-height: 1.5; }
+.raw-edit:focus { outline: none; color: var(--text-main);
+  border-color: var(--accent);
+  background: var(--bg-card); }
+
 .panel-scroll { max-height: 220px; overflow-y: auto; margin-top: 0.7rem; }
 
 /* --- One player's charge inside a game panel ---
