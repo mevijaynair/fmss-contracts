@@ -58,13 +58,18 @@ say(`   20 nights at ${koora.cost_per_session} each;`
   + `, outstanding ${koora.outstanding}`);
 
 // ---- 3. The Saturday card that came in with it.
+// What the PLAYERS pay is unchanged: the club decided to keep 37/32 on a
+// ten-man night and 32/27 on a twelve. What changed on 17 October is what
+// the GROUND charges, and that is the whole reason this card has a date —
+// the saving stays with the club rather than being handed back a dirham at
+// a time.
 contractsRepo.saveCard('sat', {
   effective_from: '2026-10-17',
-  rates: { contracted_10: 36, captain_10: 31, contracted_12: 30, captain_12: 25, noncontract: 40 },
+  rates: { contracted_10: 37, captain_10: 32, contracted_12: 32, captain_12: 27, noncontract: 40 },
   pitch_per_game: 315, water_per_game: 15,
-  notes: 'Koora 6,300 / 20 nights — 315 pitch, 15 water, ~15 to the kitty',
+  notes: 'Koora 6,300 / 20 nights — pitch 315; player rates unchanged',
 });
-say('Saturday card from 2026-10-17: 36/31 ten, 30/25 twelve, guest 40, pitch 315');
+say('Saturday card from 2026-10-17: rates unchanged (37/32 ten, 32/27 twelve, guest 40), pitch 315');
 
 // ---- 4. Mon/Thu: the pitch, at what the bundle actually costs a night.
 //         The player rates are untouched; this is the club's own arithmetic.
@@ -76,6 +81,25 @@ contractsRepo.saveCard('mon_thu', {
   notes: 'O365 4,999 for 20+3 free = 217.35 a night',
 });
 say(`Mon/Thu card from 2026-08-31: pitch ${r2(4999 / 23)}, player rates unchanged`);
+
+// ---- 5. The 6,300, paid out of the cashier's own pocket.
+//
+// Cash leaving, against a cost the books have already taken a night at a
+// time. It must NEVER write a kitty row: the pitch is charged to the pot per
+// game by recomputeGameKitty, and booking the payment as an expense as well
+// would charge the club twice for one booking. The profit or loss on those
+// nights reaches the kitty the only way it should — by playing them.
+const kooraNow = financeRepo.venueContract(koora.id);
+if (!kooraNow.payments.length) {
+  financeRepo.addPayment(koora.id, {
+    amount: 6300, date: '2026-10-17', paid_by: 'vijay', method: 'bank',
+    note: 'Block booking, 20 nights',
+  });
+  say('Koora 6,300 recorded as paid by the cashier on 2026-10-17');
+} else {
+  say(`Koora payments already on file: ${kooraNow.payments
+    .map(x => `${x.date} ${x.amount}`).join(', ')}`);
+}
 
 say('');
 for (const c of contractsRepo.all()) {
