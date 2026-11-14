@@ -8,6 +8,10 @@ import { fixtureDate, dayName, loadSchedule, markNoGame } from '../schedule-ui.j
 let contractId = null;   // resolved on first load — see defaultContract()
 let rows = [];                 // current preview rows (mutable amounts)
 let parseResult = null;        // full parser result with metadata
+// The metadata behind whatever is on screen, so a rate card that arrives
+// after the parse can re-price the rows that parse produced. Set wherever a
+// preview is drawn, which is the one place that always has it.
+let shownMeta = null;
 
 const RATE_LABEL = {
   contracted_10: 'Contract', contracted_12: 'Contract',
@@ -72,13 +76,65 @@ function detectCaptains(text, playerNames) {
   return captains;
 }
 
+/**
+ * The card in force on the night being entered.
+ *
+ * Prices have a date on them: the Koora booking dropped from 346 a night to
+ * 315 on 17 October, and a game entered late for a night before that has to
+ * be priced at what it cost then. Held here as the one the server handed
+ * back for the chosen date, so the preview and the save cannot disagree.
+ *
+ * Null until the first fetch answers, and the contract's current card stands
+ * in meanwhile — which is right for the overwhelmingly common case of
+ * entering tonight's game.
+ */
+let nightCard = null;   // { contract_id, on, rates, pitch_per_game }
+
 // The contract's rate card, whatever shape it arrives in.
 function rateCard(contractId) {
+  if (nightCard && nightCard.contract_id === contractId
+      && nightCard.on === ($('gdDate')?.value || today())) {
+    return nightCard.rates || {};
+  }
   const c = store.contracts?.find(x => x.id === contractId);
   if (!c) return {};
   return typeof c.rates === 'string'
     ? (() => { try { return JSON.parse(c.rates || '{}'); } catch { return {}; } })()
     : (c.rates || {});
+}
+
+/** What the pitch cost on that night, from the same card. */
+function nightPitch() {
+  if (nightCard && nightCard.contract_id === contractId
+      && nightCard.on === ($('gdDate')?.value || today())) {
+    return Number(nightCard.pitch_per_game) || 0;
+  }
+  return Number(store.contracts?.find(c => c.id === contractId)?.cost_per_gw) || 0;
+}
+
+/**
+ * Fetch the card for the chosen night and re-price what is on screen.
+ *
+ * Every row's amount is derived from the card, so a card that arrives after
+ * the rows have been parsed has to push through them — otherwise the screen
+ * shows last month's prices against this month's names.
+ */
+async function loadNightCard() {
+  const on = $('gdDate')?.value || today();
+  if (!contractId) return;
+  try {
+    const card = await api.get(
+      `/contracts/${encodeURIComponent(contractId)}/rate-card?on=${encodeURIComponent(on)}`);
+    nightCard = { ...card, contract_id: contractId, on };
+  } catch {
+    // No card, or no answer: the contract's own figures still price the game.
+    nightCard = null;
+  }
+  if (rows.length && shownMeta) {
+    rows.forEach(r => applyRate(r, shownMeta));
+    renderPreview(shownMeta);
+  }
+  recomputeKitty();
 }
 
 /**
@@ -603,6 +659,7 @@ function renderAddRow(meta) {
 }
 
 function renderPreview(meta) {
+  shownMeta = meta;
   $('gdPreviewCard').hidden = false;
   const outsideCount = rows.filter(r => r.player_type === 'outside').length;
   const unmatchedCount = rows.filter(r => !r.matched).length;
@@ -988,7 +1045,7 @@ function recomputeKitty() {
   const c = store.contracts.find(x => x.id === contractId);
   // Same scaling the save uses, so the profit shown on screen is the profit
   // that gets committed.
-  const pitch = (Number(c?.cost_per_gw) || 0) * (Number($('gdHours')?.value) || 1);
+  const pitch = nightPitch() * (Number($('gdHours')?.value) || 1);
   // Only water the club itself bought comes off the pot. When a player buys it
   // they are credited for it instead, so the cash never left the kitty — this
   // subtracted it either way, which charged the club twice and made the figure
@@ -1127,8 +1184,7 @@ async function doConfirm() {
     // costs the club two hours of court; booking it at the flat per-game figure
     // understated the cost by about 160 and made the pot look that much richer
     // on exactly the nights it was not.
-    cost_per_gw: (store.contracts.find(c => c.id === contractId)?.cost_per_gw || 0)
-      * (Number($('gdHours')?.value) || 1),
+    cost_per_gw: nightPitch() * (Number($('gdHours')?.value) || 1),
     teams_raw: $('gdText').value.trim(),
     // A readable result built from the one score box, rather than asking for the
     // same thing again in words.
@@ -1253,6 +1309,7 @@ function clearForm() {
 export function initGameday() {
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
     contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
+    loadNightCard();
   });
   $('gdDate').value = today();
   $('gdGameCost').value = '15'; // Default water cost
@@ -1287,7 +1344,7 @@ export function initGameday() {
   });
   // A date on a night this contract does not play is nearly always the wrong
   // contract, and nothing used to say so.
-  $('gdDate')?.addEventListener('change', offDayNote);
+  $('gdDate')?.addEventListener('change', () => { offDayNote(); loadNightCard(); });
 
   $('gdScore').addEventListener('input', showScoreNote);
   // A date the user set themselves must not be overwritten by the next fixture.
@@ -1307,6 +1364,7 @@ export function loadGameday() {
   refreshContracts(api).then(() => {
     contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
       contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
+    loadNightCard();
     });
     drawVenues();
   });
@@ -1321,6 +1379,7 @@ export function loadGameday() {
   // Keep the contract segment in sync if contracts loaded after init.
   contractSeg($('gdContractSeg'), store.contracts, contractId, (id) => {
     contractId = id; drawVenues(); offDayNote(); recalcTotal(); renderFixture();
+    loadNightCard();
   });
   renderFixture();
 
@@ -1333,4 +1392,8 @@ export function loadGameday() {
     $('gdDate').value = pending;
     toast(`Entering the game for ${pending}`);
   }
+
+  // What a place cost on the night being entered. Fetched rather than
+  // assumed: the date box may already hold a fixture from weeks ago.
+  loadNightCard();
 }

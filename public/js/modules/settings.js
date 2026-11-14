@@ -3,26 +3,75 @@ import { api } from '../api.js';
 import { store, toast } from '../store.js';
 import { $, esc, viewEl } from '../util.js';
 
+// The third entry is the column heading in the history table, where the full
+// label does not fit. Written out rather than derived from the long one by
+// string surgery, which produced headings like "Captain (10-player".
 const RATE_FIELDS = [
-  ['contracted_10', 'Contract rate (10-player)'],
-  ['contracted_12', 'Contract rate (12-player)'],
-  ['captain_10', 'Captain rate (10-player)'],
-  ['captain_12', 'Captain rate (12-player)'],
+  ['contracted_10', 'Contract rate (10-player)', 'Player 10'],
+  ['contracted_12', 'Contract rate (12-player)', 'Player 12'],
+  ['captain_10', 'Captain rate (10-player)', 'Captain 10'],
+  ['captain_12', 'Captain rate (12-player)', 'Captain 12'],
   // Stored under the key `noncontract`; shown as what it is — what somebody
   // outside the contract pays for a game.
-  ['noncontract', 'Guest rate'],
+  ['noncontract', 'Guest rate', 'Guest'],
 ];
 
-function card(c) {
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The history of what a place cost, newest first.
+ *
+ * A card runs until the next one starts, so the end date is shown but never
+ * typed: between them the cards cover every night from the first one onwards
+ * with no gap to fall through and no overlap to argue about.
+ */
+function cardHistory(c, cards) {
+  if (!cards?.length) return '';
+  const rows = [...cards].reverse().map(k => `
+    <tr>
+      <td>${k.effective_from || '—'}</td>
+      <td>${k.effective_to || '<span class="rep-in">in force</span>'}</td>
+      <td class="num">${k.pitch_per_game}</td>
+      ${RATE_FIELDS.map(([f]) => `<td class="num">${k.rates?.[f] ?? '—'}</td>`).join('')}
+      <td class="hint">${esc(k.notes || '')}</td>
+      <td>${k.is_current ? '' :
+    `<button class="btn btn-sm btn-danger" data-drop="${c.id}|${k.id}">Remove</button>`}</td>
+    </tr>`).join('');
+  return `
+    <h4 class="mini-h mt">What a place has cost, and from when</h4>
+    <div class="table-scroll">
+      <table class="sams-table rep-table">
+        <thead><tr><th>From</th><th>Until</th><th class="num">Pitch</th>
+          ${RATE_FIELDS.map(([, , short]) => `<th class="num">${esc(short)}</th>`).join('')}
+          <th>Note</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="hint">A game is priced by the card in force on the night it was played, so
+      changing these never restates a game that has already been entered. To change prices
+      from a date, put that date in <strong>From</strong> above and save: an earlier date
+      edits the card that already starts there.</p>`;
+}
+
+function card(c, cards) {
+  const live = cards?.find(k => k.is_current);
   return `
   <div class="sams-card" style="margin-bottom:1.25rem;">
-    <div class="card-header"><h3 class="card-title">${esc(c.name)}</h3></div>
+    <div class="card-header"><h3 class="card-title">${esc(c.name)}</h3>
+      <span class="card-sub">Rates in force since ${live?.effective_from || 'always'}</span></div>
     <div class="form-row">
       <div class="form-group"><label>Name</label><input id="s_${c.id}_name" value="${esc(c.name)}"></div>
       <div class="form-group"><label>Venue</label><input id="s_${c.id}_venue" value="${esc(c.venue || '')}"></div>
     </div>
-    <div class="form-group mt" style="max-width:240px;"><label>Cost per game (AED)</label>
-      <input type="number" id="s_${c.id}_cost" value="${c.cost_per_gw}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Cost per game (AED)</label>
+        <input type="number" id="s_${c.id}_cost" value="${c.cost_per_gw}"></div>
+      <div class="form-group"><label>In force from</label>
+        <input type="date" id="s_${c.id}_from" value="${live?.effective_from || todayStr()}"></div>
+      <div class="form-group"><label>Note (optional)</label>
+        <input id="s_${c.id}_note" value="${esc(live?.notes || '')}"
+          placeholder="why the price changed"></div>
+    </div>
     <h4 class="mini-h mt">Rate card (AED per player)</h4>
     <div class="form-row">
       ${RATE_FIELDS.map(([k, lbl]) =>
@@ -30,6 +79,7 @@ function card(c) {
           <input type="number" id="s_${c.id}_${k}" value="${c.rates[k] ?? 0}"></div>`).join('')}
     </div>
     <button class="btn mt" data-save="${c.id}">Save ${esc(c.name.split(' ')[0])}</button>
+    ${cardHistory(c, cards)}
   </div>`;
 }
 
@@ -43,7 +93,13 @@ export async function loadSettings() {
   renderBackupPanel();
   wireClubContact();
   store.contracts = await api.contracts();
-  $('settingsCards').innerHTML = store.contracts.map(card).join('');
+  // The card history, per contract. Quietly skipped if it cannot be read, so
+  // a failure here leaves the rest of the screen working.
+  const history = {};
+  await Promise.all(store.contracts.map(async (c) => {
+    try { history[c.id] = await api.rateCards(c.id); } catch { history[c.id] = null; }
+  }));
+  $('settingsCards').innerHTML = store.contracts.map(c => card(c, history[c.id])).join('');
   $('settingsCards').querySelectorAll('[data-save]').forEach(btn =>
     btn.addEventListener('click', async () => {
       const id = btn.dataset.save;
@@ -52,10 +108,32 @@ export async function loadSettings() {
       try {
         await api.updateContract(id, {
           name: $(`s_${id}_name`).value, venue: $(`s_${id}_venue`).value,
-          cost_per_gw: Number($(`s_${id}_cost`).value) || 0, rates,
         });
-        store.contracts = await api.contracts();
-        toast('Contract saved ✓');
+        // Prices go through the dated card, which is what decides what a game
+        // costs. A date already in the history edits that card; a new one
+        // starts a new price from that night and leaves the past as it was.
+        const from = $(`s_${id}_from`).value || todayStr();
+        await api.saveRateCard(id, {
+          effective_from: from,
+          rates,
+          pitch_per_game: Number($(`s_${id}_cost`).value) || 0,
+          notes: $(`s_${id}_note`).value || '',
+        });
+        await loadSettings();
+        toast(`Saved ✓ — in force from ${from}`);
+      } catch (e) { toast(e.message, true); }
+    }));
+  $('settingsCards').querySelectorAll('[data-drop]').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const [id, cardId] = btn.dataset.drop.split('|');
+      // Removing a card does not change a game that was priced from it: the
+      // amounts are already on the charges. It changes what the night BEFORE
+      // the next card would be priced at if it were entered again.
+      if (!confirm('Remove this rate card? Games already entered keep what they were charged.')) return;
+      try {
+        await api.removeRateCard(id, cardId);
+        await loadSettings();
+        toast('Rate card removed');
       } catch (e) { toast(e.message, true); }
     }));
 }

@@ -452,6 +452,74 @@ for (const g of db.prepare(`SELECT id, date, historical FROM gameweeks`).all()) 
 ok('no game has everybody on one side', lopsided === 0, lopDetail.join('\n          '));
 
 /* ================================================== 6. What is still missing */
+section('5b. Every night has a price behind it');
+
+// Two different kinds of cover, and a night can be missing either.
+//
+//   a RATE CARD says what the PLAYERS were charged. Without one the game was
+//   priced from the contract's current figures, which is today's answer to a
+//   question about a night in the past.
+//
+//   a VENUE BOOKING says what the GROUND charged. Without one the pitch cost
+//   on the night is whatever was typed, and the P&L has nothing to check it
+//   against.
+//
+// Reported, never judged: a night with no booking is usually a deal nobody
+// has entered yet, not a defect. Matched by ground, because an hour bought
+// from O365 is used up by playing at O365 — which is why a Mon/Thu night
+// played at Koora comes off Koora's bundle and not O365's.
+const nightsNoCard = db.prepare(`
+  SELECT c.name, g.date FROM gameweeks g JOIN contracts c ON c.id = g.contract_id
+  WHERE g.historical = 0 AND NOT EXISTS (
+    SELECT 1 FROM contract_rate_cards r
+    WHERE r.contract_id = g.contract_id AND r.effective_from <= g.date)
+  ORDER BY g.date`).all();
+if (nightsNoCard.length) {
+  WARN(`${nightsNoCard.length} night(s) played before any rate card starts`,
+    nightsNoCard.slice(0, 6).map(g => `${g.name} ${g.date}`).join('; '));
+} else { checks++; }
+
+const nightsNoBooking = db.prepare(`
+  SELECT c.name, g.date,
+         COALESCE(NULLIF(TRIM(g.venue), ''), c.venue, '') AS ground, g.cost_per_gw
+  FROM gameweeks g JOIN contracts c ON c.id = g.contract_id
+  WHERE g.historical = 0 AND NOT EXISTS (
+    SELECT 1 FROM venue_contracts v
+    WHERE LOWER(TRIM(v.vendor)) = LOWER(TRIM(COALESCE(NULLIF(TRIM(g.venue), ''), c.venue, '')))
+      AND v.start_date <= g.date AND (v.end_date IS NULL OR v.end_date >= g.date))
+  ORDER BY g.date`).all();
+if (nightsNoBooking.length) {
+  const byGround = {};
+  for (const g of nightsNoBooking) {
+    byGround[g.ground] = byGround[g.ground] || { n: 0, first: g.date, last: g.date };
+    byGround[g.ground].n += 1;
+    byGround[g.ground].last = g.date;
+  }
+  WARN(`${nightsNoBooking.length} night(s) with no venue booking behind them`,
+    Object.entries(byGround)
+      .map(([v, d]) => `${v || '(no ground)'}: ${d.n} from ${d.first} to ${d.last}`)
+      .join('; '));
+} else { checks++; }
+
+// A booking that has run out of hours is the other half of the same question:
+// the nights after it are being played on money that is gone.
+for (const v of db.prepare('SELECT * FROM venue_contracts').all()) {
+  const covered = (Number(v.sessions_total) || 0) + (Number(v.free_sessions) || 0);
+  if (!covered) continue;
+  const used = db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(g.hours, 1)), 0) h FROM gameweeks g
+    LEFT JOIN contracts c ON c.id = g.contract_id
+    WHERE g.historical = 0 AND g.date >= ? AND g.date <= ?
+      AND LOWER(TRIM(COALESCE(NULLIF(TRIM(g.venue), ''), c.venue, ''))) = LOWER(TRIM(?))`)
+    .get(v.start_date, v.end_date || '9999-12-31', v.vendor).h;
+  checks++;
+  if (used > covered) {
+    WARN(`${v.vendor} booking from ${v.start_date} is over its hours`,
+      `${used} played against ${covered} bought`);
+  }
+}
+sectionDone(2);
+
 section('6. Known gaps');
 
 const unscored = db.prepare(`SELECT c.name, g.date, g.historical FROM gameweeks g

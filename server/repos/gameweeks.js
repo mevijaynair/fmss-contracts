@@ -5,6 +5,7 @@ import { auditRepo } from './audit.js';
 import { gameResultsRepo } from './game_results.js';
 import { normaliseScore, winningTeam } from '../results_import.js';
 import { parseTeams } from '../parser.js';
+import { contractsRepo } from './contracts.js';
 
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -573,12 +574,14 @@ export const gameweeksRepo = {
    * costs one figure in the preview and another once it is saved.
    */
   rateForCharge({ gameweekId, isCaptain, fromOtherContract, players }) {
-    const gw = db.prepare('SELECT contract_id FROM gameweeks WHERE id = ?').get(gameweekId);
+    const gw = db.prepare('SELECT contract_id, date FROM gameweeks WHERE id = ?').get(gameweekId);
     if (!gw) throw new Error('Gameweek not found');
-    const c = db.prepare('SELECT rates FROM contracts WHERE id = ?').get(gw.contract_id);
-    let rates = {};
-    try { rates = typeof c?.rates === 'string' ? JSON.parse(c.rates || '{}') : (c?.rates || {}); }
-    catch { rates = {}; }
+    // Priced by the card in force ON THE NIGHT, not by the card in force now.
+    // Those are the same thing until the club changes its prices, and from
+    // the moment it does, pricing by today's card silently restates every
+    // game ever played at the new figure.
+    const card = contractsRepo.cardOn(gw.contract_id, gw.date);
+    const rates = card?.rates || {};
 
     if (fromOtherContract) {
       return { rate_type: 'noncontract', amount: Number(rates.noncontract ?? 0) };
@@ -1299,6 +1302,18 @@ export const gameweeksRepo = {
   // delta, which exactly neutralises the charge change. (Only meaningful for live
   // games; historical charges are excluded from the live balance, so there is nothing
   // to neutralise and we must NOT touch opening_balance for them.)
+  /**
+   * Rewrite one night's kitty row from what is on the night now.
+   *
+   * The row is derived from the charges, the pitch and the water, so anything
+   * that moves one of those has to ask for it again. Charge edits do it
+   * themselves; a change to the pitch alone had no way to.
+   */
+  recomputeKitty(gameweekId) {
+    recomputeGameKitty(gameweekId);
+    return this.get(gameweekId);
+  },
+
   applyChargeEdits(gameweekId, chargeEdits, { reason = '', changedBy = 'system', autoRecalculate = true } = {}) {
     const gameweek = this.get(gameweekId);
     for (const edit of chargeEdits) {

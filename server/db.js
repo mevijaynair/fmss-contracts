@@ -1215,6 +1215,64 @@ export function initSchema() {
         db.exec('PRAGMA foreign_keys = ON;');
       }
     },
+    /**
+     * contract_rate_cards — what a place cost, and from when.
+     *
+     * The rate card lived in one column on the contract, so it had exactly one
+     * value: today's. Change it and every game ever played is retrospectively
+     * priced at the new figure by anything that re-reads it, and the night the
+     * club actually changed its prices is recorded nowhere at all. That is
+     * fine while prices never move. They moved on 17 October, when the Koora
+     * booking dropped from 346 a night to 315, and there was no way to say so
+     * without rewriting the past.
+     *
+     * So a card carries the date it came into force, and a game is priced by
+     * the card in force on the night it was played.
+     *
+     * THERE IS NO end_date COLUMN, deliberately. A card runs until the next
+     * one starts, which is derived. Storing both ends invites the two states
+     * this must never be in — a gap, where a night has no price at all, and an
+     * overlap, where it has two. Neither is representable here.
+     *
+     * pitch_per_game sits on the card for the same reason the player rates do:
+     * what the ground charged is a fact with a date on it. contracts.rates and
+     * contracts.cost_per_gw remain as a mirror of the card in force TODAY, so
+     * every screen that asks "what does a game cost" keeps working unchanged.
+     */
+    () => {
+      try {
+        db.prepare('SELECT id FROM contract_rate_cards LIMIT 1').get();
+      } catch {
+        db.exec(`CREATE TABLE contract_rate_cards (
+          id             TEXT PRIMARY KEY,
+          contract_id    TEXT NOT NULL REFERENCES contracts(id),
+          effective_from TEXT NOT NULL,
+          rates          TEXT NOT NULL DEFAULT '{}',
+          pitch_per_game REAL NOT NULL DEFAULT 0,
+          water_per_game REAL NOT NULL DEFAULT 0,
+          notes          TEXT NOT NULL DEFAULT '',
+          created_at     TEXT NOT NULL,
+          UNIQUE (contract_id, effective_from)
+        )`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_crc_contract
+                 ON contract_rate_cards(contract_id, effective_from)`);
+      }
+      // Seed one card per contract from what the contract says now, so the
+      // history starts complete rather than starting empty and leaving every
+      // game played so far with no card behind it. Dated from the season
+      // start, which is the earliest night it could have applied to.
+      const missing = db.prepare(`SELECT c.id, c.rates, c.cost_per_gw, c.season_start
+        FROM contracts c WHERE NOT EXISTS (
+          SELECT 1 FROM contract_rate_cards r WHERE r.contract_id = c.id)`).all();
+      const ins = db.prepare(`INSERT INTO contract_rate_cards
+        (id, contract_id, effective_from, rates, pitch_per_game, water_per_game, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      for (const c of missing) {
+        ins.run(`crc_${c.id}_seed`, c.id, c.season_start || '0000-01-01',
+          c.rates || '{}', Number(c.cost_per_gw) || 0, 0,
+          'The card as it stood when rate history began', new Date().toISOString());
+      }
+    },
   ];
   for (const mig of migrations) mig();
 }

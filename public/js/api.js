@@ -56,6 +56,12 @@ export const api = {
   contracts: () => req('GET', '/contracts'),
   updateContract: (id, c) => req('PUT', `/contracts/${id}`, c),
 
+  // Dated rate cards: what a place cost, and from when. A game is priced by
+  // the card in force on the night it was played.
+  rateCards: (id) => req('GET', `/contracts/${id}/rate-cards`),
+  saveRateCard: (id, card) => req('POST', `/contracts/${id}/rate-cards`, card),
+  removeRateCard: (id, cardId) => req('DELETE', `/contracts/${id}/rate-cards/${cardId}`),
+
   players: () => req('GET', '/players'),
   createPlayer: (p) => req('POST', '/players', p),
   updatePlayer: (id, p) => req('PUT', `/players/${id}`, p),

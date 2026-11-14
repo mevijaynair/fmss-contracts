@@ -74,6 +74,38 @@ r.get('/me', wrap((req) => ({
 r.get('/contracts', wrap(() => contractsRepo.all()));
 r.put('/contracts/:id', wrap((req) => { requireAdmin(req); return contractsRepo.update(req.params.id, req.body); }));
 
+// ---- dated rate cards: what a place cost, and from when --------------------
+//
+// A game is priced by the card in force on the night it was played, so the
+// club can change its prices without restating every game it has ever played.
+// Admin-only throughout: this is the pricing, and the screens that show a
+// player what a game costs read the contract's current figures as before.
+r.get('/contracts/:id/rate-cards', wrap((req) => {
+  requireAdmin(req);
+  return contractsRepo.cards(req.params.id);
+}));
+
+// The one card that applies on a given night. Game Day asks for this as soon
+// as the date changes, so a game entered for last month is priced at last
+// month's rates rather than at today's.
+r.get('/contracts/:id/rate-card', wrap((req) => {
+  requireAdmin(req);
+  const on = String(req.query.on || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const card = contractsRepo.cardOn(req.params.id, on);
+  if (!card) throw new Error('That contract has no rate card');
+  return { ...card, on };
+}));
+
+r.post('/contracts/:id/rate-cards', wrap((req) => {
+  requireAdmin(req);
+  return contractsRepo.saveCard(req.params.id, req.body || {});
+}));
+
+r.delete('/contracts/:id/rate-cards/:cardId', wrap((req) => {
+  requireAdmin(req);
+  return contractsRepo.removeCard(req.params.cardId);
+}));
+
 // ---- players + ledgers ----
 r.get('/players', wrap((req) => {
   // Admin: see all players; Player: see only self
