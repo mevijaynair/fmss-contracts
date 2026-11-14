@@ -289,6 +289,151 @@ for (const c of contracts) {
   console.log(`  info  ${c.name}: kitty nets ${r2(net.n)}`);
 }
 
+/* ===================== 4b. What each game actually put into the pot ==========
+   Section 4 checks the SHAPE of the kitty rows — none orphaned, none negative,
+   none left over from a deleted charge. It never checked the NUMBER, which is
+   the thing the club actually reads. A kitty row is written once, by whatever
+   path last touched the game; if a later edit takes a path that forgets to
+   recompute, the row stays as it was and the pot quietly reports a profit the
+   charges no longer support. Nothing in the app would notice, because every
+   screen reads the stored row.
+
+   So this recomputes each game's line from the charges, in SQL written from the
+   prose rule rather than by calling the repo that wrote it:
+
+     takings = contract charges + guest cash ACTUALLY COLLECTED
+     line    = takings - what the pitch cost - water the pot paid for
+
+   Four things make a charge contribute nothing: the kitty carrying it (a free
+   place is paid for by not collecting, never by an expense), guest cash not yet
+   handed over (real money, but not yet the club's), a historical game (already
+   inside the opening baseline — crediting it again counts it twice), and water
+   somebody else bought (they are credited a contribution instead, so taking it
+   off the pot as well would charge the club twice for one bottle run). */
+section("4b. Every game's kitty line, recomputed from its charges");
+
+const gameLines = db.prepare(`
+  WITH c AS (
+    SELECT ch.gameweek_id AS gw,
+           ch.settled_from_kitty AS from_kitty,
+           ch.paid AS paid,
+           ch.amount AS amount,
+           CASE WHEN ch.settled_from_kitty = 0
+                  AND (ch.settles_cash = 1
+                       OR COALESCE(p.player_type, 'regular') = 'outside')
+                THEN 1 ELSE 0 END AS is_cash
+    FROM charges ch
+    LEFT JOIN players p ON p.id = COALESCE(ch.charged_to, ch.player_id)
+  )
+  SELECT g.id, g.date, g.contract_id, g.historical,
+         COALESCE(g.cost_per_gw, 0) AS pitch,
+         CASE WHEN COALESCE(NULLIF(g.game_cost_paid_by, ''), 'self') = 'self'
+              THEN COALESCE(g.game_cost, 0) ELSE 0 END AS water,
+         COALESCE((SELECT SUM(amount) FROM c
+                   WHERE c.gw = g.id AND from_kitty = 0 AND is_cash = 0), 0) AS contracted,
+         COALESCE((SELECT SUM(amount) FROM c
+                   WHERE c.gw = g.id AND from_kitty = 0 AND is_cash = 1 AND paid = 1), 0) AS cash_in,
+         COALESCE((SELECT SUM(amount) FROM c
+                   WHERE c.gw = g.id AND from_kitty = 0 AND is_cash = 1 AND paid = 0), 0) AS cash_due,
+         COALESCE((SELECT SUM(amount) FROM c
+                   WHERE c.gw = g.id AND from_kitty = 1), 0) AS carried,
+         (SELECT COALESCE(SUM(CASE WHEN k.kind = 'income' THEN k.amount ELSE -k.amount END), 0)
+          FROM kitty k WHERE k.scope = g.id) AS stored,
+         (SELECT COUNT(*) FROM kitty k WHERE k.scope = g.id) AS rows_held
+  FROM gameweeks g
+  ORDER BY g.date
+`).all();
+
+const expectedOf = (g) => (g.historical
+  ? 0 : r2(g.contracted + g.cash_in - g.pitch - g.water));
+
+// A game's own row is `k_gw_<id>`. Anything else scoped to the game — there
+// should be nothing, now that guest cash is folded in — would be counted by the
+// pot but missed by a check that only read the one id, so `stored` above sums
+// EVERY row facing this game and the extras are named separately below.
+const wrongLine = gameLines.filter(g => !near(expectedOf(g), g.stored));
+ok("every game's kitty line equals its charges less what the night cost",
+  wrongLine.length === 0,
+  wrongLine.slice(0, 8).map(g =>
+    `${g.date}: pot says ${r2(g.stored)}, charges say ${expectedOf(g)}`
+    + ` (${r2(g.contracted)} contracted + ${r2(g.cash_in)} cash`
+    + ` - ${r2(g.pitch)} pitch${g.water ? ` - ${r2(g.water)} water` : ''})`).join('\n          '));
+
+const extraRows = gameLines.filter(g => g.rows_held > 1);
+ok('no game owns more than one kitty row', extraRows.length === 0,
+  extraRows.slice(0, 5).map(g => `${g.date}: ${g.rows_held} rows`).join('; '));
+
+const historicalPaid = gameLines.filter(g => g.historical && !near(g.stored, 0));
+ok('no game behind the baseline is credited twice', historicalPaid.length === 0,
+  historicalPaid.slice(0, 5).map(g => `${g.date}: ${r2(g.stored)}`).join('; '));
+
+/* Every row in the pot belongs to a game, an event, a movement or a hand entry.
+   A row scoped to something that is none of those is money in the total that
+   nothing explains, which is the form a hallucinated figure would actually
+   take. */
+const unexplained = db.prepare(`
+  SELECT k.id, k.label, k.kind, k.amount FROM kitty k
+  WHERE k.scope IS NOT NULL AND k.scope <> ''
+    AND NOT EXISTS (SELECT 1 FROM gameweeks g WHERE g.id = k.scope)
+    AND NOT EXISTS (SELECT 1 FROM movements m WHERE m.id = k.scope)
+    AND k.scope NOT LIKE 'ev_%' AND k.scope NOT LIKE 'xe_%'`).all();
+ok('every kitty row points at something that exists', unexplained.length === 0,
+  unexplained.slice(0, 5).map(k => `${k.id} (${k.kind} ${r2(k.amount)})`).join('; '));
+
+/* A venue block payment is CASH, and the pitch it bought is already charged to
+   the pot one night at a time. Writing the payment into the kitty as well would
+   charge the club twice for one booking — the most expensive mistake available
+   anywhere near this screen, so it is checked by name rather than trusted. */
+const venueInPot = db.prepare(`SELECT COUNT(*) c FROM kitty
+  WHERE scope LIKE 'vp_%' OR scope LIKE 'vc_%'
+     OR LOWER(label) LIKE '%block booking%'`).get().c;
+ok('no venue payment was written into the pot', venueInPot === 0,
+  `${venueInPot} row(s) — the pitch is already charged per night`);
+
+sectionDone(5);
+
+/* What the pot is actually made of, per contract. Printed rather than judged:
+   these are the figures the club reads, and seeing them beside the checks is
+   what makes the checks worth running. */
+{
+  const byContract = new Map();
+  for (const g of gameLines) {
+    if (g.historical) continue;
+    const acc = byContract.get(g.contract_id)
+      || { games: 0, contracted: 0, cash_in: 0, cash_due: 0, carried: 0, pitch: 0, water: 0 };
+    acc.games++;
+    for (const f of ['contracted', 'cash_in', 'cash_due', 'carried', 'pitch', 'water']) {
+      acc[f] += g[f];
+    }
+    byContract.set(g.contract_id, acc);
+  }
+  for (const c of contracts) {
+    const a = byContract.get(c.id);
+    if (!a) continue;
+    console.log(`  info  ${c.name}: ${a.games} games · collected ${r2(a.contracted + a.cash_in)}`
+      + ` (${r2(a.contracted)} off balances + ${r2(a.cash_in)} guest cash)`
+      + ` less pitch ${r2(a.pitch)}${a.water ? ` and water ${r2(a.water)}` : ''}`
+      + ` = ${r2(a.contracted + a.cash_in - a.pitch - a.water)}`);
+    if (a.cash_due > 0.005) {
+      console.log(`        ${r2(a.cash_due)} of guest cash is still to collect —`
+        + ' it is not in the pot, and should not be');
+    }
+    if (a.carried > 0.005) {
+      console.log(`        ${r2(a.carried)} of places the pot carried, which is why they are not takings`);
+    }
+  }
+}
+
+/* A night that cost nothing is either a gift or a figure nobody filled in, and
+   the second inflates the pot by the whole pitch. Not a failure — the club does
+   play the odd free night — but it is never not worth a look. */
+const freeNights = gameLines.filter(g => !g.historical && g.pitch <= 0);
+if (freeNights.length) {
+  WARN(`${freeNights.length} game(s) recorded as costing nothing for the pitch`,
+    freeNights.slice(0, 6).map(g => g.date).join(', ')
+    + ' — each one adds its whole takings to the pot');
+}
+
 /* ================================================== 5. Analytics, recomputed ==
    The record every rate and streak on the Results screen is built from. This
    was wrong in production twice, both times because the code agreed with
