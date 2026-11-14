@@ -116,14 +116,17 @@ async function renderSchedule() {
 // counts for anything: who was on which side, who led each of them, and how it
 // finished. An imported game is judged on the same three — a bulk import is
 // exactly where a captain goes missing.
+// Two wordings each, because the two places they appear read differently: a
+// tag on a row is a verdict on that game ("No captain"), while an option in a
+// dropdown is a thing to go looking for ("no captain").
 const GAPS = [
-  { key: 'score', label: 'No result', missing: g => !g.has_result },
-  { key: 'captains', label: 'No captain', missing: g => !g.has_captains },
-  { key: 'teams', label: 'No sides', missing: g => !g.has_teams },
+  { key: 'score', label: 'No result', want: 'result', missing: g => !g.has_result },
+  { key: 'captains', label: 'No captain', want: 'captain', missing: g => !g.has_captains },
+  { key: 'teams', label: 'No sides', want: 'sides', missing: g => !g.has_teams },
   // A fourth, because it is the one that cannot be reconstructed later. A
   // missing captain can be remembered; the message that says who played is
   // gone off somebody's phone within the week.
-  { key: 'text', label: 'No text', missing: g => !g.has_text },
+  { key: 'text', label: 'No text', want: 'original text', missing: g => !g.has_text },
 ];
 const gapsFor = (g) => GAPS.filter(f => f.missing(g));
 
@@ -136,7 +139,10 @@ function rateCardOf(id) {
     : (c.rates || {});
 }
 
-let gapFilter = 'all';            // 'all' | 'incomplete' | one of GAPS[].key
+// What the list is showing. Three answers, not nine: everything, the games
+// with money still to collect, or the games missing something.
+let filterMode = 'all';           // 'all' | 'money' | 'gaps'
+let gapKind = 'any';              // 'any' | one of GAPS[].key, within 'gaps'
 
 // Which night. Mon/Thu is two different games in one contract — six Mondays and
 // seven Thursdays, different people free on each — and until now there was no
@@ -156,52 +162,91 @@ const DAY_LABEL = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays',
   'Thursdays', 'Fridays', 'Saturdays'];
 
 /**
- * The filter bar: which night, and what a game is missing.
+ * The filter bar: which night, and which games.
  *
- * `all` is every game on the current contract; `games` is what the day filter
- * has left of it. The gap counts are of the latter, because the day is a SCOPE
- * — narrowing it should narrow the counts — while the gaps are a filter within
- * that scope, and a count that shrinks when you click it is not a count.
+ * It had grown to nine controls in two rows of chips — every night, each night,
+ * All, Needs data, and one chip per kind of gap — which is a lot of furniture
+ * for a question with three answers. Worse, the gap chips were the loudest
+ * thing on the screen while the one genuinely urgent question, who still owes
+ * money, had no control at all.
+ *
+ * So: one dropdown for the night (a SCOPE — it narrows everything else), three
+ * buttons for what you are looking at, and the kind of gap demoted to a second
+ * dropdown that only appears once you have asked for gaps at all. Four controls
+ * at the widest, two most of the time.
+ *
+ * `all` is every game on the current contract; `games` is what the night has
+ * left of it. The counts are of the latter, because the night narrows
+ * everything — while the three buttons are a filter WITHIN that scope, and a
+ * count that shrinks when you click it is not a count.
  */
-function showGapBar(all, games) {
+function showFilterBar(all, games) {
   const bar = $('gwGapBar');
   if (!bar) return;
   const incomplete = games.filter(g => gapsFor(g).length);
-  // A gap with nothing in it is not worth clicking — but the one already
+  const owing = games.filter(g => Number(g.pending_amount) > 0);
+  const owed = owing.reduce((s, g) => s + (Number(g.pending_amount) || 0), 0);
+
+  // A view with nothing in it is not worth clicking — but the one already
   // selected stays live, or narrowing to a night where it happens to be empty
-  // leaves the active chip disabled and no way back off it.
+  // leaves the active button disabled and no way back off it.
   const chip = (key, label, n) =>
-    `<button data-gap="${key}" class="${gapFilter === key ? 'active' : ''}"
-       ${n === 0 && key !== 'all' && gapFilter !== key ? 'disabled' : ''}>${label} <strong>${n}</strong></button>`;
+    `<button data-mode="${key}" class="${filterMode === key ? 'active' : ''}"
+       ${n === 0 && key !== 'all' && filterMode !== key ? 'disabled' : ''}>${label} <strong>${n}</strong></button>`;
 
   // Only the days this contract actually plays on, and only when there is more
-  // than one of them to choose between.
+  // than one of them to choose between: splitting Saturdays into Saturdays is a
+  // control that does nothing.
   const byDay = new Map();
   for (const g of all) byDay.set(dayOf(g.date), (byDay.get(dayOf(g.date)) ?? 0) + 1);
   const days = [...byDay.keys()].sort((a, b) => a - b);
-  const dayChip = (key, label, n) =>
-    `<button data-day="${key}" class="${dayFilter === key ? 'active' : ''}">${label} <strong>${n}</strong></button>`;
+
+  // One sentence, and it answers the two questions the bar exists for before
+  // anybody touches a control.
+  const saysGaps = incomplete.length
+    ? `<strong>${incomplete.length}</strong> of ${games.length} games are missing something.`
+    : `All ${games.length} games have sides, captains, a result and their original text.`;
+  const saysMoney = owed > 0
+    ? ` <strong>${money(owed)}</strong> is still to collect.`
+    : ' Nothing is left to collect.';
 
   bar.innerHTML = `
-    <div class="hint" style="flex:1">
-      ${incomplete.length
-    ? `<strong>${incomplete.length}</strong> of ${games.length} games are missing something.`
-    : `All ${games.length} games have sides, captains, a result and their original text.`}
-    </div>
-    ${days.length > 1 ? `<span class="seg" id="gwDaySeg">
-      ${dayChip('all', 'Every night', all.length)}
-      ${days.map(d => dayChip(String(d), DAY_LABEL[d], byDay.get(d))).join('')}
-    </span>` : ''}
-    <span class="seg" id="gwGapSeg">
+    <div class="hint" style="flex:3 1 17rem">${saysGaps}${games.length ? saysMoney : ''}</div>
+    ${days.length > 1 ? `
+      <select id="gwDaySel" title="Which night to look at. It narrows everything else.">
+        <option value="all">Every night (${all.length})</option>
+        ${days.map(d => `<option value="${d}"${dayFilter === String(d) ? ' selected' : ''}
+          >${DAY_LABEL[d]} (${byDay.get(d)})</option>`).join('')}
+      </select>` : ''}
+    <span class="seg" id="gwModeSeg">
       ${chip('all', 'All', games.length)}
-      ${chip('incomplete', 'Needs data', incomplete.length)}
-      ${GAPS.map(f => chip(f.key, f.label, games.filter(f.missing).length)).join('')}
-    </span>`;
+      ${chip('money', 'To collect', owing.length)}
+      ${chip('gaps', 'Needs data', incomplete.length)}
+    </span>
+    ${filterMode === 'gaps' ? `
+      <select id="gwGapSel" title="Which gap to look for">
+        <option value="any">missing anything (${incomplete.length})</option>
+        ${GAPS.map((f) => {
+    const n = games.filter(f.missing).length;
+    return `<option value="${f.key}"${gapKind === f.key ? ' selected' : ''}${
+      n === 0 && gapKind !== f.key ? ' disabled' : ''}>no ${f.want} (${n})</option>`;
+  }).join('')}
+      </select>` : ''}`;
 
-  bar.querySelectorAll('#gwGapSeg button').forEach(b =>
-    b.addEventListener('click', () => { gapFilter = b.dataset.gap; render(); }));
-  bar.querySelectorAll('#gwDaySeg button').forEach(b =>
-    b.addEventListener('click', () => { dayFilter = b.dataset.day; render(); }));
+  bar.querySelector('#gwDaySel')?.addEventListener('change', (e) => {
+    dayFilter = e.target.value; render();
+  });
+  bar.querySelectorAll('#gwModeSeg button').forEach(b =>
+    b.addEventListener('click', () => {
+      filterMode = b.dataset.mode;
+      // Leaving the gaps view and coming back to it should not land on whatever
+      // single gap was being chased last time.
+      if (filterMode !== 'gaps') gapKind = 'any';
+      render();
+    }));
+  bar.querySelector('#gwGapSel')?.addEventListener('change', (e) => {
+    gapKind = e.target.value; render();
+  });
 }
 
 async function render() {
@@ -224,10 +269,20 @@ async function render() {
 
   // Gap counts are of the current night, so narrowing the scope narrows them —
   // but they do not change as you click between the gaps themselves.
-  showGapBar(allGames, inScope);
-  const rowsList = gapFilter === 'all' ? inScope
-    : gapFilter === 'incomplete' ? inScope.filter(g => gapsFor(g).length)
-      : inScope.filter(GAPS.find(f => f.key === gapFilter).missing);
+  // A gap with nothing left in it under the night now chosen is a filter onto
+  // an empty screen, so it falls back to the whole question rather than
+  // leaving the reader looking at nothing with no clue why.
+  if (filterMode === 'gaps' && gapKind !== 'any'
+      && !inScope.some(GAPS.find(f => f.key === gapKind)?.missing || (() => false))) {
+    gapKind = 'any';
+  }
+  showFilterBar(allGames, inScope);
+  const rowsList = filterMode === 'money'
+    ? inScope.filter(g => Number(g.pending_amount) > 0)
+    : filterMode === 'gaps'
+      ? (gapKind === 'any' ? inScope.filter(g => gapsFor(g).length)
+        : inScope.filter(GAPS.find(f => f.key === gapKind).missing))
+      : inScope;
 
   // Two columns earn their place only sometimes, and a column of dashes is
   // worse than no column: it takes width from the ones that are saying
